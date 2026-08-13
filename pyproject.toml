@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "horizon-memory"
+version = "0.1.0a1"
+description = "Standalone, model-agnostic, proof-carrying memory for AI systems"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{name = "Kaue Oliveira Costa (kyuubyN)", email = "kaue.o.costa@proton.me"}]
+maintainers = [{name = "Kaue Oliveira Costa (kyuubyN)", email = "kaue.o.costa@proton.me"}]
+keywords = ["ai", "memory", "retrieval", "provenance", "offline", "rag"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+horizon = "horizon_memory._cli:main"
+
+[project.urls]
+Homepage = "https://github.com/kyuubyN/HorizonMemory"
+Repository = "https://github.com/kyuubyN/HorizonMemory"
+Issues = "https://github.com/kyuubyN/HorizonMemory/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+pythonpath = ["src"]

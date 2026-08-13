@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use Horizon Memory, cite this software and the founding paper when available."
+title: "Horizon Memory"
+type: software
+version: 0.1.0-alpha.1
+date-released: 2026-08-13
+authors:
+  - given-names: "Kaue Oliveira"
+    family-names: "Costa"
+    alias: "kyuubyN"
+    email: "kaue.o.costa@proton.me"
+    orcid: "https://orcid.org/0009-0009-8502-3220"
+repository-code: "https://github.com/kyuubyN/HorizonMemory"
+license: "AGPL-3.0-or-later"
+abstract: >-
+  Standalone, model-agnostic, proof-carrying memory and retrieval architecture
+  for AI systems.

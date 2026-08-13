@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+build/
+dist/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+horizon-data/
+*.key
+*.pem
+*.log
