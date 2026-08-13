@@ -14,3 +14,6 @@ horizon-data/
 *.key
 *.pem
 *.log
+
+# Laboratório: dados brutos externos NUNCA versionados (licença + holdout selado)
+lab/datasets/raw/

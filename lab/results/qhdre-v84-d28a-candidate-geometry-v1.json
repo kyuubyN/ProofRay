@@ -1,0 +1,91 @@
+{
+  "arms": {
+    "typed_d26_predicates": {
+      "ambiguous_reachable": 15468,
+      "ambiguous_with_minimum_distance_at_least_3": 4110,
+      "candidate_budget_failures": 7436,
+      "candidate_reachability": 0.4524088306048155,
+      "counterfactual_classes": {
+        "count": 21251,
+        "maximum": 45,
+        "median": 3,
+        "p95": 10
+      },
+      "distance_3_rate_given_ambiguous": 0.2657098525989139,
+      "distance_gate_pass": false,
+      "gold_consistent_programs": {
+        "count": 21251,
+        "maximum": 45,
+        "median": 3,
+        "p95": 10
+      },
+      "identifiability_gate_pass": false,
+      "identifiable": 5783,
+      "identifiable_given_reachable": 0.27212837042962684,
+      "minimum_distance_among_ambiguous": {
+        "count": 15468,
+        "maximum": 4,
+        "median": 1.0,
+        "p95": 3
+      },
+      "numeric_questions": 46973,
+      "reachability_gate_pass": false,
+      "reachable": 21251
+    },
+    "untyped_literal_universe": {
+      "ambiguous_reachable": 22044,
+      "ambiguous_with_minimum_distance_at_least_3": 2865,
+      "candidate_budget_failures": 3000,
+      "candidate_reachability": 0.6739616375364571,
+      "counterfactual_classes": {
+        "count": 31658,
+        "maximum": 91,
+        "median": 2.0,
+        "p95": 18
+      },
+      "distance_3_rate_given_ambiguous": 0.1299673380511704,
+      "distance_gate_pass": false,
+      "gold_consistent_programs": {
+        "count": 31658,
+        "maximum": 91,
+        "median": 2.0,
+        "p95": 18
+      },
+      "identifiability_gate_pass": false,
+      "identifiable": 9614,
+      "identifiable_given_reachable": 0.3036831132731063,
+      "minimum_distance_among_ambiguous": {
+        "count": 22044,
+        "maximum": 3,
+        "median": 1.0,
+        "p95": 3
+      },
+      "numeric_questions": 46973,
+      "reachability_gate_pass": false,
+      "reachable": 31658
+    }
+  },
+  "claim_limit": "training-only candidate geometry diagnostic; gold-filtered oracle, no decoder",
+  "execution": "offline_cpu_no_model_no_network_no_api_no_holdout_access",
+  "frozen_parameters": {
+    "counterfactual_worlds": 7,
+    "max_literals": 40,
+    "max_programs": 4096,
+    "operators": [
+      "lookup",
+      "count",
+      "sum",
+      "argmax",
+      "argmin",
+      "difference"
+    ]
+  },
+  "holdout_state": "QUARANTINED_UNREAD",
+  "implementation_sha256": "e8507c4c7c30a0bb82220a8ceb31257675c6ff02946ee6b8f42b04a6c97ba2ad",
+  "induced_d26_predicates": 1253,
+  "result_sha256": "4e4ecd39fe6693d39289923585b18a490cd554ebaa3d3b99a1ece18f98fda782",
+  "schema": "qhdre.v84.d28a-candidate-geometry.v1",
+  "source_manifest_sha256": "c208dcca5ff0c593c9371d68c3067fdb39eb13cce6ddc85f89e25ff08d82467a",
+  "split": "official_train_diagnostic_only",
+  "train_sha256": "6b057fc18cc969e2c548aa6e3b891d1d9ff5930cb3beee90f0e30610fd53724b"
+}

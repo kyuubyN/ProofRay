@@ -1,0 +1,35 @@
+{
+  "archive": {
+    "bytes": 8308692,
+    "path": "lab/datasets/raw/v84/drop_dataset.zip",
+    "sha256": "39d2278a29fd729de301b111a45f434c24834f40df8f4ff116d864589e3249d6"
+  },
+  "claim_limit": "source integrity only; no question, answer, metric, or case count inspected",
+  "execution": "offline_mechanical_archive_extraction_no_model_no_api",
+  "holdout_state": "EXTRACTED_BYTEWISE_BUT_QUARANTINED_UNREAD",
+  "license": {
+    "archive_member": "drop_dataset/license.txt",
+    "bytes": 20631,
+    "path": "lab/datasets/raw/v84/license.txt",
+    "sha256": "91ea8537803fce5d9999988c9e83c8d21e0e4feaee09cbfb686470d4d789a10d"
+  },
+  "manifest_sha256": "38d6731c7109ae36576e9f0426a3963083e099bf7c49f17fb49dbcf3c2f037db",
+  "preregistration_freeze_sha256": "e5eb1b694e7d0d74ae6bf8b9e28e3453ebd0d15924490ffcd1f5e77f61bc9a9d",
+  "schema": "qhdre.v84.drop-source.v1",
+  "splits": {
+    "holdout": {
+      "archive_member": "drop_dataset/drop_dataset_dev.json",
+      "bytes": 13741143,
+      "content_inspection": "not_performed_by_preparation",
+      "path": "lab/datasets/raw/v84/drop_dataset_dev.json",
+      "sha256": "f25f09a9e939e946dbb37799b3b3e2c2a9f7416e524017cc4a79780f2ba6edca"
+    },
+    "train": {
+      "archive_member": "drop_dataset/drop_dataset_train.json",
+      "bytes": 54015677,
+      "content_inspection": "not_performed_by_preparation",
+      "path": "lab/datasets/raw/v84/drop_dataset_train.json",
+      "sha256": "6b057fc18cc969e2c548aa6e3b891d1d9ff5930cb3beee90f0e30610fd53724b"
+    }
+  }
+}

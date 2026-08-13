@@ -1,0 +1,285 @@
+{
+  "claim_limit": "structural feasibility of natural question constellations; no decoder result",
+  "execution": "offline_cpu_no_model_no_network_no_api_no_holdout_access",
+  "frozen_parameters": {
+    "minimum_recurrent_passages": 3,
+    "pairing": "unique_mutual_nearest_token_edit_no_threshold"
+  },
+  "holdout_state": "QUARANTINED_UNREAD",
+  "implementation_sha256": "7f7b8cd365cbaef3f4bf4e7ccaceeac87e090dd7df9bb5d3fc11e93ef433632f",
+  "metrics": {
+    "mutual_unique_nearest_edges": 7886,
+    "numeric_questions": 46973,
+    "passages_with_at_least_two_numeric_questions": 5024,
+    "probe_gate_pass": true,
+    "question_coverage": 0.07996082856108828,
+    "questions_covered_by_recurrent_edges": 3756,
+    "recurrent_delta_types": 203,
+    "recurrent_edges": 1878,
+    "recurrent_edges_with_changed_denotation": 1346,
+    "recurrent_edges_with_preserved_denotation": 532,
+    "recurrent_passages": 1351,
+    "top_recurrent_deltas": [
+      {
+        "added": [
+          "shortest"
+        ],
+        "edges": 178,
+        "passages": 160,
+        "removed": [
+          "longest"
+        ]
+      },
+      {
+        "added": [
+          "second"
+        ],
+        "edges": 127,
+        "passages": 124,
+        "removed": [
+          "first"
+        ]
+      },
+      {
+        "added": [
+          "the"
+        ],
+        "edges": 75,
+        "passages": 72,
+        "removed": []
+      },
+      {
+        "added": [
+          "touchdown",
+          "pass"
+        ],
+        "edges": 70,
+        "passages": 68,
+        "removed": [
+          "field",
+          "goal"
+        ]
+      },
+      {
+        "added": [
+          "touchdowns"
+        ],
+        "edges": 45,
+        "passages": 45,
+        "removed": [
+          "field",
+          "goals"
+        ]
+      },
+      {
+        "added": [
+          "run"
+        ],
+        "edges": 43,
+        "passages": 43,
+        "removed": [
+          "pass"
+        ]
+      },
+      {
+        "added": [
+          "total"
+        ],
+        "edges": 33,
+        "passages": 32,
+        "removed": []
+      },
+      {
+        "added": [
+          "touchdowns",
+          "scored"
+        ],
+        "edges": 33,
+        "passages": 33,
+        "removed": [
+          "field",
+          "goals",
+          "kicked"
+        ]
+      },
+      {
+        "added": [
+          "shorter"
+        ],
+        "edges": 32,
+        "passages": 32,
+        "removed": [
+          "longer"
+        ]
+      },
+      {
+        "added": [
+          "win"
+        ],
+        "edges": 32,
+        "passages": 31,
+        "removed": [
+          "lose"
+        ]
+      },
+      {
+        "added": [
+          "touchdown"
+        ],
+        "edges": 31,
+        "passages": 30,
+        "removed": [
+          "field",
+          "goal"
+        ]
+      },
+      {
+        "added": [
+          "second"
+        ],
+        "edges": 30,
+        "passages": 28,
+        "removed": []
+      },
+      {
+        "added": [
+          "make"
+        ],
+        "edges": 29,
+        "passages": 29,
+        "removed": [
+          "kick"
+        ]
+      },
+      {
+        "added": [
+          "wins"
+        ],
+        "edges": 24,
+        "passages": 22,
+        "removed": [
+          "losses"
+        ]
+      },
+      {
+        "added": [
+          "in",
+          "the",
+          "game"
+        ],
+        "edges": 22,
+        "passages": 22,
+        "removed": []
+      },
+      {
+        "added": [
+          "households"
+        ],
+        "edges": 22,
+        "passages": 19,
+        "removed": [
+          "families"
+        ]
+      },
+      {
+        "added": [
+          "the"
+        ],
+        "edges": 21,
+        "passages": 20,
+        "removed": [
+          "@"
+        ]
+      },
+      {
+        "added": [
+          "rushing"
+        ],
+        "edges": 20,
+        "passages": 19,
+        "removed": [
+          "passing"
+        ]
+      },
+      {
+        "added": [
+          "game"
+        ],
+        "edges": 18,
+        "passages": 18,
+        "removed": [
+          "first",
+          "half"
+        ]
+      },
+      {
+        "added": [
+          "touchdown",
+          "run"
+        ],
+        "edges": 17,
+        "passages": 17,
+        "removed": [
+          "field",
+          "goal"
+        ]
+      },
+      {
+        "added": [
+          "touchdowns"
+        ],
+        "edges": 17,
+        "passages": 17,
+        "removed": [
+          "points"
+        ]
+      },
+      {
+        "added": [
+          "touchdown",
+          "passes"
+        ],
+        "edges": 17,
+        "passages": 17,
+        "removed": [
+          "field",
+          "goals"
+        ]
+      },
+      {
+        "added": [
+          "the",
+          "game"
+        ],
+        "edges": 16,
+        "passages": 16,
+        "removed": []
+      },
+      {
+        "added": [
+          "quarter"
+        ],
+        "edges": 16,
+        "passages": 16,
+        "removed": [
+          "half"
+        ]
+      },
+      {
+        "added": [
+          "latter"
+        ],
+        "edges": 15,
+        "passages": 12,
+        "removed": [
+          "former"
+        ]
+      }
+    ]
+  },
+  "result_sha256": "e7faca727d397423e594e1b80d2f1cb86b31284ff4236bf1e21ab0ff5e731239",
+  "schema": "qhdre.v84.question-constellation-d29-probe.v1",
+  "source_manifest_sha256": "c208dcca5ff0c593c9371d68c3067fdb39eb13cce6ddc85f89e25ff08d82467a",
+  "split": "official_train_diagnostic_only",
+  "train_sha256": "6b057fc18cc969e2c548aa6e3b891d1d9ff5930cb3beee90f0e30610fd53724b"
+}
