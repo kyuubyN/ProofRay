@@ -17,3 +17,34 @@ horizon-data/
 
 # Laboratório: dados brutos externos NUNCA versionados (licença + holdout selado)
 lab/datasets/raw/
+
+# Local benchmark outputs include development diagnostics, sealed-evaluation
+# artifacts, and negative results.  Publication copies are curated manually.
+/lab/results/
+
+# Reproducible but separately licensed parser binaries, grammar images and
+# Python lab dependencies. Manifests record origins and hashes; blobs stay local.
+/lab/external/
+
+# External literature is inspected locally; redistribution rights are not assumed.
+/2601.09913v1.pdf
+/2605.20833v1.pdf
+/tmp/pdfs/
+
+# Private scientific vault: hypotheses, raw benchmarks, sealed splits, negative
+# results, paper drafts, and Q-HDRE-derived material are never published by a
+# normal repository operation. Public releases must be copied out deliberately.
+/research_vault/
+
+# The laboratory as a whole is the private scientific record, not a deliverable:
+# experiment charters (Q-HDRE-derived theory), mechanism prototypes, runners,
+# dataset manifests and frozen holdout splits. `tests/test_horizon_lab_never_packaged.py`
+# already forbids shipping it; this keeps a broad `git add` from versioning it too.
+# Files committed before this rule stay tracked and must be retired deliberately.
+/lab/
+
+# Local run artefacts and agent scratch space; never part of the distribution.
+/cache/
+/logs/
+/tmp/
+/.agents/

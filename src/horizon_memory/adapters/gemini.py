@@ -22,7 +22,7 @@ from typing import Protocol
 
 from .base import (
     GenerationConfig, ModelAdapter, ModelRun, ModelRunState, PrefillMetrics, build_prompt,
-    request_digest,
+    build_user_content, request_digest,
 )
 from ..evidence import EvidencePack
 
@@ -202,8 +202,13 @@ class GeminiModelAdapter(ModelAdapter):
                                    metadata_error, time.perf_counter())
         if self.rate_limiter:
             self.rate_limiter.acquire(input_estimate)
+        # Gemini has a native system-instruction channel.  Keeping the authority
+        # contract inside a user turn makes it peer data rather than the governing
+        # instruction and is not equivalent to local chat-template execution.
+        user_content = build_user_content(question, evidence_pack, config)
         payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "systemInstruction": {"parts": [{"text": config.system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_content}]}],
             "generationConfig": {
                 "maxOutputTokens": config.max_output_tokens, "temperature": config.temperature,
                 "topP": config.top_p,

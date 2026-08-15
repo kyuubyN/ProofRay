@@ -159,9 +159,15 @@ class AdapterContracts(unittest.TestCase):
         with patch.dict(os.environ, {"GEMINI_API_KEY": sentinel}, clear=True):
             run = adapter.generate("capital?", _pack(), GenerationConfig())
         self.assertEqual(run.state.value, "generated")
-        url, headers, _, _ = transport.calls[1]
+        url, headers, payload, _ = transport.calls[1]
         self.assertNotIn(sentinel, url)
         self.assertEqual(headers["x-goog-api-key"], sentinel)
+        self.assertEqual(payload["systemInstruction"]["parts"][0]["text"],
+                         GenerationConfig().system_prompt)
+        user_text = payload["contents"][0]["parts"][0]["text"]
+        self.assertNotIn(GenerationConfig().system_prompt, user_text)
+        self.assertIn("HORIZON_EVIDENCE", user_text)
+        self.assertIn("QUESTION:\ncapital?", user_text)
         self.assertNotIn(sentinel, json.dumps(ledger.entries))
         self.assertNotIn("Paris", json.dumps(ledger.entries))
         self.assertEqual(run.cached_input_tokens, 4)
