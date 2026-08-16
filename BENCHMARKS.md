@@ -68,6 +68,63 @@ This result rejects universal end-to-end dominance of the current retrieval
 configuration. It also supports the architecture boundary: a reader is an
 optional consumer, not the authority that decides whether memory is true.
 
+## Reading-comprehension pilot program
+
+A separate, more recent pilot program targets a harder question than
+retrieval hit rate: given a fixed byte budget and a small, non-frontier
+language model as reader, does memory-selected evidence produce a *correct
+answer*, not just a relevant one? This program uses a public multi-hop
+reading-comprehension benchmark whose official scoring is an LLM judge
+(semantic equivalence against a gold answer, continuous 0-1 scale with
+partial credit for a partially correct answer), not term overlap.
+
+**A metric-validity lesson worth recording.** An earlier internal scorer
+(verbatim-fact-assertion matching) was found, on audit, to score the literal
+correct gold answer at 0% — it required transcription that contradicted the
+reading contract's own instruction to combine evidence into one paragraph
+rather than quote it verbatim. It was retracted, and every prior claim built
+on it was struck. The replacement is a validated LLM-judge instrument: it was
+checked against a synthetic battery covering a correct answer, a
+conversationally-reframed correct answer, a partial answer, a cross-topic
+wrong answer, a same-topic hard-negative wrong answer, an explicit
+abstention, and an empty response — and only promoted once it separated
+correct from hard-negative-wrong by a wide margin, graded partial credit
+in between rather than snapping to 0/1, and was invariant to conversational
+framing. Two independent backends passed this validation and cross-check
+each other. This is the instrument behind every number below.
+
+**Result, on the validated instrument, N=88 fully paired episodes, one
+consistent small reader throughout:**
+
+| Evidence source | Mean judge score (0-1 scale) |
+|---|---:|
+| Memory-selected packet (matched budget) | **0.72** |
+| BM25, same byte budget | 0.55 |
+| BM25, ~3x the byte budget | 0.50 |
+
+The gap between memory-selected evidence and matched-budget BM25 is large
+and statistically clear (paired 95% confidence interval excludes zero).
+Giving BM25 roughly three times more budget does not close the gap — it
+makes BM25 slightly *worse*, not better, meaning the win is not explained by
+BM25 simply needing more room. The reference dataset's own published
+baseline (a standard retriever paired with a much larger hosted model)
+scored 0.555 on the same official scoring family; the memory-selected packet
+above, paired with a small (single-digit-billion-parameter) reader, already
+clears that number on a comparable scale. This is encouraging for the
+project's core hypothesis — that the right memory substrate lets a small
+model do more with less — but it is a comparable-scale anchor, not a
+byte-exact reproduction of the published baseline's exact harness, and it is
+still well short of the program's long-term accuracy target (see below).
+
+**What is currently under active test, not yet resolved:** whether the
+remaining gap above 0.72 is better explained by evidence still being
+incomplete at this budget, or by the reader's difficulty composing evidence
+it already has into one correct answer. An oracle-style ceiling test (a
+reader handed the literal correct answer directly) scored above 0.97,
+confirming the reading contract itself is not the bottleneck. Distinguishing
+"more of the right evidence would help" from "the reader needs help
+composing what it already has" is the current open experiment.
+
 ## What is not yet solved
 
 Horizon does not currently cover arbitrary words, relations or question forms.

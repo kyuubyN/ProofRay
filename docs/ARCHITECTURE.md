@@ -56,6 +56,56 @@ These engines may combine lexical candidates with causal observables, hard
 exclusions and evidence budgets. They must continue to report paired BM25
 baselines and may not convert retrieval hit rate into an answer-accuracy claim.
 
+## The validated reading pipeline (private prototype, not yet packaged)
+
+A private research line reached a different, more directly validated
+mechanism for turning stored facts into a reader-ready evidence pack. It
+currently lives entirely in the private research lab, not in
+`horizon_memory.research` or the stable namespace: no file under `src/`
+depends on it, and it depends on the stable substrate rather than the other
+way around. It is documented here because it is the pipeline actually
+supported by controlled experiments; promoting it into a shippable module is
+future work, not yet started.
+
+The pipeline has five stages:
+
+1. **Full claim scan.** Every factual claim available to an episode is
+   extracted up front — not only a pre-filtered "supporting" subset. Working
+   from the complete candidate pool, rather than a subset chosen too early,
+   turned out to matter more than any later ranking refinement.
+2. **Budget-aware causal selection.** Claims are scored for relevance to the
+   query's causal thread and packed into a fixed byte budget. The scorer
+   specifically protects the most causally central thread from being starved
+   when many competing turns want the same budget, rather than spreading
+   the budget evenly regardless of relevance.
+3. **Packet assembly with provenance.** Selected claims are packaged with
+   their source, obligations (role, timing, unit, cause, identity,
+   completeness) and a verifiable digest. Obligations are treated as
+   non-negotiable requirements distinct from ordinary relevance — a claim can
+   be topically relevant and still fail an obligation.
+4. **Plain natural-language rendering.** The packet is rendered as an
+   ordinary flat list of complete sentences — no tags, no internal IDs, no
+   visible section headings. Controlled ablations found that every attempt to
+   add visible structure (tags, headings, explicit scaffolding) to the
+   evidence surface *hurt* small readers, while a plain natural-language
+   surface with byte-identical content did not. This was the single largest
+   reader-side improvement found in the whole program.
+5. **An explicit extractive reading contract.** The consumer is instructed to
+   answer only from the supplied evidence, preserve exact names, numbers and
+   relations, combine every relevant statement into one answer, and abstain
+   explicitly rather than guess when the evidence does not support an answer.
+   This contract, held constant, is what let stages 1-4 be evaluated on a
+   level field.
+
+This pipeline, at a byte budget matched to what it naturally uses, was
+compared against a strong lexical baseline (BM25) at both a matched budget
+and a substantially larger one, scored by a validated LLM-judge instrument
+(see [Benchmarks](../BENCHMARKS.md)). It won at both budgets, and giving the
+baseline more budget did not close the gap. What still limits accuracy beyond
+that point — whether more of the right evidence is being missed, or whether
+a small reader model struggles to compose evidence it already has into a
+correct answer — is an open, actively-tested question, not yet closed.
+
 ## External readers
 
 `horizon_memory.adapters` connects bounded evidence to independent readers.
