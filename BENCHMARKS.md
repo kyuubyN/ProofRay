@@ -141,3 +141,9 @@ rate. Current public claims must therefore avoid:
 The long-term research target remains near-99% end-to-end correctness without
 requiring an LLM or hosted API, while publishing precision, coverage,
 abstention, provenance failures and compute cost separately.
+
+A related, narrower open problem: when a fact is restated multiple times with
+each restatement superseding the last, nothing in the stable API distinguishes
+the current value from a stale one. An opt-in research mechanism for this
+(`horizon_memory.research.collapse_evidence_items`) exists and is measured,
+not solved — see `RESEARCH.md` for its scope and honestly-mixed results.

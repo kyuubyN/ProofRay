@@ -8,7 +8,8 @@ import hashlib
 import inspect
 import unittest
 
-from horizon_memory import EvidenceItem, SUPERSESSION_DEFAULT_RELEVANCE_FLOOR, collapse_evidence_items
+from horizon_memory import EvidenceItem
+from horizon_memory.research import SUPERSESSION_DEFAULT_RELEVANCE_FLOOR, collapse_evidence_items
 
 
 def _item(fact_id: int, text: str, source: str = "s") -> EvidenceItem:

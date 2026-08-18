@@ -48,10 +48,6 @@ from .hssd_query_compiler import StructuralHSSDQueryCompiler
 from .standalone_hssd_engine import StandaloneHSSDEngine, StandaloneHSSDResult
 from .sufficient_statistic_search import SufficientStatisticPack
 from .typed_hssd_adapter import TypedCausalHSSDEvidenceAdapter
-from .supersession_collapse import (
-    DEFAULT_RELEVANCE_FLOOR as SUPERSESSION_DEFAULT_RELEVANCE_FLOOR,
-    SupersessionReport, collapse_evidence_items,
-)
 from .types import (
     AuditReport, CompactResult, CompactState, ExportResult, ExportedFact, Provenance,
     QueryResult, QueryState, ReadResult, ReadState, ReadViewHandle, RecoverResult, RecoverState,
@@ -88,7 +84,6 @@ __all__ = [
     "AuthorizedFiberRoute", "AuthorizedFiberSearchEngine",
     "StandaloneHSSDEngine", "StandaloneHSSDResult",
     "classify_trial", "assert_paired_query_ids",
-    "collapse_evidence_items", "SupersessionReport", "SUPERSESSION_DEFAULT_RELEVANCE_FLOOR",
 ]
 
 __version__ = "0.1.0a1"

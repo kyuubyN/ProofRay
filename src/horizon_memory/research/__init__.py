@@ -21,6 +21,10 @@ from ..proof_pressure_search import (
     SearchAdmission,
     SearchObligation,
 )
+from ..supersession_collapse import (
+    DEFAULT_RELEVANCE_FLOOR as SUPERSESSION_DEFAULT_RELEVANCE_FLOOR,
+    SupersessionReport, collapse_evidence_items,
+)
 
 __all__ = [
     "HorizonSearchEngine",
@@ -32,4 +36,7 @@ __all__ = [
     "FeedbackTransportHorizonSearchEngine",
     "ConservativeFeedbackTransportHorizonSearchEngine",
     "ParetoTailFeedbackHorizonSearchEngine",
+    "collapse_evidence_items",
+    "SupersessionReport",
+    "SUPERSESSION_DEFAULT_RELEVANCE_FLOOR",
 ]
