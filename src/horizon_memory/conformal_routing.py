@@ -168,9 +168,11 @@ class ConformalClaimGenerator(CandidateGenerator):
                 document_weights: tuple[float, float, float, float, float, float]
                 = LEXICAL_SUBLEXICAL_WEIGHTS,
                 claim_weights: tuple[float, float, float, float, float, float]
-                = CLAIM_GENERATOR_DEFAULT_WEIGHTS):
+                = CLAIM_GENERATOR_DEFAULT_WEIGHTS, *,
+                claim_specificity_bonus: float | None = None):
         self.document_router = ConformalDocumentGenerator(calibrator, epsilon, document_weights)
-        self.claim_generator = ClaimGenerator(claim_weights)
+        self.claim_generator = ClaimGenerator(claim_weights,
+                                              specificity_bonus=claim_specificity_bonus)
 
     def generate(self, query, index, limit, same_session=True):
         # Request a document pool at least as large as the caller's own claim-level `limit`

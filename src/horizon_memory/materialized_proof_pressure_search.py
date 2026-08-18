@@ -15,7 +15,7 @@ import math
 from .contextual_cavity import CavityScore
 from .proof_pressure_search import HorizonSearchEngine
 from .raw_causal_channels import (
-    RawCausalDocument, SignedChannelScore, observe_raw_text,
+    RawCausalDocument, SignedChannelScore, _modal_is_confirmed_finding, observe_raw_text,
 )
 
 
@@ -37,6 +37,27 @@ class MaterializedRawCausalSyndromeIndex:
         self.entity_sets = {key: set(value.entities) for key, value in self.channels.items()}
         self.relation_sets = {key: set(value.relations) for key, value in self.channels.items()}
         self._cache: dict[str, tuple[SignedChannelScore, ...]] = {}
+        # 2026-08-18: same technique already validated twice this session at other pipeline
+        # stages (`lab/proof_dossier.py`'s `_anchor_specificity_scores`, `evidence.py`'s
+        # `_numeric_specificity_scores`) -- IDF over each document's own distinguishing tokens
+        # (entities + numbers) within the CANDIDATE POOL this index was built over, not a static
+        # dictionary. Query-independent (unlike `components()`'s own per-query BM25 scores), so
+        # computed once here rather than per `rank()` call. `rank()`'s own optional
+        # `specificity_bonus` parameter is the first test of this signal at the ClaimGenerator
+        # candidate-ranking stage specifically (distinct from the acquisition-budget stage, where
+        # the same signal tested negative, and the final-render stage, where it tested positive).
+        anchor_sets = {key: value.entities + value.numbers for key, value in self.channels.items()}
+        anchor_df: Counter = Counter()
+        for anchors in anchor_sets.values():
+            anchor_df.update(set(anchors))
+        self.specificity_scores: dict[int, float] = {}
+        for key, anchors in anchor_sets.items():
+            score = sum(math.log(1.0 + (self.n - anchor_df[a] + .5) / (anchor_df[a] + .5))
+                       for a in set(anchors))
+            self.specificity_scores[key] = score
+        max_specificity = max(self.specificity_scores.values(), default=0.0) or 1.0
+        for key in self.specificity_scores:
+            self.specificity_scores[key] /= max_specificity
 
     def _bm25(self, query: tuple[str, ...], tf: Counter, length: int,
               df: Counter, average_length: float) -> float:
@@ -79,7 +100,14 @@ class MaterializedRawCausalSyndromeIndex:
                 contradiction += 1.0
             if query.polarity == "negative" and value.polarity == "positive":
                 contradiction += .5
-            if query.modality == "asserted" and value.modality == "modal":
+            # 2026-08-18 (plan item 1b): don't penalize a claim reporting an already-CONFIRMED
+            # finding just because it also contains a modal word ("the study demonstrated X
+            # could improve Y by 15%") -- that isn't a hedge, unlike a genuine "might/could"
+            # distractor with no confirming verb (the IKEA-bookshelf case this rule exists for,
+            # confirmed unaffected: its query has no numbers, so this rule never fired for it
+            # either way, and its own modal sentence has no confirming verb before "might").
+            if (query.modality == "asserted" and value.modality == "modal"
+                    and not _modal_is_confirmed_finding(document.text)):
                 contradiction += .25
             rows.append({
                 "fact_id": fact_id,
@@ -97,9 +125,13 @@ class MaterializedRawCausalSyndromeIndex:
         self._cache[query_text] = result
         return result
 
-    @staticmethod
-    def rank(components: tuple[SignedChannelScore, ...], weights: tuple[float, ...]) \
-            -> tuple[SignedChannelScore, ...]:
+    def rank(self, components: tuple[SignedChannelScore, ...], weights: tuple[float, ...], *,
+             specificity_bonus: float | None = None) -> tuple[SignedChannelScore, ...]:
+        # `specificity_bonus` (2026-08-18, opt-in, `None` preserves every prior digest): was a
+        # `@staticmethod` before this parameter needed `self.specificity_scores` -- every call
+        # site already invokes this via an instance (`index.rank(...)`), so converting to a
+        # regular instance method is fully backward compatible, confirmed by grepping every
+        # caller in `src/`/`tests/`/`lab/` before making the change.
         if len(weights) != 6 or any(weight < 0 for weight in weights):
             raise ValueError("six non-negative signed-field weights are required")
         rows = []
@@ -107,6 +139,8 @@ class MaterializedRawCausalSyndromeIndex:
             amplitude = (weights[0] * item.lexical + weights[1] * item.sublexical +
                          weights[2] * item.entity + weights[3] * item.relation +
                          weights[4] * item.observable - weights[5] * item.contradiction)
+            if specificity_bonus is not None:
+                amplitude *= (1.0 + specificity_bonus * self.specificity_scores.get(item.fact_id, 0.0))
             rows.append(SignedChannelScore(
                 item.fact_id, amplitude, item.lexical, item.sublexical, item.entity,
                 item.relation, item.observable, item.contradiction))
