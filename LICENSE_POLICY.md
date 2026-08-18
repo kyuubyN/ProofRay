@@ -24,16 +24,15 @@ Commercial use is permitted when its applicable license is followed. Separate
 commercial licenses may be offered later, but they do not revoke rights already
 received under an open-source release.
 
-The project has not adopted a RAIL-style license (a license family that
-attaches behavioral use restrictions, common for ML models, and not
-OSI-approved open source). `RESPONSIBLE_USE.md` states real misuse concerns
-as an ask, not as a license term, for the same reason `AI_TRAINING_POLICY.md`
-declines to smuggle a training restriction into the AGPL: this project will
-not mislabel a restricted license as free software.
-
-A move to an OpenRAIL-R license (this project's retrieval-specific variant of
-the BigScience/Hugging Face OpenRAIL family), with a binding attachment of
-prohibited uses, is under consideration — decided before, not after, any
-public release. See `LICENSE_RAIL_DRAFT.md` for the draft and its open
-decisions. It is not yet
-adopted and does not apply to anything already released under AGPL.
+The project considered and decided against a RAIL-style license (a license
+family that attaches binding behavioral use restrictions, common for ML
+models, and not OSI-approved open source). The reasoning: Horizon Memory is
+meant to work the way Linux does — a free core that anyone can build a
+distribution, product or business on top of, the way Ubuntu, Fedora and Red
+Hat do on the Linux kernel — and a restricted license adds exactly the kind
+of adoption friction and legal complexity that model depends on not having.
+`RESPONSIBLE_USE.md` instead states real misuse concerns plainly, as an ask
+and not a license term, for the same reason `AI_TRAINING_POLICY.md` declines
+to smuggle a training restriction into the AGPL: this project will not
+mislabel a restricted license as free software, and won't quietly make the
+license more restrictive to get the same effect either.

@@ -79,7 +79,6 @@ datasets, unpublished papers, benchmark answer keys and development logs.
 - [Governance](GOVERNANCE.md)
 - [Security policy](SECURITY.md)
 - [Responsible use](RESPONSIBLE_USE.md)
-- [Draft: OpenRAIL-R license under consideration](LICENSE_RAIL_DRAFT.md)
 
 ## Freedom and attribution
 
