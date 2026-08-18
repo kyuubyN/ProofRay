@@ -83,16 +83,33 @@ class SupersessionCollapseTests(unittest.TestCase):
 
     def test_cjk_text_detects_and_resolves_a_group(self):
         # CJK has no letter-casing, so a capitalization-based entity/anchor signal is
-        # structurally blind to it -- this exercises the character-bigram anchor fallback
-        # instead. "北京" (Beijing, superseded) -> "上海" (Shanghai, the later, correct answer).
+        # structurally blind to it -- this exercises the word-segmentation anchor path instead
+        # (see test_zh_segmentation_only_counts_real_dictionary_words below for the segmenter in
+        # isolation). Sentences kept longer than the short-example version tried first: with
+        # only a 745-word calibration dictionary, a short sentence can easily contain zero
+        # dictionary words at all -- these specific sentences were confirmed to carry enough
+        # real dictionary anchors ("会议"/"决定"/"最终"/"计划"/"北京") for both claims.
         items = (
-            _item(1, "我们计划在北京开会讨论项目。"),
-            _item(2, "最终决定改在上海开会。"),
+            _item(1, "我们计划在北京举行这次重要会议，大家都同意了。"),
+            _item(2, "经过反复讨论，最终决定改在上海举行这次重要会议。"),
         )
-        kept, report = collapse_evidence_items(items, "最终决定在哪里开会？")
+        kept, report = collapse_evidence_items(items, "最终决定在哪里举行这次会议？")
         self.assertEqual(report.groups_detected, 1)
         self.assertEqual(report.resolved_groups, 1)
         self.assertEqual({item.fact_id for item in kept}, {2})
+
+    def test_zh_segmentation_only_counts_real_dictionary_words(self):
+        # D142 (2026-08-18): regression test for the word-segmentation redesign. "北京" (Beijing)
+        # is a real, calibrated dictionary word and must survive as a multi-character anchor; no
+        # single leftover character should ever appear as an anchor on its own -- that
+        # combinatorial-saturation failure mode (raw character bigrams) is exactly what this
+        # redesign replaced. See RESEARCH.md for the full empirical trace.
+        from horizon_memory.supersession_collapse import _cjk_anchors
+
+        anchors = _cjk_anchors("我们计划在北京举行这次重要会议。")
+        self.assertIn("北京", anchors)
+        self.assertIn("会议", anchors)
+        self.assertFalse(any(len(a) == 1 for a in anchors))
 
     def test_no_distractor_or_gold_answer_parameter_exists(self):
         params = set(inspect.signature(collapse_evidence_items).parameters)

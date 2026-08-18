@@ -30,23 +30,23 @@ Core module already did from the start (the bug was research-side only) -- but r
 fixing the research twin changed the honest picture reported here:
 - **No language/budget/noise combination currently clears the pre-registered decision rule**
   (>=15pp distractor-token-containment reduction, <=5pp lax-containment reduction, no
-  fill_fraction collapse). The closest is clean-text Chinese at a 1024-byte budget (distractor
-  containment -12.5pp, lax containment -1.4pp) -- real, safe, directionally right, short of the
-  bar. Every measured combination is now either a small-but-safe positive or a true no-op, never
-  a large content-losing negative -- the earlier apparent Portuguese "win" was partly an artifact
-  of the anchor bug and did not survive the fix at full honesty.
+  fill_fraction collapse). Every measured combination is a small-but-safe positive or a true
+  no-op, never a large content-losing negative -- an earlier apparent Portuguese "win" was partly
+  an artifact of an anchor-detection bug (see git history) and did not survive fixing it.
 - Chinese was previously reported as never firing at all (CJK text has no letter-casing, so a
-  capitalization-based entity signal is structurally blind to it). Fixed with a character-bigram
-  anchor fallback for CJK text (plus embedded Latin words/numbers) -- Chinese now detects and
-  resolves groups on every tested variant, with zero abstention.
+  capitalization-based entity signal is structurally blind to it), then as firing but unsafely
+  (a character-bigram anchor fallback that saturated on combinatorial noise -- see the note above
+  `_segment_zh`). With word-segmentation anchors: clean-text Chinese at 1024B moved to
+  distractor -8.3pp / lax +0.0pp (was -12.5pp / -1.4pp with bigram anchors) -- less aggressive
+  but essentially loss-free, a real safety improvement even though it moved further from, not
+  closer to, the decision rule's 15pp bar.
 - A generality check against ORDINARY (non-revision) `dataset_chat` scenarios
-  (`lab/dataset_chat/check_supersession_false_positives.py`, 1290 scenario/variant pairs) found an
-  **11.01% false-positive exclusion rate** (up from 9.46% before the CJK fix, because Chinese
-  scenarios can now be false-positived too, where they were previously immune by being blind) --
-  e.g. a scenario mentioning two different services' two different port numbers was wrongly
-  collapsed as if it were one revised value. This is why this module is never called by default:
-  it should only be applied to input a caller has reason to believe is single-fact-revision-
-  shaped, not to arbitrary multi-fact evidence.
+  (`lab/dataset_chat/check_supersession_false_positives.py`, 1290 scenario/variant pairs) improved
+  from **11.01% to 7.05%** false-positive exclusion rate with word-segmentation anchors -- e.g. a
+  scenario mentioning two different services' two different port numbers was wrongly collapsed
+  as if it were one revised value; this class of error is real but now measurably rarer. This is
+  why this module is never called by default: it should only be applied to input a caller has
+  reason to believe is single-fact-revision-shaped, not to arbitrary multi-fact evidence.
 
 Hard rule: this module never accepts a `distractors`/`gold_answer`-shaped parameter. A caller
 measuring against known-correct answers must do so outside this module's call boundary.
@@ -71,25 +71,83 @@ _SCOPE = "supersession"
 DEFAULT_RELEVANCE_FLOOR = 0.0
 
 # CJK text has no letter-casing, so `observe_raw_text.entities` (built on capitalization) is
-# structurally empty for it -- character bigrams are the established fallback for CJK anchor
-# detection in this project (see `lab/supersession_collapse.py`'s identical fix), plus embedded
-# Latin words/numbers (Chinese chat routinely embeds product names/technical terms verbatim).
+# structurally empty for it. Character bigrams were the first fallback tried and were replaced
+# (2026-08-18): with a small local candidate pool (~10-15 claims) and a combinatorially huge
+# bigram space (thousands of characters squared), nearly every claim ends up with several
+# bigrams that are "unique" in the pool by chance, not because they carry meaning -- confirmed
+# directly, rarity saturated at the pool's maximum for every claim regardless of aggregation
+# (sum, mean, top-K). Replaced with maximum-matching word segmentation against
+# `zh_word_dictionary.ZH_WORD_DICTIONARY` (a plain frequency-threshold word list built from this
+# project's own ZH chat research corpus, not a library, not a learned model) -- reduces the
+# anchor space to the same order of magnitude as PT/EN's naturally sparse numbers/proper-noun
+# anchors. Only genuine multi-character dictionary matches count; a leftover single character
+# from incomplete segmentation is not a word and is dropped, not kept.
 _CJK_CHAR = re.compile(r"[一-鿿㐀-䶿]")
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9_+.'-]*")
+_MAX_ZH_WORD_LEN = 4
 
 
 def _is_cjk(text: str) -> bool:
     return bool(_CJK_CHAR.search(text))
 
 
+def _segment_zh(text: str) -> list[str]:
+    """Bidirectional maximum-matching segmentation against `ZH_WORD_DICTIONARY`. Falls back to
+    single characters for spans the dictionary doesn't cover -- those never become anchors (see
+    `_cjk_anchors`), so an incomplete dictionary fails toward fewer anchors, not spurious ones."""
+    from .zh_word_dictionary import ZH_WORD_DICTIONARY as _DICT
+
+    chars = list(text)
+    n = len(chars)
+
+    def _forward() -> list[str]:
+        words, i = [], 0
+        while i < n:
+            if not _CJK_CHAR.match(chars[i]):
+                words.append(chars[i])
+                i += 1
+                continue
+            matched = None
+            for length in range(min(_MAX_ZH_WORD_LEN, n - i), 1, -1):
+                candidate = "".join(chars[i:i + length])
+                if candidate in _DICT:
+                    matched = candidate
+                    break
+            words.append(matched or chars[i])
+            i += len(matched) if matched else 1
+        return words
+
+    def _backward() -> list[str]:
+        words, i = [], n
+        while i > 0:
+            if not _CJK_CHAR.match(chars[i - 1]):
+                words.append(chars[i - 1])
+                i -= 1
+                continue
+            matched = None
+            for length in range(min(_MAX_ZH_WORD_LEN, i), 1, -1):
+                candidate = "".join(chars[i - length:i])
+                if candidate in _DICT:
+                    matched = candidate
+                    break
+            words.append(matched or chars[i - 1])
+            i -= len(matched) if matched else 1
+        return list(reversed(words))
+
+    forward, backward = _forward(), _backward()
+    if len(forward) != len(backward):
+        return forward if len(forward) < len(backward) else backward
+    singles = lambda seq: sum(1 for w in seq if len(w) == 1 and _CJK_CHAR.match(w))
+    return forward if singles(forward) <= singles(backward) else backward
+
+
 def _cjk_anchors(text: str) -> frozenset[str]:
-    chars = [ch for ch in text if not ch.isspace()]
-    bigrams = {"".join(pair) for pair in zip(chars, chars[1:])
-              if _CJK_CHAR.match(pair[0]) and _CJK_CHAR.match(pair[1])}
+    words = _segment_zh(text)
+    anchors = {w for w in words if len(w) >= 2 and _CJK_CHAR.match(w[0])}
     latin_words = {match.group().casefold() for match in _LATIN_WORD.finditer(text)
                   if len(match.group()) >= 2}
     channels = observe_raw_text(text)
-    return frozenset(bigrams) | frozenset(latin_words) | frozenset(channels.numbers)
+    return frozenset(anchors) | frozenset(latin_words) | frozenset(channels.numbers)
 
 
 def _text_anchors(text: str) -> frozenset[str]:
