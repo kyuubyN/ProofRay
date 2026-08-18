@@ -81,6 +81,19 @@ class SupersessionCollapseTests(unittest.TestCase):
         self.assertEqual(report.groups_detected, 0)
         self.assertEqual(kept, items)
 
+    def test_cjk_text_detects_and_resolves_a_group(self):
+        # CJK has no letter-casing, so a capitalization-based entity/anchor signal is
+        # structurally blind to it -- this exercises the character-bigram anchor fallback
+        # instead. "北京" (Beijing, superseded) -> "上海" (Shanghai, the later, correct answer).
+        items = (
+            _item(1, "我们计划在北京开会讨论项目。"),
+            _item(2, "最终决定改在上海开会。"),
+        )
+        kept, report = collapse_evidence_items(items, "最终决定在哪里开会？")
+        self.assertEqual(report.groups_detected, 1)
+        self.assertEqual(report.resolved_groups, 1)
+        self.assertEqual({item.fact_id for item in kept}, {2})
+
     def test_no_distractor_or_gold_answer_parameter_exists(self):
         params = set(inspect.signature(collapse_evidence_items).parameters)
         self.assertFalse(any("distractor" in p or "gold" in p for p in params))

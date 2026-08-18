@@ -19,26 +19,41 @@ extractor failed on real text in this project's research history (see `research_
 0/536 real MemGym-DR; D101/H-WRR: 7.02% real closure after 2,400/2,400 on generated text).
 
 **Measured scope and limits (research pass, `lab/dataset_chat/domains_lh_{pt,en,zh}`,
-72 value-revision scenarios, `lab/dataset_chat/run_supersession_collapse_pilot.py`)** -- report
-honestly, do not oversell:
-- Passes a pre-registered decision rule (>=15pp distractor-token-containment reduction, <=5pp
-  lax-containment reduction, no fill_fraction collapse) only on clean-text Portuguese at a
-  1024-byte budget (distractor containment 0.764->0.562, lax containment 0.601->0.573).
-- Fails the same rule under noise (PT), on English (cuts real content along with stale values),
-  and never fires at all on Chinese (CJK text has no letter-casing, so the entity/anchor signal
-  this module depends on is structurally blind to it).
+72 value-revision scenarios, `lab/dataset_chat/run_supersession_collapse_pilot.py`, mirrored by
+`lab/supersession_collapse.py`, the twin research-side implementation this Core module was ported
+from)** -- report honestly, do not oversell, and this section was already corrected once (see
+git history): a first version of this module's own anchor detection reused D48's `_anchors()`,
+which tagged a sentence's own leading capitalized word as if it were a proper noun ("Final
+answer?" -> spurious anchor "final") -- confirmed as the direct cause of a real false exclusion
+in English test data. Fixed by computing anchors locally from `observe_raw_text` only, which this
+Core module already did from the start (the bug was research-side only) -- but re-measuring after
+fixing the research twin changed the honest picture reported here:
+- **No language/budget/noise combination currently clears the pre-registered decision rule**
+  (>=15pp distractor-token-containment reduction, <=5pp lax-containment reduction, no
+  fill_fraction collapse). The closest is clean-text Chinese at a 1024-byte budget (distractor
+  containment -12.5pp, lax containment -1.4pp) -- real, safe, directionally right, short of the
+  bar. Every measured combination is now either a small-but-safe positive or a true no-op, never
+  a large content-losing negative -- the earlier apparent Portuguese "win" was partly an artifact
+  of the anchor bug and did not survive the fix at full honesty.
+- Chinese was previously reported as never firing at all (CJK text has no letter-casing, so a
+  capitalization-based entity signal is structurally blind to it). Fixed with a character-bigram
+  anchor fallback for CJK text (plus embedded Latin words/numbers) -- Chinese now detects and
+  resolves groups on every tested variant, with zero abstention.
 - A generality check against ORDINARY (non-revision) `dataset_chat` scenarios
-  (`lab/dataset_chat/check_supersession_false_positives.py`, 1290 scenario/variant pairs) found a
-  **9.46% false-positive exclusion rate** -- e.g. a scenario mentioning two different services'
-  two different port numbers was wrongly collapsed as if it were one revised value. This is why
-  this module is never called by default: it should only be applied to input a caller has reason
-  to believe is single-fact-revision-shaped, not to arbitrary multi-fact evidence.
+  (`lab/dataset_chat/check_supersession_false_positives.py`, 1290 scenario/variant pairs) found an
+  **11.01% false-positive exclusion rate** (up from 9.46% before the CJK fix, because Chinese
+  scenarios can now be false-positived too, where they were previously immune by being blind) --
+  e.g. a scenario mentioning two different services' two different port numbers was wrongly
+  collapsed as if it were one revised value. This is why this module is never called by default:
+  it should only be applied to input a caller has reason to believe is single-fact-revision-
+  shaped, not to arbitrary multi-fact evidence.
 
 Hard rule: this module never accepts a `distractors`/`gold_answer`-shaped parameter. A caller
 measuring against known-correct answers must do so outside this module's call boundary.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .evidence import EvidenceItem
@@ -54,6 +69,34 @@ _SCOPE = "supersession"
 # (ClaimGenerator + SemanticRouter) upstream -- this floor is a cheap sanity backstop (any
 # positive lexical overlap with the question), not a second hand-tuned relevance filter.
 DEFAULT_RELEVANCE_FLOOR = 0.0
+
+# CJK text has no letter-casing, so `observe_raw_text.entities` (built on capitalization) is
+# structurally empty for it -- character bigrams are the established fallback for CJK anchor
+# detection in this project (see `lab/supersession_collapse.py`'s identical fix), plus embedded
+# Latin words/numbers (Chinese chat routinely embeds product names/technical terms verbatim).
+_CJK_CHAR = re.compile(r"[一-鿿㐀-䶿]")
+_LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9_+.'-]*")
+
+
+def _is_cjk(text: str) -> bool:
+    return bool(_CJK_CHAR.search(text))
+
+
+def _cjk_anchors(text: str) -> frozenset[str]:
+    chars = [ch for ch in text if not ch.isspace()]
+    bigrams = {"".join(pair) for pair in zip(chars, chars[1:])
+              if _CJK_CHAR.match(pair[0]) and _CJK_CHAR.match(pair[1])}
+    latin_words = {match.group().casefold() for match in _LATIN_WORD.finditer(text)
+                  if len(match.group()) >= 2}
+    channels = observe_raw_text(text)
+    return frozenset(bigrams) | frozenset(latin_words) | frozenset(channels.numbers)
+
+
+def _text_anchors(text: str) -> frozenset[str]:
+    if _is_cjk(text):
+        return _cjk_anchors(text)
+    channels = observe_raw_text(text)
+    return frozenset(channels.entities) | frozenset(channels.numbers)
 
 
 def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
@@ -81,16 +124,24 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
     already produces) -- items missing either are left untouched, never considered for exclusion.
     """
     question_lexical = frozenset(observe_raw_text(question).lexical)
+    question_anchors = _text_anchors(question)
     candidates: list[tuple[EvidenceItem, frozenset[str], object]] = []
     for item in items:
         if not item.content or item.parent_sha256 is None or item.content_span is None:
             continue
         channels = observe_raw_text(item.content)
-        anchors = frozenset(channels.entities) | frozenset(channels.numbers)
+        anchors = _text_anchors(item.content)
         if not anchors:
             continue
         lexical = frozenset(channels.lexical)
-        if _jaccard(lexical, question_lexical) <= relevance_floor:
+        # `.lexical` merges an entire contiguous CJK run into one token (no whitespace to split
+        # on), so plain Jaccard against the question is almost always zero for CJK text even when
+        # the claim is genuinely on-topic -- the anchor-overlap bonus is what actually gates
+        # relevance there, mirroring `lab/supersession_collapse.py`'s identical `_relevance` fix.
+        relevance = _jaccard(lexical, question_lexical)
+        if anchors & question_anchors:
+            relevance += 0.35
+        if relevance <= relevance_floor:
             continue
         candidates.append((item, anchors, channels))
 
