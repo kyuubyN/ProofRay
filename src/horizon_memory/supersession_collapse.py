@@ -94,8 +94,38 @@ fixing the research twin changed the honest picture reported here:
   groups are actually driven by genuine (non-slang) vocabulary that naturally co-occurs across
   multiple turns of ONE coherent multi-turn story (e.g. a thesis/graduation narrative sharing
   "university"/"thesis"/"system"/"finally" across turns) -- a discourse-cohesion problem, not an
-  anchor-vocabulary problem. Points toward the plan's own item 2b (discourse window) as the next
-  lever, not further stopword-list engineering.
+  anchor-vocabulary problem.
+- **Item 2b (discourse window / turn-distance) measured before building, closed as inapplicable
+  to this failure mode**: every one of the 45 ordinary-domain false-positive groups AND every
+  genuine revision group in `domains_lh_zh` has pairwise turn-distance exactly 1 -- both false
+  positives and real corrections are adjacent-turn pairs, so a distance-decay filter cannot
+  discriminate between them (accepting distance-1 does nothing; rejecting it would block real
+  adjacent-turn corrections just as often).
+- **ZH correction gate, two paths (plan item 2c, 2026-08-18)**: a first version required an
+  explicit correction marker ("不是"/"其实是"/"更新一下"/"等等"...) as a hard AND-gate for every
+  CJK group. Real (false-positive rate 10.93% -> 8.14%) but over-conservative: genuine ZH
+  corrections without formal marker language ("居然考的是第1章" -- a surprise particle, not "不
+  是/其实是") were wrongly blocked, and the primary pilot metric got WORSE (ZH clean distractor
+  cut -8.3pp -> -4.2pp, moving further from the decision bar). Revised into two paths after
+  testing -- and refuting -- three more specific candidate signals for a marker-less "path B"
+  (each tested directly against real data before being trusted, per this project's own
+  discipline): (1) turn distance -- vacuous, see 2b above; (2) restricting resolution to
+  digit-bearing anchor types (date/money/percent/cardinal) -- doesn't discriminate, 90% of real
+  revision groups are ALSO entity-only, same as 62% of false-positive groups; (3) the size of
+  each claim's own non-shared anchor set as a "a correction only introduces the new value"
+  signal -- also refuted, real revision groups have a LARGER mean per-claim value-set (4.57)
+  than false-positive groups (3.24), the opposite of the prediction. What DID hold: the raw
+  presence/magnitude of `shared_anchors` (already computed for the typed-anchor filter above) --
+  false-positive groups share a non-empty anchor 75.6% of the time, real revision groups only
+  40.0% -- matching the given-new asymmetry (Clark & Haviland 1977: a correction reduces/omits
+  reference to the already-established topic; a continuation re-states it). A direct threshold
+  sweep confirmed `shared_anchors == 0` as the useful cut (`<= 1` was tested and found too
+  permissive, 84.4% false-positive acceptance). **Final two-path result**: Path A (marker
+  present) resolves regardless of `shared_anchors`; Path B (no marker, `shared_anchors` empty)
+  resolves at the same confidence. Measured: false-positive rate 8.91% (vs 10.93% with no gate
+  at all, vs 8.14% with the stricter marker-only gate), ZH clean distractor cut -6.9pp (vs -8.3pp
+  with no gate, vs -4.2pp with the marker-only gate) -- strictly better than the marker-only gate
+  on both axes that matter, though still short of the pre-registered 15pp/5pp decision bar.
 
 Hard rule: this module never accepts a `distractors`/`gold_answer`-shaped parameter. A caller
 measuring against known-correct answers must do so outside this module's call boundary.
@@ -226,6 +256,17 @@ _CURRENCY_MARK = re.compile(r"[$€£¥]|R\$")
 _CURRENCY_WORD = re.compile(r"\b(reais?|dollars?|euros?|bucks?|USD|EUR|BRL)\b", re.IGNORECASE)
 _PERCENT_MARK = re.compile(r"%")
 _PERCENT_WORD = re.compile(r"\b(percent|porcento|por\s+cento)\b", re.IGNORECASE)
+
+_ZH_CORRECTION_MARKER = re.compile(
+    "|".join((
+        "不是", "其实是", "实际上是", "改成", "改为", "应该是", "更正", "纠正",
+        "说错了", "打错了", "写错了", "更新一下", "更新：", "等等", "最终", "最后确定",
+        "最终结果", "最新", "我记错了", "不对",
+    )))
+
+
+def _has_zh_correction_marker(text: str) -> bool:
+    return bool(_ZH_CORRECTION_MARKER.search(text))
 
 
 def _anchor_type(anchor: str, surface: str, temporal: frozenset[str]) -> str:
@@ -359,6 +400,23 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
                          if majority_type in item_types[(item.fact_id, item.content_span)]]
     if len(value_bearing) < 2:
         return items, SupersessionReport(groups_detected, 0, {"type_mismatch": 1}, frozenset())
+
+    # ZH correction gate, two-path (plan item 2c, 2026-08-18, ported from
+    # lab/supersession_collapse.py -- see that module's own comment on this exact block for the
+    # full derivation, including three refuted alternative signals). Path A: a correction marker
+    # ("不是"/"其实是"/"等等"/"更新一下"...) present anywhere in the group -- high confidence,
+    # resolve regardless of `shared_anchors`. Path B: no marker, but `shared_anchors` is EMPTY --
+    # the given-new asymmetry signal alone (Clark & Haviland 1977: a correction reduces/omits
+    # reference to the already-established topic; a continuation re-states it). Measured:
+    # `shared_anchors == 0` recovers 60% of marker-less real revisions at only 24.4% acceptance
+    # risk on ordinary (non-revision) data -- `<= 1` was tested and found too permissive (84.4%
+    # FP risk). Scoped to CJK groups only; non-CJK resolution is untouched.
+    if any(_is_cjk(item.content) for item, _value, _channels in value_bearing):
+        has_marker = any(_has_zh_correction_marker(item.content)
+                         for item, _value, _channels in value_bearing)
+        if not has_marker and shared_anchors:
+            return items, SupersessionReport(groups_detected, 0, {"no_correction_marker": 1},
+                                             frozenset())
 
     facts = []
     item_by_fact_id: dict[int, EvidenceItem] = {}
