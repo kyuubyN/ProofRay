@@ -125,6 +125,58 @@ confirming the reading contract itself is not the bottleneck. Distinguishing
 "more of the right evidence would help" from "the reader needs help
 composing what it already has" is the current open experiment.
 
+## Offline composer coverage (zero-LLM proxy, engineering diagnostic)
+
+Distinct from the judge-scored pilot above: this is a cheaper, zero-LLM,
+zero-API, zero-network diagnostic — token/anchor overlap between the
+composer's rendered evidence and the gold answer — used during development
+to iterate quickly before spending judge-API budget on a real reader pilot.
+**It is not a judge-scored accuracy number and must not be read as one.**
+
+Both rows below run the identical engine now shipped in
+`horizon_memory.claim_composer` / `proof_dossier` / `lossless_proof_answer`
+(claim-level extraction, submodular core selection under the final answer
+budget, `anchor_bonus`/`specificity_bonus`-weighted fallback fill under the
+acquisition budget) at the same two-stage byte budget (65,536-byte
+acquisition, 24,576-byte final render). The only thing that differs between
+rows is the adapter that turns each dataset's own shape into the composer's
+`(sources, intents)` inputs: MemGym-DR decomposes into per-turn intents
+(each multi-hop question's own sub-queries); LongMemEval-S has no native
+turn/sub-query structure, so intents are scoped per haystack session instead
+— the structural analog, reusing the same question text per session. This is
+one engine with two adapters, not two separate pipelines.
+
+| Dataset | N | Metric | Mean rendered coverage | Ceiling |
+|---|---:|---|---:|---:|
+| MemGym-DR (frozen dev split) | 120 | gold-anchor overlap (numbers, proper nouns) | **0.9166** | 0.9853 (any document, physical ceiling) |
+| LongMemEval-S | 120 | gold-answer token overlap (whole answer) | **0.8384** | 0.8554 (pool coverage before the final-budget cut) |
+
+Caveats, stated plainly:
+
+- These are two different, dataset-specific token-overlap metrics, not one
+  shared instrument. MemGym-DR's is restricted to anchor tokens after
+  several documented metric-defect corrections (a bare list marker like
+  "(1)" or a possessive suffix is not counted as required content);
+  LongMemEval-S's is unrestricted whole-answer token overlap. The two mean
+  scores are not directly comparable to each other as a single ranked
+  "accuracy" — each is only meaningful against its own dataset's own
+  ceiling.
+- Neither number is judge-scored. Internal testing has previously found a
+  token/anchor-overlap proxy can diverge from real judge/reader quality in
+  either direction (a large evidence dump can score artificially high on
+  overlap while a real reader gets no benefit from it, or vice versa).
+  Treat these as engineering-iteration signals, not accuracy claims — the
+  0.72 vs 0.55 judge-scored table above remains the only judge-scored number
+  in this document.
+- MemGym-DR's own ceiling (0.9853) is well above its measured score,
+  meaning the majority of the remaining gap is not a hard, dataset-authored
+  wall the way some earlier internal ceiling checks found for other
+  datasets — there is real, not-yet-closed headroom here. LongMemEval-S's
+  own ceiling was measured only at the coverage-proxy layer (before the
+  final-answer budget cut), not independently audited against its raw
+  source text the way MemGym-DR's was, so it should be read as a looser
+  bound.
+
 ## What is not yet solved
 
 Horizon does not currently cover arbitrary words, relations or question forms.
