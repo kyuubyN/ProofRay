@@ -9,20 +9,17 @@ prohibited uses, breach of which terminates the grant) rather than inventing
 a new structure from scratch.
 
 **Status: draft for review. Not a legal document yet. Not signed off by a
-lawyer. Does not apply to anything already released — code already published
-under `AGPL-3.0-or-later` keeps that license for the copies already
-distributed; a license cannot be revoked retroactively for recipients who
-already received it under the current terms.** This document exists so the
-actual decision — whether and how to adopt it for future releases — can be
-made deliberately, with something concrete in front of it, not decided by a
-markdown file appearing in a commit.
-
-**The repository is currently private.** Nothing here is urgent in the sense
-of a public release racing against someone else's — there is no public
-audience yet to protect or to be exposed to. The point of drafting this now,
-before the repo opens, is to have the license question already settled
-*before* the first public release, rather than retrofitting restrictions
-onto users who already received an unrestricted grant.
+lawyer.** The earlier version of this note warned that a license cannot be
+revoked retroactively for recipients who already received the code under
+`AGPL-3.0-or-later` — that caveat assumed public distribution that hasn't
+actually happened. **The repository is private, and the sole author is its
+sole copyright holder; nobody outside that has received the code yet, so
+there is no existing third party with a vested AGPL grant to protect.**
+Nothing here is staged for "future releases only" — it can be adopted
+directly, whenever the wording is ready, with no legacy grant to work
+around. The moment that stops being true — a collaborator gets access, the
+repo goes public, anyone outside the author receives a copy — is the moment
+this reasoning needs to be rechecked, not before.
 
 ## Why this exists
 
@@ -112,27 +109,21 @@ this is framed as a condition of the license, not a separate promise.
 
 ## What this draft does not do
 
-- It does not touch code already distributed under `AGPL-3.0-or-later`.
 - It is not a substitute for `DISCLAIMER.md`'s liability position — a
   restriction on use is a different legal instrument from a warranty
   disclaimer, and both are still needed.
-- It is not final. Turning this into the actual governing license for future
-  releases needs, at minimum: a decision on whether it *replaces* AGPL going
-  forward or is offered *alongside* it (dual-licensing), a decision on the
-  effective version/date, a real legal review of the exact restriction
-  wording (several of the categories above use terms — "meaningful human
-  review," "lawful basis" — that a lawyer should tighten before this has real
-  teeth), and, if adopted, updating every file's SPDX header, the `LICENSE`
-  file, `LICENSE_POLICY.md` and `README.md` together in one deliberate
-  change, not piecemeal.
+- It is not final on wording. Several categories in the Attachment use terms
+  a lawyer should tighten before they carry real weight in a dispute —
+  "meaningful human review," "lawful basis" — this is about precision, not
+  about waiting for a release milestone.
+- Adopting it means updating every file's SPDX header, `LICENSE`,
+  `LICENSE_POLICY.md` and `README.md` together in one change, not piecemeal —
+  a mechanical step, not a legal one, and doable as soon as the wording above
+  is settled.
 
 ## Open decisions, for you
 
-- Replace AGPL going forward, or dual-license (AGPL for those who don't need
-  the restriction removed, RAIL-style for a broader default)?
-- Since the repo is private, there is no forced deadline: adopt this before
-  the repo ever goes public, or tie it to a specific milestone (e.g. v1.0,
-  once the V1 accuracy gate is met)?
-- Who reviews the restriction wording before it is treated as binding —
-  arranged now, while there is no public release pressure, or closer to
-  whenever going public is actually decided?
+- Replace AGPL outright, or keep AGPL available as a second option for users
+  who don't need the restriction (dual-licensing)?
+- Is the wording above ready to adopt as written, or does it need a lawyer's
+  pass first? Nothing forces a choice here except wanting it right.
