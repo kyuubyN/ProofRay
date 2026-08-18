@@ -1,4 +1,12 @@
-# DRAFT — Horizon Responsible AI License (not yet adopted)
+# DRAFT — Horizon OpenRAIL-R (not yet adopted)
+
+Modeled specifically on the BigScience/Hugging Face **OpenRAIL** family
+(OpenRAIL-M for models, OpenRAIL-D for datasets) — this is the **retrieval**
+variant of that same template, "R" for retrieval, adapted for a search/
+memory engine rather than a generative model. It reuses OpenRAIL's actual
+mechanic (a copyleft-style source grant plus a binding attachment of named
+prohibited uses, breach of which terminates the grant) rather than inventing
+a new structure from scratch.
 
 **Status: draft for review. Not a legal document yet. Not signed off by a
 lawyer. Does not apply to anything already released — code already published
@@ -8,6 +16,13 @@ already received it under the current terms.** This document exists so the
 actual decision — whether and how to adopt it for future releases — can be
 made deliberately, with something concrete in front of it, not decided by a
 markdown file appearing in a commit.
+
+**The repository is currently private.** Nothing here is urgent in the sense
+of a public release racing against someone else's — there is no public
+audience yet to protect or to be exposed to. The point of drafting this now,
+before the repo opens, is to have the license question already settled
+*before* the first public release, rather than retrofitting restrictions
+onto users who already received an unrestricted grant.
 
 ## Why this exists
 
@@ -19,10 +34,11 @@ provenance-verified search that outperforms an LLM reader at a small byte
 budget) with real dual-use weight, most acutely as a tool for persistent,
 provenance-tracked *memory* of people and events. The choice is not "open vs.
 restricted" in the abstract; it is closer to the one BigScience/Hugging Face
-faced with OpenRAIL: release something powerful with named, binding limits on
-its worst uses, or leave the field open for someone else to release an
-equivalent capability with no limits at all. This project prefers to be the
-one that did it with limits.
+faced with OpenRAIL: when the capability itself is powerful enough to matter,
+release it with named, binding limits on its worst uses from the start,
+rather than release it unrestricted first and add limits later, after an
+unrestricted grant already went out. The repository being private today is
+exactly what makes that ordering possible.
 
 ## What this license is meant to preserve
 
@@ -92,8 +108,9 @@ this is framed as a condition of the license, not a separate promise.
 
 - Replace AGPL going forward, or dual-license (AGPL for those who don't need
   the restriction removed, RAIL-style for a broader default)?
-- Effective from the next release, or from a specific version boundary
-  (e.g. v1.0, once the V1 accuracy gate is met)?
-- Who reviews the restriction wording before it is treated as binding — is
-  professional legal review something to arrange before or after a first
-  public RAIL release?
+- Since the repo is private, there is no forced deadline: adopt this before
+  the repo ever goes public, or tie it to a specific milestone (e.g. v1.0,
+  once the V1 accuracy gate is met)?
+- Who reviews the restriction wording before it is treated as binding —
+  arranged now, while there is no public release pressure, or closer to
+  whenever going public is actually decided?

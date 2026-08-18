@@ -31,7 +31,9 @@ as an ask, not as a license term, for the same reason `AI_TRAINING_POLICY.md`
 declines to smuggle a training restriction into the AGPL: this project will
 not mislabel a restricted license as free software.
 
-A move to a RAIL-style license, with a binding attachment of prohibited uses,
-is under active consideration for future releases — see
-`LICENSE_RAIL_DRAFT.md` for the draft and its open decisions. It is not yet
+A move to an OpenRAIL-R license (this project's retrieval-specific variant of
+the BigScience/Hugging Face OpenRAIL family), with a binding attachment of
+prohibited uses, is under consideration — decided before, not after, any
+public release. See `LICENSE_RAIL_DRAFT.md` for the draft and its open
+decisions. It is not yet
 adopted and does not apply to anything already released under AGPL.
