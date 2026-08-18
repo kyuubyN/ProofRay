@@ -28,25 +28,31 @@ answer?" -> spurious anchor "final") -- confirmed as the direct cause of a real 
 in English test data. Fixed by computing anchors locally from `observe_raw_text` only, which this
 Core module already did from the start (the bug was research-side only) -- but re-measuring after
 fixing the research twin changed the honest picture reported here:
-- **No language/budget/noise combination currently clears the pre-registered decision rule**
-  (>=15pp distractor-token-containment reduction, <=5pp lax-containment reduction, no
-  fill_fraction collapse). Every measured combination is a small-but-safe positive or a true
-  no-op, never a large content-losing negative -- an earlier apparent Portuguese "win" was partly
-  an artifact of an anchor-detection bug (see git history) and did not survive fixing it.
+- **PT clean and EN heavy_noise now clear the pre-registered decision rule** (>=15pp
+  distractor-token-containment reduction, <=5pp lax-containment reduction, no fill_fraction
+  collapse) -- the first combinations to do so in this module's history, after an anchor-primary
+  relevance fix (2026-08-18, see below). Not every combination is clean: PT heavy_noise and EN
+  clean now exceed the 5pp lax-loss ceiling -- the mechanism became more aggressive across the
+  board, winning on some combinations and over-excluding on others, not a uniform improvement.
 - Chinese was previously reported as never firing at all (CJK text has no letter-casing, so a
   capitalization-based entity signal is structurally blind to it), then as firing but unsafely
   (a character-bigram anchor fallback that saturated on combinatorial noise -- see the note above
   `_segment_zh`). With word-segmentation anchors: clean-text Chinese at 1024B moved to
   distractor -8.3pp / lax +0.0pp (was -12.5pp / -1.4pp with bigram anchors) -- less aggressive
-  but essentially loss-free, a real safety improvement even though it moved further from, not
-  closer to, the decision rule's 15pp bar.
-- A generality check against ORDINARY (non-revision) `dataset_chat` scenarios
-  (`lab/dataset_chat/check_supersession_false_positives.py`, 1290 scenario/variant pairs) improved
-  from **11.01% to 7.05%** false-positive exclusion rate with word-segmentation anchors -- e.g. a
-  scenario mentioning two different services' two different port numbers was wrongly collapsed
-  as if it were one revised value; this class of error is real but now measurably rarer. This is
-  why this module is never called by default: it should only be applied to input a caller has
-  reason to believe is single-fact-revision-shaped, not to arbitrary multi-fact evidence.
+  but essentially loss-free. CJK's relevance path is untouched by the 2026-08-18 fix below (its
+  anchor space needs the jaccard+overlap gate; see that module-docstring note).
+- **Anchor-primary relevance for non-CJK text (2026-08-18)**: the diagnosed root cause of PT's
+  own `light_noise` gap (below) was fixed by making a claim's own anchor (once confirmed
+  non-empty, which every claim reaching this check already is) sufficient for relevance on its
+  own, for non-CJK text only -- removing the dependency on `observe_raw_text`'s English-only
+  stopword list. This is a real, measured trade, not a clean win: the false-positive rate on the
+  1,290-pair generality check against ORDINARY (non-revision) `dataset_chat` scenarios rose from
+  **7.05% to 14.03%** (a claim carrying any real anchor is now treated as relevant regardless of
+  topical connection to the question). Kept deliberately, decided by the project owner after
+  seeing both numbers side by side: this module is never called by default (see above), so the
+  doubled false-positive rate is an honest characterization of the mechanism, not a live
+  production risk -- it only matters to a caller applying this outside the single-fact-revision
+  shape it is scoped to.
 
 Hard rule: this module never accepts a `distractors`/`gold_answer`-shaped parameter. A caller
 measuring against known-correct answers must do so outside this module's call boundary.
@@ -192,13 +198,27 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
         if not anchors:
             continue
         lexical = frozenset(channels.lexical)
-        # `.lexical` merges an entire contiguous CJK run into one token (no whitespace to split
-        # on), so plain Jaccard against the question is almost always zero for CJK text even when
-        # the claim is genuinely on-topic -- the anchor-overlap bonus is what actually gates
-        # relevance there, mirroring `lab/supersession_collapse.py`'s identical `_relevance` fix.
-        relevance = _jaccard(lexical, question_lexical)
-        if anchors & question_anchors:
-            relevance += 0.35
+        if anchors and not _is_cjk(item.content):
+            # A real anchor (number/proper noun) is itself sufficient relevance for non-CJK text
+            # -- falling through to lexical Jaccard against the question is what broke on real PT
+            # noise (2026-08-18): `observe_raw_text`'s stopword list is English-only, so a
+            # Portuguese preposition ("para") could be the ONLY nonzero-Jaccard token, and
+            # informal noise ("p" for "para") erased that coincidence even though the item's real
+            # anchor (its number) survived intact. Narrower than the relevance-floor removal
+            # already tried and reverted (2026-08-17): CJK is untouched below, because CJK's
+            # anchor space is not the same sparse, meaningful signal PT/EN's numbers and proper
+            # nouns are -- that is exactly why removing the floor globally caused CJK to collapse
+            # nearly its whole candidate pool into one group.
+            relevance = 1.0
+        else:
+            # `.lexical` merges an entire contiguous CJK run into one token (no whitespace to
+            # split on), so plain Jaccard against the question is almost always zero for CJK text
+            # even when the claim is genuinely on-topic -- the anchor-overlap bonus is what
+            # actually gates relevance there, mirroring `lab/supersession_collapse.py`'s
+            # identical `_relevance` fix.
+            relevance = _jaccard(lexical, question_lexical)
+            if anchors & question_anchors:
+                relevance += 0.35
         if relevance <= relevance_floor:
             continue
         candidates.append((item, anchors, channels))
