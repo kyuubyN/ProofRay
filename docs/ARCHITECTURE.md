@@ -40,6 +40,14 @@ The central publication rule is that an applied acknowledgment must correspond
 to durable published state. Recovery observes published authority and does not
 silently invent repairs.
 
+`HorizonMemory` keeps a small, bounded LRU cache of already-opened generation
+handles, keyed by the immutable manifest digest that identifies a generation.
+A write always produces a new digest rather than mutating an old one, so the
+cache needs no invalidation logic for correctness — it only removes redundant
+WAL re-verification on repeated reads against a generation that has not
+changed, a real (measured, ~2.7x) latency improvement on the routing path
+with no behavioral change.
+
 ## Evidence boundary
 
 Evidence is treated as untrusted input until its identity, source digest, span,
@@ -56,16 +64,34 @@ These engines may combine lexical candidates with causal observables, hard
 exclusions and evidence budgets. They must continue to report paired BM25
 baselines and may not convert retrieval hit rate into an answer-accuracy claim.
 
-## The validated reading pipeline (private prototype, not yet packaged)
+The namespace also exposes `collapse_evidence_items`: an opt-in mechanism that
+excludes superseded restatements of a value (a revised date, a reversed
+decision) from an already-verified evidence pool, so a downstream reader
+isn't handed several conflicting values with nothing marking which is
+current. It reuses the stable namespace's `TypedCausalExecutor` unmodified
+for resolution — the same clock-and-orbit logic `typed_causal_program`
+already validated for query answers, repurposed here as a general
+"which-value-is-current" primitive — and only adds detection on top: does a
+claim carry an anchor (a number or proper noun) at all. Measured, not
+assumed, with mixed results across language and noise conditions; see
+`RESEARCH.md` for the honest numbers and why it stays opt-in.
+
+## The validated reading pipeline (partially promoted; full pipeline still a private prototype)
 
 A private research line reached a different, more directly validated
-mechanism for turning stored facts into a reader-ready evidence pack. It
-currently lives entirely in the private research lab, not in
-`horizon_memory.research` or the stable namespace: no file under `src/`
-depends on it, and it depends on the stable substrate rather than the other
-way around. It is documented here because it is the pipeline actually
-supported by controlled experiments; promoting it into a shippable module is
-future work, not yet started.
+mechanism for turning stored facts into a reader-ready evidence pack, described
+in five stages below. Parts of it have since moved into the stable namespace:
+claim-level (sentence-span, not whole-document) candidate generation and
+conformal-calibrated document routing, the mechanisms behind stages 1-2, now
+ship as `ClaimGenerator` and `ConformalClaimGenerator`/`ConformalDocumentGenerator`,
+with the budget-fill merge options (`global_sort_alpha`, `source_priority`,
+`dedup_threshold`) on `EvidencePack.budgeted_items()`. Stages 3-5 — this exact
+packet shape, the plain-rendering step and the reading contract — remain in
+the private research lab only: no file under `src/` depends on them, and they
+depend on the stable substrate rather than the other way around. It is
+documented here in full because it is the pipeline actually supported by
+controlled experiments; promoting the remaining stages into a shippable
+module is future work, not yet started.
 
 The pipeline has five stages:
 
