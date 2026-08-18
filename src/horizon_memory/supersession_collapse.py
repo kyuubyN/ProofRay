@@ -62,6 +62,20 @@ fixing the research twin changed the honest picture reported here:
   doubled false-positive rate is an honest characterization of the mechanism, not a live
   production risk -- it only matters to a caller applying this outside the single-fact-revision
   shape it is scoped to.
+- **Typed-anchor majority-vote filter (2026-08-18, plan item 2a)**: a group's competing values
+  are now required to share a majority anchor TYPE (date/money/percent/cardinal/entity, see
+  `_anchor_type`) before resolution proceeds -- a group mixing a date revision with an unrelated
+  money mention is no longer treated as one value-revision. Filters to the majority type rather
+  than requiring universal agreement, since a single noise claim (a greeting/exclamation carrying
+  an incidental "entity" anchor, admitted by anchor-primary relevance purely because it has SOME
+  anchor) must not poison an otherwise type-consistent group of real competing claims -- an
+  all-or-nothing version was tried first and measured decisively worse (severe over-abstention)
+  before the majority-vote fix. Net effect, same 1,290-pair generality check: false-positive rate
+  **14.03% -> 11.16%** -- recovers roughly half the ground given up by the anchor-primary
+  relevance change above, without giving up that change's own fix. On the per-language decision
+  bars adopted the same day (ZH 15pp/5pp, PT/EN 12pp/5pp distractor-containment reduction /
+  lax-containment loss): PT clean, EN light_noise, and EN heavy_noise now clear their bar -- the
+  first non-CJK combinations in this module's history to do so.
 
 Hard rule: this module never accepts a `distractors`/`gold_answer`-shaped parameter. A caller
 measuring against known-correct answers must do so outside this module's call boundary.
@@ -178,6 +192,32 @@ def _cjk_content_words(text: str) -> frozenset[str]:
     return frozenset(w for w in _segment_zh(text) if len(w) >= 2 and _CJK_CHAR.match(w[0]))
 
 
+_CURRENCY_MARK = re.compile(r"[$€£¥]|R\$")
+_CURRENCY_WORD = re.compile(r"\b(reais?|dollars?|euros?|bucks?|USD|EUR|BRL)\b", re.IGNORECASE)
+_PERCENT_MARK = re.compile(r"%")
+_PERCENT_WORD = re.compile(r"\b(percent|porcento|por\s+cento)\b", re.IGNORECASE)
+
+
+def _anchor_type(anchor: str, surface: str, temporal: frozenset[str]) -> str:
+    """Coarse type classification (2026-08-18, ported from lab/supersession_collapse.py):
+    reuses `observe_raw_text`'s existing numbers/temporal/entities split as the base signal
+    rather than building a new extractor -- only adds light regex to separate MONEY/PERCENT
+    within `.numbers`. See `collapse_evidence_items`'s own type-filter comment for how this is
+    used (majority-vote filter, not universal agreement -- a single noise claim must not
+    poison a whole group)."""
+    if anchor in temporal:
+        return "date"
+    if any(char.isdigit() for char in anchor):
+        index = surface.find(anchor)
+        window = surface[max(0, index - 20):index + len(anchor) + 20] if index >= 0 else ""
+        if _CURRENCY_MARK.search(window) or _CURRENCY_WORD.search(window):
+            return "money"
+        if _PERCENT_MARK.search(window) or _PERCENT_WORD.search(window):
+            return "percent"
+        return "cardinal"
+    return "entity"
+
+
 @dataclass(frozen=True)
 class SupersessionReport:
     groups_detected: int
@@ -266,6 +306,29 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
     if len(value_bearing) < 2:
         return items, SupersessionReport(groups_detected, 0, {"insufficient_members": 1},
                                          frozenset())
+
+    # Typed-anchor filter (2026-08-18, ported from lab/supersession_collapse.py): a group whose
+    # members' distinguishing values span genuinely different kinds of facts (a date competing
+    # with a money amount) is not a real value-revision. Filters to the MAJORITY type rather than
+    # requiring universal agreement -- a single noise claim (a greeting/exclamation carrying an
+    # incidental "entity" anchor, admitted by anchor-primary relevance since it has SOME anchor)
+    # must not poison a whole group of otherwise type-consistent real competing claims. Measured
+    # (lab/ pilot + FP check, mirrored here): false-positive rate 14.03% -> 11.16%.
+    item_types: dict[tuple[int, tuple[int, int] | None], frozenset[str]] = {}
+    for item, value, channels in value_bearing:
+        temporal = frozenset(channels.temporal)
+        key = (item.fact_id, item.content_span)
+        item_types[key] = frozenset(_anchor_type(anchor, item.content, temporal)
+                                    for anchor in value)
+    type_votes: Counter = Counter()
+    for types in item_types.values():
+        type_votes.update(types)
+    majority_type = type_votes.most_common(1)[0][0] if type_votes else None
+    if majority_type is not None:
+        value_bearing = [(item, value, channels) for item, value, channels in value_bearing
+                         if majority_type in item_types[(item.fact_id, item.content_span)]]
+    if len(value_bearing) < 2:
+        return items, SupersessionReport(groups_detected, 0, {"type_mismatch": 1}, frozenset())
 
     facts = []
     item_by_fact_id: dict[int, EvidenceItem] = {}
