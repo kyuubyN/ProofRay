@@ -10,7 +10,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
+
+
+_TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def _content_tokens(text: str | None) -> frozenset[str]:
+    if not text:
+        return frozenset()
+    return frozenset(_TOKEN.findall(text.casefold()))
+
+
+def _jaccard(a: str, b: str) -> float:
+    ta, tb = _content_tokens(a), _content_tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
 
 
 @dataclass(frozen=True)
@@ -28,6 +45,9 @@ class EvidenceItem:
     content_span: tuple[int, int] | None = None  # offsets exatos no conteúdo pai
     parent_sha256: str | None = None
     event_label: str | None = None
+    relevance_score: float | None = None  # FH-06.1: score bruto do Candidate que gerou este item;
+    # usado só como sinal de ordenação em budgeted_items(global_sort_alpha=...), nunca como
+    # autoridade -- não entra no integrity_digest (não é conteúdo, é um sinal de roteamento).
 
     def __post_init__(self) -> None:
         if self.fact_id < 0 or not self.source:
@@ -53,8 +73,9 @@ class EvidenceItem:
 
 
 def _item_order(item: EvidenceItem) -> tuple:
-    return ((0, item.sequence, item.fact_id) if item.sequence is not None else
-            (1, item.fact_id, item.fact_id))
+    span_key = item.content_span if item.content_span is not None else (-1, -1)
+    return ((0, item.sequence, item.fact_id, span_key) if item.sequence is not None else
+            (1, item.fact_id, item.fact_id, span_key))
 
 
 @dataclass(frozen=True)
@@ -86,7 +107,8 @@ class EvidencePack:
             raise ValueError("sources do not match items")
         if tuple(item.version for item in self.items) != self.versions:
             raise ValueError("versions do not match items")
-        if len(set(self.fact_ids)) != n or tuple(sorted(self.items, key=_item_order)) != self.items:
+        identities = {(item.fact_id, item.content_span) for item in self.items}
+        if len(identities) != n or tuple(sorted(self.items, key=_item_order)) != self.items:
             raise ValueError("evidence must be unique and canonically ordered")
         if self.verifier_state not in ("verified", "rejected", "unverified", "mixed"):
             raise ValueError("invalid verifier_state")
@@ -110,7 +132,10 @@ class EvidencePack:
             "content_span": item.content_span, "parent_sha256": item.parent_sha256,
             "event_label": item.event_label,
         } for item in ordered]
-        citations = tuple(f"{item.source}#fact-{item.fact_id}" for item in ordered)
+        citations = tuple(
+            f"{item.source}#fact-{item.fact_id}:{item.content_span[0]}-{item.content_span[1]}"
+            if item.content_span is not None else f"{item.source}#fact-{item.fact_id}"
+            for item in ordered)
         labels = tuple((citation_labels or {}).get(item.fact_id, citation)
                        for item, citation in zip(ordered, citations))
         if any(not label or "\n" in label or "]" in label for label in labels):
@@ -128,36 +153,90 @@ class EvidencePack:
             citations, digest, query_plan, labels,
         )
 
-    def budgeted_items(self, max_chars: int = 32_000) -> tuple:
-        """Select whole turns by retrieval rank, then return them in causal pack order."""
+    def budgeted_items(self, max_chars: int = 32_000, *, global_sort_alpha: float | None = None,
+                       source_priority: dict[str, float] | None = None,
+                       dedup_threshold: float | None = None) -> tuple:
+        """Select whole turns/claims under a byte-like character budget, then return them in
+        causal pack order.
+
+        `global_sort_alpha` (D137 Variant 3 port, 2026-08-17): the default merge is rank-major --
+        every item is offered budget in `(retrieval_rank, canonical order)` tiers, so with many
+        distinct sources included a strongly-relevant source's 2nd/3rd claim still queues behind
+        every other source's own single best claim (the flooding pattern D137 diagnosed). When
+        set (float in [0,1]), replaces rank-major entirely with one global sort key per item:
+        `alpha * source_priority.get(item.source, 0.0) + (1-alpha) * (item.relevance_score or
+        0.0)` -- blending a document-level routing confidence (e.g. a conformal p-value, passed
+        via `source_priority`) with the item's own channel relevance score (`Candidate.score`,
+        carried onto `EvidenceItem.relevance_score` by `HorizonVerifier`). Defaults to None,
+        which preserves the original retrieval_rank-tier order and every digest/selection
+        computed before this parameter existed.
+
+        `dedup_threshold` (D135 port, corrected): rejects a candidate item whose content is more
+        than `dedup_threshold` Jaccard-similar (token overlap) to an already-selected item's
+        content -- moderate near-duplicate rejection (>0.6) was D135's validated production
+        default; no per-query calibration is required (D135's own correction: a fixed threshold
+        matched a fully-calibrated strategist's output on 190/200 held-out episodes). Defaults to
+        None (no dedup), preserving prior behavior.
+        """
         if max_chars <= 0:
             raise ValueError("max_chars must be positive")
+        if global_sort_alpha is not None and not (0.0 <= global_sort_alpha <= 1.0):
+            raise ValueError("global_sort_alpha must be in [0,1]")
+        if dedup_threshold is not None and not (0.0 <= dedup_threshold <= 1.0):
+            raise ValueError("dedup_threshold must be in [0,1]")
         used = 0
         chosen = set()
-        ranked = sorted(zip(self.items, self.citation_labels), key=lambda pair: (
-            pair[0].retrieval_rank is None,
-            pair[0].retrieval_rank if pair[0].retrieval_rank is not None else 2 ** 63 - 1,
-            _item_order(pair[0]),
-        ))
+        selected_contents: list[str] = []
+        pairs = list(zip(self.items, self.citation_labels))
+        if global_sort_alpha is not None:
+            def _sort_key(pair):
+                item, _citation = pair
+                doc_score = (source_priority.get(item.source, 0.0)
+                            if source_priority is not None else 0.0)
+                claim_score = item.relevance_score if item.relevance_score is not None else 0.0
+                combined = global_sort_alpha * doc_score + (1 - global_sort_alpha) * claim_score
+                return (-combined, _item_order(item))
+            ranked = sorted(pairs, key=_sort_key)
+        else:
+            ranked = sorted(pairs, key=lambda pair: (
+                pair[0].retrieval_rank is None,
+                pair[0].retrieval_rank if pair[0].retrieval_rank is not None else 2 ** 63 - 1,
+                _item_order(pair[0]),
+            ))
         for item, citation in ranked:
             content = item.content if item.content is not None else str(item.value)
             content = content.replace("</HORIZON_EVIDENCE>", "&lt;/HORIZON_EVIDENCE&gt;")
             metadata = f" date={item.event_label}" if item.event_label else ""
             block = f"[{citation}{metadata}]\n{content}"
             separator = 2 if chosen else 0
-            if used + separator + len(block) <= max_chars:
-                chosen.add(item.fact_id)
-                used += separator + len(block)
-        return tuple(item for item in self.items if item.fact_id in chosen)
+            if used + separator + len(block) > max_chars:
+                continue
+            if dedup_threshold is not None and any(
+                    _jaccard(content, existing) > dedup_threshold
+                    for existing in selected_contents):
+                continue
+            chosen.add((item.fact_id, item.content_span))
+            selected_contents.append(content)
+            used += separator + len(block)
+        return tuple(item for item in self.items if (item.fact_id, item.content_span) in chosen)
 
-    def render_untrusted(self, max_chars: int = 32_000) -> str:
-        """Renderiza dados como citação não confiável, nunca como instrução de sistema."""
-        selected = self.budgeted_items(max_chars)
+    def render_untrusted(self, max_chars: int = 32_000, *, global_sort_alpha: float | None = None,
+                         source_priority: dict[str, float] | None = None,
+                         dedup_threshold: float | None = None) -> str:
+        """Renderiza dados como citação não confiável, nunca como instrução de sistema.
+
+        `global_sort_alpha`/`source_priority`/`dedup_threshold` (2026-08-17): forwarded verbatim
+        to `budgeted_items()` -- this method previously always used the default rank-major merge
+        regardless of what selection a caller wanted, silently discarding any D137/D135 merge
+        preference before rendering. All default `None`, preserving prior output exactly."""
+        selected = self.budgeted_items(max_chars, global_sort_alpha=global_sort_alpha,
+                                       source_priority=source_priority,
+                                       dedup_threshold=dedup_threshold)
         blocks = []
-        citations = {item.fact_id: citation
+        citations = {(item.fact_id, item.content_span): citation
                      for item, citation in zip(self.items, self.citation_labels)}
         for item in selected:
-            citation = citations[item.fact_id]
+            citation = citations[(item.fact_id, item.content_span)]
             content = item.content if item.content is not None else str(item.value)
             # Neutraliza o único marcador estrutural usado pelo template.
             content = content.replace("</HORIZON_EVIDENCE>", "&lt;/HORIZON_EVIDENCE&gt;")

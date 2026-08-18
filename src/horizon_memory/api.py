@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+from collections import OrderedDict
 from pathlib import Path
 
 from horizon_memory._engine.horizon_store import OP_DELETE, OP_PUT
@@ -49,6 +50,15 @@ _READ_MAP = {
     "abstain": ReadState.ABSTAIN,
 }
 
+# `_read()`'s own generation-handle cache: `manifest_blob` is immutable and content-identifies
+# exactly one already-validated `GenerationHandle` (itself a frozen dataclass, sealed, read-only
+# -- see `_engine/horizon_manifest.py`'s own docstring). A write always produces a *new*
+# manifest_blob in the cursor rather than mutating an old one, so this cache needs no explicit
+# invalidation for correctness; the bound below only caps memory in a long-lived process across
+# many writes, not correctness. Sized generously above one routing pass's own locality (many
+# `get()` calls against a single unchanged generation between writes) without growing unbounded.
+_GENERATION_CACHE_SIZE = 8
+
 
 class HorizonMemory:
     """Subsistema standalone de memória. Use `create`/`open` para instanciar; `close` para encerrar."""
@@ -65,6 +75,8 @@ class HorizonMemory:
         # contadores lógicos p/ ledger (fatos escritos por esta instância)
         self._seen_facts: dict[int, str] = {}  # fact_id -> "live"|"deleted"
         self._opid_counter = 0
+        # cache de GenerationHandle por manifest_blob (ver nota acima de _GENERATION_CACHE_SIZE)
+        self._generation_cache: OrderedDict[bytes, object] = OrderedDict()
 
     # ---------------------------------------------------------------- ciclo de vida
     @classmethod
@@ -168,9 +180,17 @@ class HorizonMemory:
             gen_id, rseq = cursor.manifest.generation_id, cursor.read_seq
         else:
             gen_id, rseq = None, None
-        gstate, handle = _bs.read_generation(self._cfg, self._ws, manifest_blob)
-        if handle is None:
-            return ReadResult(ReadState.ABSTAIN, None, "none", reason=f"open_generation:{gstate.name}")
+        handle = self._generation_cache.get(manifest_blob)
+        if handle is not None:
+            self._generation_cache.move_to_end(manifest_blob)
+        else:
+            gstate, handle = _bs.read_generation(self._cfg, self._ws, manifest_blob)
+            if handle is None:
+                return ReadResult(ReadState.ABSTAIN, None, "none",
+                                  reason=f"open_generation:{gstate.name}")
+            self._generation_cache[manifest_blob] = handle
+            if len(self._generation_cache) > _GENERATION_CACHE_SIZE:
+                self._generation_cache.popitem(last=False)
         rr = handle.read_fact(fact_id)
         state = _READ_MAP.get(rr.status, ReadState.ABSTAIN)
         l0_entry = handle.l0.get(fact_id)

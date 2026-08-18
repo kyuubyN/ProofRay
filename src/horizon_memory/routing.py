@@ -79,6 +79,22 @@ class Candidate:
     channel: str
     rank: int
     namespace: str
+    claim_span: tuple[int, int] | None = None
+    """FH-06.1: an optional exact (start, end) span within the parent RouteDocument's own text.
+    None (default) means the candidate refers to the whole document, preserving every prior
+    generator's behavior unchanged. When set, HorizonVerifier still authorizes via the PARENT
+    fact_id's own presence/version/generation in the Horizon store (a claim is never itself a
+    separately-stored fact) but returns only the exact substring as evidence content -- the same
+    discipline lab/deterministic_claim_composer.py's AuthorizedClaim already uses in the research
+    line, ported here as the claim generator's own field on the routing type it already existed
+    next to (EvidenceItem.content_span/parent_sha256 predate this and were never populated by any
+    generator until now)."""
+
+    def __post_init__(self):
+        if self.claim_span is not None and (
+                len(self.claim_span) != 2 or self.claim_span[0] < 0 or
+                self.claim_span[1] <= self.claim_span[0]):
+            raise ValueError("invalid claim_span")
 
 
 @dataclass(frozen=True)
@@ -86,9 +102,9 @@ class CandidateList:
     candidates: tuple[Candidate, ...]
 
     def __post_init__(self):
-        ids = [candidate.fact_id for candidate in self.candidates]
-        if len(ids) != len(set(ids)):
-            raise ValueError("CandidateList must be deduplicated by FactId")
+        identities = [(candidate.fact_id, candidate.claim_span) for candidate in self.candidates]
+        if len(identities) != len(set(identities)):
+            raise ValueError("CandidateList must be deduplicated by (FactId, claim_span)")
 
 
 class RouteState(Enum):
@@ -396,11 +412,24 @@ class HorizonVerifier:
             return None
         if document.generation_id is not None and read.generation_id != document.generation_id:
             return None
+        if candidate.claim_span is not None:
+            start, end = candidate.claim_span
+            if end > len(document.text):
+                return None
+            surface = document.text[start:end]
+            content = f"{document.role}: {surface}" if document.role else surface
+            return EvidenceItem(candidate.fact_id, document.source, read.version, read.value,
+                                content=content, span=document.span, verifier_state="verified",
+                                sequence=document.sequence, retrieval_rank=candidate.rank,
+                                event_time=document.event_time,
+                                content_span=candidate.claim_span,
+                                parent_sha256=hashlib.sha256(document.text.encode()).hexdigest(),
+                                relevance_score=candidate.score)
         content = f"{document.role}: {document.text}" if document.role else document.text
         return EvidenceItem(candidate.fact_id, document.source, read.version, read.value,
                             content=content, span=document.span, verifier_state="verified",
                             sequence=document.sequence, retrieval_rank=candidate.rank,
-                            event_time=document.event_time)
+                            event_time=document.event_time, relevance_score=candidate.score)
 
 
 class SemanticRouter:
@@ -410,8 +439,15 @@ class SemanticRouter:
         self.verifier = verifier
 
     def route(self, query: QueryEnvelope, limit: int, allow_scope_fallback: bool = True) -> RoutedResult:
-        if limit not in (1, 2, 4, 8, 16, 32):
-            raise ValueError("limit must be one of 1,2,4,8,16,32")
+        """`limit` (relaxed 2026-08-17, FH-06.2): originally restricted to the V25 experiment's
+        own `{1,2,4,8,16,32}` enum -- a historical convention, not a mechanism dependency (`limit`
+        is only ever used here as a candidate-list slice bound, never in power-of-2 arithmetic).
+        A claim-level generator (`ClaimGenerator`/`ConformalClaimGenerator`, FH-06.1/FH-06.2)
+        filling a large byte budget (`EvidencePack.budgeted_items(max_chars=...)`) with many short
+        sentence-level candidates needs a claim COUNT well above 32 to avoid the candidate cap
+        binding before the byte budget does -- any positive integer is accepted now."""
+        if not isinstance(limit, int) or limit < 1:
+            raise ValueError("limit must be a positive integer")
         if query.scope_id != self.verifier.memory.scope_id:
             trace = RouteTrace(query.query_id, self.generator.channel, limit, 0, 0, 0, False,
                                "scope_mismatch")
@@ -425,13 +461,18 @@ class SemanticRouter:
             # Combina sempre os dois rankings. Condicionar o fallback a uma lista local incompleta
             # bloquearia transferencia quando uma sessao densa preenchesse L com candidatos errados.
             # O score vem do mesmo gerador nos dois namespaces; empate favorece a sessao corrente.
-            merged: dict[int, Candidate] = {candidate.fact_id: candidate for candidate in candidates}
+            # Chave por (fact_id, claim_span): um documento pode contribuir varios candidatos de
+            # alegacao distintos (FH-06.1), cada um deduplicado/fundido independentemente.
+            merged: dict[tuple[int, tuple | None], Candidate] = {
+                (candidate.fact_id, candidate.claim_span): candidate for candidate in candidates}
             for candidate in fallback.candidates:
-                previous = merged.get(candidate.fact_id)
+                key = (candidate.fact_id, candidate.claim_span)
+                previous = merged.get(key)
                 if previous is None or candidate.score > previous.score:
-                    merged[candidate.fact_id] = candidate
+                    merged[key] = candidate
             candidates = sorted(merged.values(), key=lambda candidate: (
-                -candidate.score, candidate.namespace != "scope_session", candidate.fact_id))[:limit]
+                -candidate.score, candidate.namespace != "scope_session", candidate.fact_id,
+                candidate.claim_span or (-1, -1)))[:limit]
             fallback_used = any(candidate.namespace == "scope_fallback" for candidate in candidates)
 
         items = []

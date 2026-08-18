@@ -17,6 +17,12 @@ from .routing import (
     BM25Generator, QueryEnvelope, RouteDocument, RoutedResult, RouteState, RouteTrace, RoutingIndex,
     SemanticRouter, TemporalCausalWeaveGenerator,
 )
+from .claim_routing import ClaimGenerator, DEFAULT_WEIGHTS as CLAIM_GENERATOR_DEFAULT_WEIGHTS, claim_spans
+from .conformal_routing import (
+    ConformalCalibrator, ConformalClaimGenerator, ConformalDocumentGenerator,
+    LEXICAL_SUBLEXICAL_WEIGHTS, collect_calibration_scores as collect_conformal_calibration_scores,
+    document_priority_by_source, score_documents as conformal_score_documents,
+)
 from .evidence import EvidenceItem, EvidencePack
 from .codec import (CompressionReport, ExactExecution, ProofCarryingCodec, compile_query_equation,
                     execute_exact, semantic_charges)
@@ -42,6 +48,10 @@ from .hssd_query_compiler import StructuralHSSDQueryCompiler
 from .standalone_hssd_engine import StandaloneHSSDEngine, StandaloneHSSDResult
 from .sufficient_statistic_search import SufficientStatisticPack
 from .typed_hssd_adapter import TypedCausalHSSDEvidenceAdapter
+from .supersession_collapse import (
+    DEFAULT_RELEVANCE_FLOOR as SUPERSESSION_DEFAULT_RELEVANCE_FLOOR,
+    SupersessionReport, collapse_evidence_items,
+)
 from .types import (
     AuditReport, CompactResult, CompactState, ExportResult, ExportedFact, Provenance,
     QueryResult, QueryState, ReadResult, ReadState, ReadViewHandle, RecoverResult, RecoverState,
@@ -57,7 +67,10 @@ __all__ = [
     "PartitionIndex",
     "QueryEnvelope", "RouteDocument", "Candidate", "CandidateList", "RoutingIndex", "BM25Generator",
     "LexicalGenerator", "DenseGenerator", "HybridGenerator", "CausalWeaveGenerator",
-    "TemporalCausalWeaveGenerator",
+    "TemporalCausalWeaveGenerator", "ClaimGenerator", "CLAIM_GENERATOR_DEFAULT_WEIGHTS", "claim_spans",
+    "ConformalCalibrator", "ConformalClaimGenerator", "ConformalDocumentGenerator",
+    "LEXICAL_SUBLEXICAL_WEIGHTS", "collect_conformal_calibration_scores",
+    "document_priority_by_source", "conformal_score_documents",
     "HorizonVerifier", "SemanticRouter",
     "RoutedResult", "RouteState", "RouteTrace",
     "EvidenceItem", "EvidencePack", "EvaluationArm", "TrialSignals", "TrialRecord",
@@ -75,6 +88,7 @@ __all__ = [
     "AuthorizedFiberRoute", "AuthorizedFiberSearchEngine",
     "StandaloneHSSDEngine", "StandaloneHSSDResult",
     "classify_trial", "assert_paired_query_ids",
+    "collapse_evidence_items", "SupersessionReport", "SUPERSESSION_DEFAULT_RELEVANCE_FLOOR",
 ]
 
 __version__ = "0.1.0a1"
