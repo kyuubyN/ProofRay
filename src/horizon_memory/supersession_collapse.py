@@ -39,8 +39,17 @@ fixing the research twin changed the honest picture reported here:
   (a character-bigram anchor fallback that saturated on combinatorial noise -- see the note above
   `_segment_zh`). With word-segmentation anchors: clean-text Chinese at 1024B moved to
   distractor -8.3pp / lax +0.0pp (was -12.5pp / -1.4pp with bigram anchors) -- less aggressive
-  but essentially loss-free. CJK's relevance path is untouched by the 2026-08-18 fix below (its
-  anchor space needs the jaccard+overlap gate; see that module-docstring note).
+  but essentially loss-free. **CJK's relevance path itself was later improved too (2026-08-18,
+  same day as the anchor-primary fix below)**: the plain Jaccard fallback (structurally near-zero
+  for CJK, since `.lexical` merges a whole contiguous CJK run into one token) was replaced with a
+  self-built, BM25-style IDF computed directly over the segmented-word candidate pool -- ported
+  from `lab/supersession_collapse.py`'s validated `_cjk_bm25_scores` (see `collapse_evidence_items`'s
+  own IDF-pool comment for why a literal reuse of `MaterializedRawCausalSyndromeIndex`/
+  `HorizonSearchEngine` doesn't work for CJK: their shared `.lexical` channel hardcodes a
+  3-character minimum, built for Latin scripts, which silently drops nearly every real
+  2-character Chinese word). Measured: false-positive rate on the 1,290-pair generality check
+  fell 14.03% -> 13.72%, a real improvement over the word-segmentation-only Jaccard fallback, at
+  the same primary-metric level (ZH clean distractor -8.3pp unchanged).
 - **Anchor-primary relevance for non-CJK text (2026-08-18)**: the diagnosed root cause of PT's
   own `light_noise` gap (below) was fixed by making a claim's own anchor (once confirmed
   non-empty, which every claim reaching this check already is) sufficient for relevance on its
@@ -59,7 +68,9 @@ measuring against known-correct answers must do so outside this module's call bo
 """
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from .evidence import EvidenceItem
@@ -163,11 +174,8 @@ def _text_anchors(text: str) -> frozenset[str]:
     return frozenset(channels.entities) | frozenset(channels.numbers)
 
 
-def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
-    union = left | right
-    if not union:
-        return 0.0
-    return len(left & right) / len(union)
+def _cjk_content_words(text: str) -> frozenset[str]:
+    return frozenset(w for w in _segment_zh(text) if len(w) >= 2 and _CJK_CHAR.match(w[0]))
 
 
 @dataclass(frozen=True)
@@ -187,18 +195,40 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
     (`EvidenceItem.parent_sha256`/`.content_span` populated, as `HorizonVerifier.verify()`
     already produces) -- items missing either are left untouched, never considered for exclusion.
     """
-    question_lexical = frozenset(observe_raw_text(question).lexical)
     question_anchors = _text_anchors(question)
+    question_cjk_words = _cjk_content_words(question) if _is_cjk(question) else frozenset()
+
+    # Self-built BM25-style IDF pool for the CJK fallback (2026-08-18 port from
+    # lab/supersession_collapse.py's `_cjk_bm25_scores`, validated: false-positive rate on the
+    # 1,290-pair generality check fell 14.03% -> 13.72%, a real improvement over the prior
+    # word-segmentation-only Jaccard fallback). Not a literal reuse of
+    # `MaterializedRawCausalSyndromeIndex`/`HorizonSearchEngine` (tried first, in `lab/`): both
+    # build on `observe_raw_text`'s `.lexical` channel, which hardcodes `len(token) >= 3` --
+    # built for Latin scripts, but Chinese words are overwhelmingly 2 characters ("我们", "计划",
+    # "会议"...), so every real segmented CJK word scored 0.0 lexical/sublexical under either
+    # shared engine. Computed once over every CJK item's own content instead, never touching
+    # `observe_raw_text`'s filtered channels or a static dictionary for this part.
+    cjk_word_sets: dict[int, frozenset[str]] = {}
+    df: Counter = Counter()
+    for index, item in enumerate(items):
+        if item.content and _is_cjk(item.content):
+            words = _cjk_content_words(item.content)
+            cjk_word_sets[index] = words
+            df.update(words)
+    cjk_pool_size = len(cjk_word_sets)
+
+    def idf(word: str) -> float:
+        return math.log(1.0 + (cjk_pool_size - df[word] + .5) / (df[word] + .5))
+
     candidates: list[tuple[EvidenceItem, frozenset[str], object]] = []
-    for item in items:
+    for index, item in enumerate(items):
         if not item.content or item.parent_sha256 is None or item.content_span is None:
             continue
         channels = observe_raw_text(item.content)
         anchors = _text_anchors(item.content)
         if not anchors:
             continue
-        lexical = frozenset(channels.lexical)
-        if anchors and not _is_cjk(item.content):
+        if not _is_cjk(item.content):
             # A real anchor (number/proper noun) is itself sufficient relevance for non-CJK text
             # -- falling through to lexical Jaccard against the question is what broke on real PT
             # noise (2026-08-18): `observe_raw_text`'s stopword list is English-only, so a
@@ -211,14 +241,13 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
             # nearly its whole candidate pool into one group.
             relevance = 1.0
         else:
-            # `.lexical` merges an entire contiguous CJK run into one token (no whitespace to
-            # split on), so plain Jaccard against the question is almost always zero for CJK text
-            # even when the claim is genuinely on-topic -- the anchor-overlap bonus is what
-            # actually gates relevance there, mirroring `lab/supersession_collapse.py`'s
-            # identical `_relevance` fix.
-            relevance = _jaccard(lexical, question_lexical)
-            if anchors & question_anchors:
-                relevance += 0.35
+            # IDF-weighted overlap with the question's own segmented words, computed over the
+            # local CJK candidate pool -- replaces the old Jaccard-on-merged-CJK-token fallback
+            # (structurally near-zero for CJK, since `.lexical` merges a whole contiguous CJK run
+            # into one token) with a real, validated signal (2026-08-18 port, see the IDF pool
+            # comment above).
+            relevance = sum(idf(word) for word in cjk_word_sets.get(index, frozenset())
+                           & question_cjk_words)
         if relevance <= relevance_floor:
             continue
         candidates.append((item, anchors, channels))
