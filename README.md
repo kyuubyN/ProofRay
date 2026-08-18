@@ -15,6 +15,13 @@ Created and founded by **Kaue Oliveira Costa (kyuubyN)**, Brazil<br>
 [ORCID 0009-0009-8502-3220](https://orcid.org/0009-0009-8502-3220) ·
 [kaue.o.costa@proton.me](mailto:kaue.o.costa@proton.me)
 
+Co-author: **Yuri Yassumura Pecelin**<br>
+[ORCID 0009-0007-9766-9809](https://orcid.org/0009-0007-9766-9809) ·
+[yuripecelin@gmail.com](mailto:yuripecelin@gmail.com)
+
+See [AUTHORS.md](AUTHORS.md) for the full authorship record and
+[CONTRIBUTORS.md](CONTRIBUTORS.md) for the broader contributor roster.
+
 > Status: private alpha. Interfaces and research claims are being audited
 > before the first public release.
 
@@ -79,6 +86,8 @@ datasets, unpublished papers, benchmark answer keys and development logs.
 - [Governance](GOVERNANCE.md)
 - [Security policy](SECURITY.md)
 - [Responsible use](RESPONSIBLE_USE.md)
+- [Authors](AUTHORS.md)
+- [Contributors](CONTRIBUTORS.md)
 
 ## Freedom and attribution
 

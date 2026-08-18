@@ -10,6 +10,10 @@ authors:
     alias: "kyuubyN"
     email: "kaue.o.costa@proton.me"
     orcid: "https://orcid.org/0009-0009-8502-3220"
+  - given-names: "Yuri Yassumura"
+    family-names: "Pecelin"
+    email: "yuripecelin@gmail.com"
+    orcid: "https://orcid.org/0009-0007-9766-9809"
 repository-code: "https://github.com/kyuubyN/HorizonMemory"
 license: "AGPL-3.0-or-later"
 abstract: >-
