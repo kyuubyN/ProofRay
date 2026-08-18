@@ -26,6 +26,8 @@ The `horizon_memory` namespace provides:
 - typed causal facts and programs;
 - bounded evidence packs;
 - HSSD compilation, selection and proof verification;
+- exact-span claim sealing, provenance-carrying proof dossiers and lossless
+  rendering (`claim_composer`, `proof_dossier`, `lossless_proof_answer`);
 - explicit result and abstention states;
 - audit and storage ledgers.
 
@@ -85,13 +87,17 @@ claim-level (sentence-span, not whole-document) candidate generation and
 conformal-calibrated document routing, the mechanisms behind stages 1-2, now
 ship as `ClaimGenerator` and `ConformalClaimGenerator`/`ConformalDocumentGenerator`,
 with the budget-fill merge options (`global_sort_alpha`, `source_priority`,
-`dedup_threshold`) on `EvidencePack.budgeted_items()`. Stages 3-5 — this exact
-packet shape, the plain-rendering step and the reading contract — remain in
-the private research lab only: no file under `src/` depends on them, and they
-depend on the stable substrate rather than the other way around. It is
-documented here in full because it is the pipeline actually supported by
-controlled experiments; promoting the remaining stages into a shippable
-module is future work, not yet started.
+`dedup_threshold`) on `EvidencePack.budgeted_items()`. Stages 3-4 — exact-span
+claim sealing/verification and provenance-carrying packet assembly, and the
+plain, lossless rendering step — now ship too, as `claim_composer`
+(`ClaimSource`, `AuthorizedClaim`, `extract_authorized_claims`),
+`proof_dossier` (`build_proof_dossier`, including the budget-fill merge
+options above plus `submodular_budget_fill`, `anchor_bonus` and
+`specificity_bonus`) and `lossless_proof_answer`
+(`render_lossless_proof_answer`). Stage 5 — the reading contract itself — is
+a downstream-consumer instruction, not a storage mechanism, and stays out of
+the core by design; see `horizon_memory.adapters` for where a caller wires an
+actual reader.
 
 The pipeline has five stages:
 
