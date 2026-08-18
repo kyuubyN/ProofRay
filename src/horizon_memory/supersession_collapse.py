@@ -76,6 +76,26 @@ fixing the research twin changed the honest picture reported here:
   bars adopted the same day (ZH 15pp/5pp, PT/EN 12pp/5pp distractor-containment reduction /
   lax-containment loss): PT clean, EN light_noise, and EN heavy_noise now clear their bar -- the
   first non-CJK combinations in this module's history to do so.
+- **ZH anchor stopwords (2026-08-18)**: prompted by a direct question -- do the KBs/dictionaries
+  this project uses for other metrics also silently fail for Chinese? One concrete instance
+  confirmed immediately: `lang/china/stop_words.txt` (sourced alongside the Jieba big
+  dictionary) turned out to be a plain ENGLISH stopword list, unreferenced anywhere in code, not
+  Chinese at all. A real, separate gap was then found and fixed: `_cjk_anchors` applied zero
+  frequency filtering, so high-frequency internet slang/intensifiers specific to this corpus's
+  casual register ("666", "cap"/"no", "直接", "卧槽", "家人们"...) were treated exactly like a
+  genuine distinguishing value. A classical Chinese stopword list would NOT have caught this --
+  the noise is corpus-specific slang, not grammar -- so `zh_anchor_stopwords.py` derives its list
+  the same way `zh_word_dictionary.py` does: document frequency (>=5%) over the project's own
+  `dataset_chat` ZH corpus (282 scenario/variant pairs), not a hand-curated linguistic list.
+  **Honest result, not oversold**: real and targeted (anchor occurrence count fell 1911 -> 1393,
+  -27%, on the diagnostic sample; aggregate false-positive rate 11.16% -> 10.93%), but it does
+  NOT close the dominant remaining cause -- re-running the same diagnostic post-fix found the
+  same 45 false-positive groups on ordinary ZH data, byte-identical in count, because most
+  groups are actually driven by genuine (non-slang) vocabulary that naturally co-occurs across
+  multiple turns of ONE coherent multi-turn story (e.g. a thesis/graduation narrative sharing
+  "university"/"thesis"/"system"/"finally" across turns) -- a discourse-cohesion problem, not an
+  anchor-vocabulary problem. Points toward the plan's own item 2b (discourse window) as the next
+  lever, not further stopword-list engineering.
 
 Hard rule: this module never accepts a `distractors`/`gold_answer`-shaped parameter. A caller
 measuring against known-correct answers must do so outside this module's call boundary.
@@ -173,12 +193,22 @@ def _segment_zh(text: str) -> list[str]:
 
 
 def _cjk_anchors(text: str) -> frozenset[str]:
+    from .zh_anchor_stopwords import ZH_ANCHOR_STOPWORDS
+
     words = _segment_zh(text)
     anchors = {w for w in words if len(w) >= 2 and _CJK_CHAR.match(w[0])}
     latin_words = {match.group().casefold() for match in _LATIN_WORD.finditer(text)
                   if len(match.group()) >= 2}
     channels = observe_raw_text(text)
-    return frozenset(anchors) | frozenset(latin_words) | frozenset(channels.numbers)
+    raw = frozenset(anchors) | frozenset(latin_words) | frozenset(channels.numbers)
+    # 2026-08-18: corpus-derived slang/discourse-filler stopwords (see
+    # `zh_anchor_stopwords.py` for full derivation) -- confirmed on real ordinary-domain data to
+    # drive spurious group detection the same way an unfiltered "Final" from "Final answer?" did
+    # once for English. Measured: real, targeted (anchor occurrence count -27% on the ZH
+    # diagnostic sample), but does NOT close the dominant remaining false-positive driver (see
+    # this module's own docstring "Measured scope" section) -- kept as a real, non-regressive
+    # improvement, not oversold as a fix for the whole problem.
+    return raw - ZH_ANCHOR_STOPWORDS
 
 
 def _text_anchors(text: str) -> frozenset[str]:
