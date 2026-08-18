@@ -14,6 +14,10 @@ authors:
     family-names: "Pecelin"
     email: "yuripecelin@gmail.com"
     orcid: "https://orcid.org/0009-0007-9766-9809"
+  - given-names: "Matheus"
+    family-names: "Geraldi"
+    email: "Matheus.ge.si@gmail.com"
+    orcid: "https://orcid.org/0009-0009-9059-7827"
 repository-code: "https://github.com/kyuubyN/HorizonMemory"
 license: "AGPL-3.0-or-later"
 abstract: >-
