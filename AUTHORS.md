@@ -17,6 +17,10 @@ contribution (see `GOVERNANCE.md`). It is distinct from co-authorship below.
   - ORCID: <https://orcid.org/0009-0007-9766-9809>
   - Public contact: <yuripecelin@gmail.com>
 
+- **Matheus Geraldi** — co-author.
+  - ORCID: <https://orcid.org/0009-0009-9059-7827>
+  - Public contact: <Matheus.ge.si@gmail.com>
+
 Co-authors are credited here and in `CITATION.cff`, in the order they joined
 the project. See `CONTRIBUTORS.md` for the fuller roster, including
 non-authorship contributions.
