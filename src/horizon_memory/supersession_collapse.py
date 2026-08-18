@@ -126,6 +126,26 @@ fixing the research twin changed the honest picture reported here:
   at all, vs 8.14% with the stricter marker-only gate), ZH clean distractor cut -6.9pp (vs -8.3pp
   with no gate, vs -4.2pp with the marker-only gate) -- strictly better than the marker-only gate
   on both axes that matter, though still short of the pre-registered 15pp/5pp decision bar.
+- **Path B refinement (2026-08-18)**, after the ZH long-horizon corpus grew from 24 to 200
+  scenarios (14 domains, up from 3) -- the earlier N=6 real-revision sample inside the
+  `shared_anchors==0` subset was too small to calibrate a further threshold; re-measured at N=25
+  before trusting anything. Two more given-new-asymmetry signals, tested jointly this time: the
+  corrective (latest-turn) claim's own length (real corrections are terse, median 20 chars vs 29
+  for continuations) and whether the group's distinguishing values are a SINGLE anchor type
+  (96.0% of real revisions vs 63.6% of false positives, a much cleaner split than the earlier
+  N=6/11 read that closed this as inconclusive). Combined gate on Path B specifically (Path A
+  unaffected): false-positive acceptance risk 63.6% -> 27.3%, real-revision recall 96.0% -> 76.0%
+  within that subset -- a real, deliberate trade. Isolated on the SAME N=200 dataset (with vs
+  without this refinement, holding everything else fixed): 1,290-pair generality-check
+  false-positive rate 8.91% -> 8.37%, ZH clean distractor cut barely moves (-1.2pp -> -0.8pp,
+  both already far from the 15pp bar on this larger, more varied corpus). **A separate, unexplained
+  finding surfaced by this comparison, not caused by the refinement**: the whole
+  `domains_lh_zh` distractor-cut metric is now an order of magnitude smaller on the 200-scenario
+  corpus than it was on the original 24-scenario one (-0.8/-1.2pp now vs -6.9pp before, in BOTH
+  the with- and without-refinement configurations) -- likely a real difference in how the larger,
+  more varied dataset constructs its distractor content, not a bug in either state, but not yet
+  investigated. Pilot numbers on this corpus should not be compared directly against the
+  pre-2026-08-18 24-scenario baselines documented above without accounting for this.
 
 Hard rule: this module never accepts a `distractors`/`gold_answer`-shaped parameter. A caller
 measuring against known-correct answers must do so outside this module's call boundary.
@@ -391,6 +411,10 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
         key = (item.fact_id, item.content_span)
         item_types[key] = frozenset(_anchor_type(anchor, item.content, temporal)
                                     for anchor in value)
+    # Captured pre-filter (used by the ZH Path B refinement below): whether every value-bearing
+    # member's own distinguishing anchors are a SINGLE type, before majority-type filtering can
+    # itself force apparent homogeneity by dropping the minority members.
+    pre_filter_homogeneous = len(frozenset().union(*item_types.values())) == 1 if item_types else False
     type_votes: Counter = Counter()
     for types in item_types.values():
         type_votes.update(types)
@@ -414,9 +438,24 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
     if any(_is_cjk(item.content) for item, _value, _channels in value_bearing):
         has_marker = any(_has_zh_correction_marker(item.content)
                          for item, _value, _channels in value_bearing)
-        if not has_marker and shared_anchors:
-            return items, SupersessionReport(groups_detected, 0, {"no_correction_marker": 1},
-                                             frozenset())
+        if not has_marker:
+            if shared_anchors:
+                return items, SupersessionReport(groups_detected, 0, {"no_correction_marker": 1},
+                                                 frozenset())
+            # Path B refinement (2026-08-18, ported from lab/supersession_collapse.py -- see that
+            # module's own comment on this block for the full derivation). Re-tested after the ZH
+            # long-horizon corpus grew from 24 to 200 scenarios (the earlier N=6 real-revision
+            # sample was too small to calibrate any further threshold). Two more given-new-
+            # asymmetry signals, tested jointly: (1) the corrective (latest-turn) claim's own
+            # length -- terse for a real correction, longer for a continuation (median 20 vs 29
+            # chars); (2) whether the group's distinguishing values are a SINGLE anchor type (96.0%
+            # of real revisions vs 63.6% of false positives at N=25/11). Combined: false-positive
+            # acceptance risk 63.6% -> 27.3%, real-revision recall 96.0% -> 76.0%.
+            latest = max(value_bearing, key=lambda row: row[0].fact_id)[0]
+            corrective_len = len(latest.content)
+            if not (pre_filter_homogeneous and corrective_len <= 28):
+                return items, SupersessionReport(groups_detected, 0,
+                                                 {"path_b_low_confidence": 1}, frozenset())
 
     facts = []
     item_by_fact_id: dict[int, EvidenceItem] = {}
