@@ -53,6 +53,28 @@ exactly what makes that ordering possible.
    time. What can be defined, and enforced, is a list of specific,
    recognizable *bad-faith or high-harm* uses — the same shape OpenRAIL uses.
 
+## Explicitly permitted uses (draft)
+
+The Attachment below names what is prohibited; it should not be read as
+leaving everything else in doubt. The following are explicitly permitted,
+stated affirmatively so a good-faith user never has to guess:
+
+1. **Personal and educational use** — learning, teaching, coursework,
+   personal projects, research and academic study.
+2. **Community and civil-society projects** — nonprofits, cooperatives,
+   civic-tech and public-interest initiatives, including by volunteers and
+   small organizations without dedicated legal review.
+3. **Cultural and heritage preservation** — archives, libraries, museums and
+   similar institutions using it to organize, retrieve or preserve
+   provenance-tracked cultural or historical material.
+4. **Accessibility** — adapting or integrating it to make information or
+   services usable by people with disabilities.
+
+These categories do not override Attachment restriction 1–8 below — a
+surveillance use does not become permitted by labeling it "educational."
+They exist so the restrictions are read as narrow and named, not as a
+general license to interrogate every use case.
+
 ## Attachment: Use Restrictions (draft)
 
 You may not use Horizon Memory, or a modified version of it, for any of the
