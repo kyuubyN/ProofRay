@@ -77,6 +77,8 @@ datasets, unpublished papers, benchmark answer keys and development logs.
 - [Research module](RESEARCH.md)
 - [Licensing policy](LICENSE_POLICY.md)
 - [Governance](GOVERNANCE.md)
+- [Security policy](SECURITY.md)
+- [Responsible use](RESPONSIBLE_USE.md)
 
 ## Freedom and attribution
 
@@ -96,7 +98,8 @@ See [LICENSE_POLICY.md](LICENSE_POLICY.md), [TRADEMARKS.md](TRADEMARKS.md),
 
 Horizon Memory is general-purpose infrastructure. Operators are responsible
 for the data they ingest, decisions they automate, legal compliance, security,
-human review and consequences of deployment. See [DISCLAIMER.md](DISCLAIMER.md).
+human review and consequences of deployment. See [DISCLAIMER.md](DISCLAIMER.md),
+[SECURITY.md](SECURITY.md) and [RESPONSIBLE_USE.md](RESPONSIBLE_USE.md).
 
 ## Citation
 

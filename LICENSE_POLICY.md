@@ -23,3 +23,10 @@ Memory as “non-commercial software.”
 Commercial use is permitted when its applicable license is followed. Separate
 commercial licenses may be offered later, but they do not revoke rights already
 received under an open-source release.
+
+The project has not adopted a RAIL-style license (a license family that
+attaches behavioral use restrictions, common for ML models, and not
+OSI-approved open source). `RESPONSIBLE_USE.md` states real misuse concerns
+as an ask, not as a license term, for the same reason `AI_TRAINING_POLICY.md`
+declines to smuggle a training restriction into the AGPL: this project will
+not mislabel a restricted license as free software.
