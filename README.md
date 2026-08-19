@@ -26,8 +26,9 @@ Co-author: **Matheus Geraldi**<br>
 See [AUTHORS.md](AUTHORS.md) for the full authorship record and
 [CONTRIBUTORS.md](CONTRIBUTORS.md) for the broader contributor roster.
 
-> Status: private alpha. Interfaces and research claims are being audited
-> before the first public release.
+> Status: alpha version. Interfaces and research claims are being audited
+> before the first public release, and there is still a lot to improve —
+> expect rough edges, incomplete coverage, and active, ongoing work.
 
 Horizon originated inside the private **Q-HDRE research program**. Its
 physics-inspired hypotheses were not treated as claims about nature: they were
