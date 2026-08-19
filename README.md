@@ -11,7 +11,7 @@ systems. It stores durable state, retrieves evidence under explicit budgets,
 preserves provenance, verifies proof-carrying results, and abstains when its
 conditions are not satisfied. The core requires no LLM, hosted API, or network.
 
-Created and founded by **Kaue Oliveira Costa (kyuubyN)**, Brazil<br>
+Created and founded by **Kaue Oliveira Costa**<br>
 [ORCID 0009-0009-8502-3220](https://orcid.org/0009-0009-8502-3220) ·
 [kaue.o.costa@proton.me](mailto:kaue.o.costa@proton.me)
 
