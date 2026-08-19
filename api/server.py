@@ -84,7 +84,7 @@ def create_answer():
             polish_state = "skipped_abstained"
 
     answer_id, created = new_answer_id_and_timestamp()
-    STORE[answer_id] = (result, created)
+    STORE[answer_id] = (result, created, polished_answer, polish_state)
 
     return jsonify(serialize(answer_id, created, result, include_sources,
                              polished_answer, polish_state)), 201
@@ -96,9 +96,10 @@ def get_answer(answer_id: str):
     if entry is None:
         return jsonify({"error": {"message": f"no answer found with id '{answer_id}'",
                                    "type": "not_found_error"}}), 404
-    result, created = entry
-    return jsonify(serialize(answer_id, created, result, _include_sources_from_query()))
+    result, created, polished_answer, polish_state = entry
+    return jsonify(serialize(answer_id, created, result, _include_sources_from_query(),
+                             polished_answer, polish_state))
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8420, debug=False)
+    app.run(host="127.0.0.1", port=8420, debug=False, threaded=True)

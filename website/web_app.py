@@ -13,8 +13,6 @@ import multiprocessing
 import os
 import random
 import re
-import secrets
-import shutil
 import threading
 import time
 
@@ -22,36 +20,26 @@ import requests
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from horizon_memory import (
-    BM25Generator, HorizonConfig, HorizonMemory, HorizonVerifier, QueryEnvelope, RouteDocument,
-    RouteState, RoutingIndex, SemanticRouter,
+    BM25Generator, DEFAULT_PROFILE, HorizonAnswerEngine, QueryEnvelope, RouteDocument,
+    RoutingIndex,
 )
-from horizon_memory.claim_composer import ClaimSource, ContextIntent
-from horizon_memory.claim_routing import ClaimGenerator
-from horizon_memory.proof_dossier import build_proof_dossier
 
 app = Flask(__name__)
 
 SCOPE = 7
-MEM_ROOT = "/tmp/horizon-data-web"   # tmpfs: the per-query store is transient, not durable state
 DATASET = "demo_dataset.jsonl"
 
-# The exact budgets the published 0.95 result was measured at.
-ACQUISITION_BYTES = 65_536
-ANSWER_BYTES = 24_576
-PER_FIBER = 64
-GLOBAL_SORT_ALPHA = 0.3
-ANCHOR_BONUS = 0.3
-SPECIFICITY_BONUS = 0.5
-CLAIM_LIMIT = 800
+# The exact budgets the published 0.95 result was measured at -- read off DEFAULT_PROFILE
+# (the same profile ENGINE runs with below) rather than duplicated as separate constants, so
+# these two can never quietly drift apart the way this file's own answer-selection logic once
+# did from answer_engine.py's (see run_horizon's docstring).
+ACQUISITION_BYTES = DEFAULT_PROFILE.acquisition_bytes
+ANSWER_BYTES = DEFAULT_PROFILE.answer_bytes
 RAG_TOP_K = 12          # conventional RAG retrieval depth for the control
 WARM_WORKERS = 2        # parallel warm-up processes; see _warm_cache for why this is low
-ANSWER_SENTENCES = 4    # sentences in the clean answer
-SHORTLIST_SIZE = 50     # relevance-ranked pool the clean answer is chosen from
 RAG_CONTEXT_BYTES = ANSWER_BYTES   # budget-matched to Horizon's own final answer budget
 
-if os.path.exists(MEM_ROOT):
-    shutil.rmtree(MEM_ROOT)
-os.makedirs(MEM_ROOT, exist_ok=True)
+ENGINE = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE, session_id="s1")
 
 ROWS = []
 BY_QUESTION = {}
@@ -120,141 +108,45 @@ _RESULT_CACHE = {}
 
 
 def run_horizon(row):
-    """The real pipeline. Returns composed claims with per-claim provenance."""
+    """The real pipeline. Returns composed claims with per-claim provenance.
+
+    Runs through the shared `HorizonAnswerEngine` (`answer_engine.py`) instead of hand-wiring
+    routing/verification/composition here -- this file's own inline copy of that pipeline (and
+    its own, separately-drifted clean-answer selector) was the exact bug `answer_engine.py`'s
+    own docstring describes fixing: a greedy `gain = new_words * (0.3 + relevance)` formula with
+    no relevance floor could let a long, low-relevance sentence outscore and exclude the single
+    most relevant claim (MemGym-DR ordinal 382, BARM/UCEF). Routing through one shared
+    implementation means this demo can no longer silently fall behind that fix, or any future
+    one (2026-08-19, found via code review)."""
     cached = _RESULT_CACHE.get(row["ordinal"])
     if cached is not None:
         return {**cached, "cached": True}
 
     started = time.time()
     documents = _documents(row)
-    index = RoutingIndex(documents)
+    result = ENGINE.answer(row["question"], documents)
 
-    root = os.path.join(MEM_ROOT, f"ep-{row['ordinal']}-{secrets.token_hex(4)}")
-    memory = HorizonMemory.create(HorizonConfig(root, SCOPE, secrets.token_bytes(32)))
-    try:
-        for document in documents:
-            memory.put(SCOPE, document.fact_id, 1, 1)
+    if result.state != "RESOLVED":
+        return {"state": result.state, "claims": [], "answer_lines": [],
+                "documents": result.documents_considered,
+                "elapsed_ms": int((time.time() - started) * 1000)}
 
-        query = QueryEnvelope(f"q{row['ordinal']}", row["question"], SCOPE, "s1", 10)
-        verifier = HorizonVerifier(memory, index)
-        result = SemanticRouter(index, ClaimGenerator(), verifier).route(
-            query, CLAIM_LIMIT, allow_scope_fallback=False)
+    claims = [{"text": c.text, "source": f"doc:{c.fact_id}"} for c in result.claims]
+    answer_lines = [{"text": c.text, "source": f"doc:{c.fact_id}"} for c in result.answer_lines]
+    answer_text = "\n".join(c["text"] for c in claims)
 
-        if result.state != RouteState.EVIDENCE:
-            return {"state": result.state.name, "claims": [], "documents": len(documents),
-                    "elapsed_ms": int((time.time() - started) * 1000)}
-
-        items = result.evidence.budgeted_items(max_chars=ACQUISITION_BYTES)
-        sources, origin, relevance, seen = [], {}, {}, set()
-        for item in items:
-            key = (item.source, item.fact_id, item.content_span)
-            if key in seen:
-                continue
-            seen.add(key)
-            content = item.content if item.content is not None else str(item.value)
-            source_id = f"{item.source}:{item.fact_id}:{item.content_span}"
-            sources.append(ClaimSource.seal(source_id, content))
-            origin[source_id] = item.fact_id
-            relevance[source_id] = item.relevance_score or 0.0
-        sources = tuple(sources)
-
-        intents = (ContextIntent.seal("q:intent", row["question"],
-                                      frozenset(s.source_id for s in sources)),)
-
-        core = build_proof_dossier(sources=sources, intents=intents, strategy="horizon",
-                                   per_fiber=PER_FIBER, max_bytes=ANSWER_BYTES,
-                                   submodular_budget_fill=True)
-        # One ranked build, reused for both the budget fill and the clean-answer selection.
-        ranked = build_proof_dossier(
-            sources=sources, intents=intents, strategy="horizon", per_fiber=PER_FIBER,
-            max_bytes=ACQUISITION_BYTES, global_sort_alpha=GLOBAL_SORT_ALPHA,
-            anchor_bonus=ANCHOR_BONUS, specificity_bonus=SPECIFICITY_BONUS)
-
-        chosen = list(core.claims)
-        used = sum(len(c.surface.encode("utf-8")) for c in chosen)
-        if used < ANSWER_BYTES:
-            known = {c.claim_id for c in chosen}
-            spare = ANSWER_BYTES - used
-            filled = 0
-            for claim in ranked.claims:
-                if claim.claim_id in known:
-                    continue
-                cost = len(claim.surface.encode("utf-8")) + 1
-                if filled + cost > spare:
-                    continue
-                chosen.append(claim)
-                filled += cost
-
-        claims, seen_text = [], set()
-        for claim in chosen:
-            normalized = " ".join(claim.surface.split()).lower()
-            if normalized in seen_text:
-                continue          # the same sentence often appears in several source documents
-            seen_text.add(normalized)
-            claims.append({"text": claim.surface,
-                           "source": f"doc:{origin.get(claim.source_id, '?')}"})
-
-        answer_text = "\n".join(c["text"] for c in claims)
-
-        # The clean answer, in two stages, both reusing signals the pipeline already produced:
-        #   1. rank by the router's own claim-level relevance score (what `ClaimGenerator`
-        #      computed and `HorizonVerifier` carried onto each verified item);
-        #   2. over that shortlist, greedily pick the sentences that add the most NEW content,
-        #      the same max-cover principle `submodular_budget_fill` uses one layer down --
-        #      four sentences that each say something different beat four near-restatements.
-        # Measured against the alternatives on a 40-question held-out set: 36.7% of the gold
-        # answer's distinctive tokens captured, versus 21.8% for relevance ranking alone.
-        # Presentation only: every sentence here is in the full verified list below it.
-        question_tokens = _content_words(row["question"])
-
-        def _pick(min_length, require_sentence):
-            shortlist, seen_clean = [], set()
-            for claim in sorted(chosen, key=lambda c: -relevance.get(c.source_id, 0.0)):
-                text = claim.surface.strip()
-                normalized = " ".join(text.split()).lower()
-                if normalized in seen_clean or len(text) < min_length:
-                    continue
-                if require_sentence and not (text.endswith(".") and text[0].isupper()):
-                    continue
-                seen_clean.add(normalized)
-                shortlist.append(claim)
-                if len(shortlist) >= SHORTLIST_SIZE:
-                    break
-
-            def gain(claim, covered):
-                new = _content_words(claim.surface) - question_tokens - covered
-                return len(new) * (0.3 + relevance.get(claim.source_id, 0.0))
-
-            picked, covered = [], set()
-            while shortlist and len(picked) < ANSWER_SENTENCES:
-                best = max(shortlist, key=lambda c: gain(c, covered))
-                if gain(best, covered) <= 0:
-                    break
-                picked.append({"text": best.surface.strip(),
-                               "source": f"doc:{origin.get(best.source_id, '?')}"})
-                covered |= _content_words(best.surface)
-                shortlist.remove(best)
-            return picked
-
-        # Prefer complete, substantial sentences; fall back progressively rather than showing
-        # nothing when a corpus yields mostly short/fragmentary claims for this question.
-        answer_lines = _pick(90, True) or _pick(60, True) or _pick(40, False)
-
-        payload = {
-            "state": "RESOLVED",
-            "answer_lines": answer_lines,
-            "claims": claims,
-            "documents": len(documents),
-            "verified_candidates": len(sources),
-            "answer_bytes": len(answer_text.encode("utf-8")),
-            "coverage": _coverage(row["answer"], answer_text),
-            "elapsed_ms": int((time.time() - started) * 1000),
-        }
-        _RESULT_CACHE[row["ordinal"]] = payload
-        return payload
-    finally:
-        memory.close()
-        shutil.rmtree(root, ignore_errors=True)
+    payload = {
+        "state": "RESOLVED",
+        "answer_lines": answer_lines,
+        "claims": claims,
+        "documents": result.documents_considered,
+        "verified_candidates": result.verified_candidates,
+        "answer_bytes": len(answer_text.encode("utf-8")),
+        "coverage": _coverage(row["answer"], answer_text),
+        "elapsed_ms": int((time.time() - started) * 1000),
+    }
+    _RESULT_CACHE[row["ordinal"]] = payload
+    return payload
 
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
