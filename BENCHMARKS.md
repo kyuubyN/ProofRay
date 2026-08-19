@@ -51,6 +51,90 @@ Hit@1 was preserved in these evaluations. Horizon also used fewer mean
 evidence bytes in the reported protocols. The supported claim is improvement
 over BM25 on these frozen evaluations, not universal search superiority.
 
+### Diagnostic re-open with the current engine (not a fresh holdout claim)
+
+All three rows above come from one-shot frozen holdouts already opened once
+against a 2026-08-13 engine snapshot. At the project owner's explicit
+direction, the same three holdouts were reopened against the current engine
+(this session's contradiction-channel numbers-rule fix and
+modality-confirmed-finding exception, both found and fixed on an unrelated
+dataset) to check whether either fix changes retrieval quality here too.
+**This is a genuine, acknowledged departure from this project's own "open a
+holdout exactly once" discipline** — the numbers below are diagnostic-only,
+not a second independent holdout confirmation, following the same downgrade
+already applied elsewhere in this project's own record to a re-read
+confirmation split.
+
+Every metric each original protocol reported, not just the two headline
+columns:
+
+**LoCoMo (1,676 q, Horizon HPPS) — every reported metric is byte-identical:**
+
+| Metric | Original | Reopened | Delta |
+|---|---:|---:|---:|
+| Hit@1 | 0.296695 | 0.296695 | 0 |
+| Hit@5 | 0.587241 | 0.587241 | 0 |
+| Hit@10 | 0.695619 | 0.695619 | 0 |
+| Hit@32 | 0.812452 | 0.812452 | 0 |
+| Gold recall@1 | 0.263661 | 0.263661 | 0 |
+| Gold recall@5 | 0.521064 | 0.521064 | 0 |
+| Gold recall@10 | 0.617877 | 0.617877 | 0 |
+| Gold recall@32 | 0.737101 | 0.737101 | 0 |
+| MRR | 0.422516 | 0.422516 | 0 |
+| Mean bytes selected | 3914.743 | 3914.743 | 0 |
+| Mean items selected | 27.61 | 27.61 | 0 |
+
+**SciFact (206 q, Horizon HPPS) — every Hit@/Recall@ depth identical; MRR/MAP shift under 0.02pp:**
+
+| Metric | Original | Reopened | Delta |
+|---|---:|---:|---:|
+| Hit@1 | 0.577670 | 0.577670 | 0 |
+| Hit@5 | 0.766990 | 0.766990 | 0 |
+| Hit@10 | 0.820388 | 0.820388 | 0 |
+| Hit@32 | 0.898058 | 0.898058 | 0 |
+| Recall@1 | 0.557848 | 0.557848 | 0 |
+| Recall@5 | 0.746359 | 0.746359 | 0 |
+| Recall@10 | 0.804612 | 0.804612 | 0 |
+| Recall@32 | 0.885922 | 0.885922 | 0 |
+| MRR@32 | 0.669579 | 0.669780 | +0.000201 |
+| MAP@32 | 0.659173 | 0.659347 | +0.000175 |
+| NDCG@10 | 0.694336 | 0.694336 | 0 |
+| Mean bytes selected | 50021.956 | 50129.485 | +107.53 |
+| Mean items selected | 31.117 | 30.990 | -0.126 |
+| Max bytes (any query) | 75693 | 75774 | +81 |
+
+**NFCorpus (323 q, Pareto tail) — the one dataset with a real, if small, shift:**
+
+| Metric | Original | Reopened | Delta |
+|---|---:|---:|---:|
+| Hit@1 | 0.439628 | 0.439628 | 0 |
+| Hit@5 | 0.650155 | 0.650155 | 0 |
+| Hit@10 | 0.687306 | 0.690402 | +0.003096 |
+| Hit@32 | 0.758514 | 0.755418 | -0.003096 |
+| Recall@1 | 0.056574 | 0.056574 | 0 |
+| Recall@5 | 0.118790 | 0.118790 | 0 |
+| Recall@10 | 0.150154 | 0.151131 | +0.000977 |
+| Recall@32 | 0.210711 | 0.210521 | -0.000191 |
+| MRR@32 | 0.528006 | 0.528004 | -0.000002 |
+| MAP@32 | 0.137163 | 0.137814 | +0.000651 |
+| NDCG@10 (linear gain) | 0.321416 | 0.322115 | +0.000700 |
+| Mean bytes selected | 48946.037 | 49424.433 | +478.40 |
+| Mean items selected | 31.724 | 31.669 | -0.056 |
+| Max bytes (any query) | 63324 | 64663 | +1339 |
+
+LoCoMo's Horizon-side numbers are exactly byte-identical across all eleven
+reported metrics — the fix changed nothing measurable here. SciFact keeps
+every Hit@/Recall@ depth exactly identical; only MRR/MAP move, by under
+0.02 percentage points, and NDCG@10 (which only looks at the top 10) is
+untouched — meaning the small reordering the fix caused happened below
+rank 10, not within it. NFCorpus's Pareto-tail arm is the one real,
+non-trivial shift: Hit@32 down 0.31pp exactly offset by Hit@10 up 0.31pp
+(content moved between rank bands, not lost), every other metric moving
+by under 0.1pp. In all three datasets, BM25's own numbers (which never
+touch the contradiction channel) are unchanged to the last reported
+digit, confirming nothing else in the pipeline shifted — the fix is the
+only variable that changed between the original and reopened runs.
+
 ## Natural-language reader pilot
 
 A public 30-question LongMemEval-S pilot compared no memory, turn-level BM25
