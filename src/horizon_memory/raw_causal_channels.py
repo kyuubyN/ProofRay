@@ -20,6 +20,15 @@ _NEGATION = frozenset(("no", "not", "never", "neither", "nor", "without", "didn'
                        "doesn't", "don't", "wasn't", "weren't", "isn't", "aren't"))
 _MODAL = frozenset(("may", "might", "could", "would", "should", "perhaps", "maybe", "plan",
                     "plans", "planned", "hope", "hopes", "want", "wants"))
+# 2026-08-18 (plan item 1b): a claim reporting an already-confirmed finding ("the study
+# demonstrated X could improve...") is not a genuine hedge just because a modal word appears
+# somewhere in it -- but `RawCausalChannels.modality` (below) is a whole-text boolean deliberately
+# kept simple (5+ other callers, directly tested) and must not be edited to carry this distinction.
+# `_modal_is_confirmed_finding` is a separate, narrower helper for a single caller
+# (`materialized_proof_pressure_search.py`'s contradiction rule) to use instead of touching the
+# shared field.
+_CONFIRMING_REPORT = frozenset(("demonstrated", "showed", "shown", "found", "revealed",
+                                "reported", "confirmed", "established", "achieved", "observed"))
 _STOP = frozenset("""
 a an and are as at be been being but by did do does for from had has have he her hers him his
 how i if in into is it its me my of on or our ours she so than that the their them then there
@@ -92,6 +101,19 @@ def observe_raw_text(text: str, *, question: bool = False) -> RawCausalChannels:
             interrogative = "boolean"
     return RawCausalChannels(tuple(lexical), sublexical, entities, numbers, temporal,
                              relations, polarity, modality, interrogative)
+
+
+def _modal_is_confirmed_finding(text: str) -> bool:
+    """True if a confirmed-finding verb (`_CONFIRMING_REPORT`) appears before the first modal
+    token in `text` -- i.e. the modal word is reporting something already established/observed
+    ("the study demonstrated X could improve...") rather than genuinely hedging. Token-index
+    comparison over the same raw tokenization `observe_raw_text` uses, not string search, so a
+    verb appearing later in the text (after the modal) does not count."""
+    tokens = tuple(token.casefold().replace("’", "'") for token in _WORD.findall(text))
+    modal_index = next((index for index, token in enumerate(tokens) if token in _MODAL), None)
+    if modal_index is None:
+        return False
+    return any(token in _CONFIRMING_REPORT for token in tokens[:modal_index])
 
 
 @dataclass(frozen=True)

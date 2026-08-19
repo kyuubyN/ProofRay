@@ -72,10 +72,18 @@ class ClaimGenerator(CandidateGenerator):
     """FH-06.1: proposes one candidate per sentence-level claim span instead of per document."""
     channel = "claim"
 
-    def __init__(self, weights: tuple[float, float, float, float, float, float] = DEFAULT_WEIGHTS):
+    def __init__(self, weights: tuple[float, float, float, float, float, float] = DEFAULT_WEIGHTS,
+                 *, specificity_bonus: float | None = None):
         if len(weights) != 6 or any(weight < 0 for weight in weights):
             raise ValueError("six non-negative channel weights are required")
         self.weights = weights
+        # `specificity_bonus` (2026-08-18, opt-in, `None` preserves prior behavior): threads
+        # through to `MaterializedRawCausalSyndromeIndex.rank()`'s own new parameter -- see its
+        # docstring for what it computes. Not yet validated at this specific call site (candidate
+        # ranking, as opposed to the acquisition-budget or final-render stages where the same
+        # signal was already tested); exposed as opt-in so a caller can test it without changing
+        # default behavior for anything else that constructs `ClaimGenerator`.
+        self.specificity_bonus = specificity_bonus
 
     def generate(self, query, index, limit, same_session=True):
         eligible = index.eligible(query, same_session)
@@ -92,7 +100,8 @@ class ClaimGenerator(CandidateGenerator):
             RawCausalDocument(position, surface, 0, 0)
             for position, (_fact_id, _span, surface) in enumerate(claims))
         claim_index = MaterializedRawCausalSyndromeIndex(raw_documents)
-        ranked = claim_index.rank(claim_index.components(query.text), self.weights)
+        ranked = claim_index.rank(claim_index.components(query.text), self.weights,
+                                  specificity_bonus=self.specificity_bonus)
         namespace = "scope_session" if same_session else "scope_fallback"
         candidates = []
         for rank, row in enumerate(ranked[:limit], 1):
