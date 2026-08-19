@@ -165,9 +165,10 @@ Caveats, stated plainly:
   token/anchor-overlap proxy can diverge from real judge/reader quality in
   either direction (a large evidence dump can score artificially high on
   overlap while a real reader gets no benefit from it, or vice versa).
-  Treat these as engineering-iteration signals, not accuracy claims — the
-  0.72 vs 0.55 judge-scored table above remains the only judge-scored number
-  in this document.
+  Treat these as engineering-iteration signals, not accuracy claims — see
+  the judge-scored section directly below for the real-judge numbers on
+  this exact composer, which is the one that should be cited as an
+  accuracy result.
 - MemGym-DR's own ceiling (0.9853) is well above its measured score,
   meaning the majority of the remaining gap is not a hard, dataset-authored
   wall the way some earlier internal ceiling checks found for other
@@ -176,6 +177,42 @@ Caveats, stated plainly:
   final-answer budget cut), not independently audited against its raw
   source text the way MemGym-DR's was, so it should be read as a looser
   bound.
+
+## Composer judge-scored pilot (current pinned configuration)
+
+Real, LLM-judge-scored results for the exact composer configuration in the
+table above — not the token-overlap proxy. The composer's own deterministic
+rendered text is judged directly against the gold answer, with no reader
+call in the loop: an earlier internal pilot found that judging a raw,
+unranked evidence dump this way inflates the score (the judge rewards
+"is the answer findable somewhere in this pile of text" rather than
+correctness of a real, budget-constrained selection), so this only holds
+for a composed answer built under the same byte budget a real deployment
+would use — exactly what both rows below are.
+
+Judged by **`gemini/gemini-3.1-flash-lite`** — one of three backends
+promoted in this project's own instrument-validation pass after each passed
+all six pre-registered acceptance criteria on a hard-negative/abstention
+battery (see the metric-validity note above). The chain's primary candidate,
+`groq/llama-3.3-70b-versatile`, was unavailable for this session (Groq now
+returns "model does not exist" for it, consistent with the model having
+been deprecated on Groq's side since it was promoted); LongMemEval-S's own
+per-call records confirm gemini answered all 120 of its calls, and
+MemGym-DR was scored in the same session under the same condition.
+
+| Dataset | N | Mean judge score | Paired control | Delta |
+|---|---:|---:|---:|---|
+| MemGym-DR (frozen dev split) | 120 | **0.950** | 0.726 (LLM reader, same evidence budget) | **+0.224**, 95% CI [0.171, 0.277] |
+| LongMemEval-S | 120 | **0.767** | — (no clean paired control exists yet) | — |
+
+MemGym-DR's confidence interval excludes zero: a real, decisive win over a
+paired LLM-reader control on an actual semantic judge, not a proxy — and
+the largest judge-scored margin in this document. LongMemEval-S has no
+established paired control under this un-contaminated methodology yet (an
+earlier internal LongMemEval judge number scored raw, un-composed evidence
+directly and is now understood to be inflated the same way the MemGym-DR
+evidence-only pilot above was), so its score is reported alone rather than
+against a possibly-misleading baseline.
 
 ## What is not yet solved
 
