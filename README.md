@@ -81,6 +81,28 @@ is intentional and will not be hidden behind a broader marketing claim.
 The repository intentionally excludes private theory notebooks, private
 datasets, unpublished papers, benchmark answer keys and development logs.
 
+## Performance
+
+Measured directly, not estimated: five fresh (non-cached) questions from the
+MemGym-DR benchmark corpus, one full route → verify → compose pipeline run
+each, single process, no GPU.
+
+| Metric | Value |
+|---|---|
+| Mean CPU time per question | 1.79 s |
+| Mean wall-clock time per question | 1.79 s |
+| Peak resident memory (one process) | ~127 MB |
+| Documents searched per question | 483–567 (mean ≈ 536) |
+| Evidence budget spent | 24–64 KB of verified text (not documents) |
+
+CPU time and wall-clock time came out effectively identical, which means the
+pipeline spent that time actually computing, not waiting on disk or network —
+no GPU, model weights or hosted API are involved anywhere in this path.
+Measured with Python's `resource.getrusage`; see
+[Benchmarks and claim boundaries](BENCHMARKS.md) for accuracy numbers on the
+same corpus, and [HorizonAI Engine](HorizonAI%20Engine/README.md) for the
+live demo this was measured against.
+
 ## Connecting Horizon
 
 The core never calls a model, a database driver, or a chat client on its own
