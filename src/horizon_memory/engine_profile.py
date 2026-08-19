@@ -1,0 +1,158 @@
+# Copyright (c) 2026 kyuubyN
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""A versioned, swappable bundle of every tunable value `HorizonAnswerEngine` (`answer_engine.py`)
+consumes -- the "weights" half of shipping this as architecture-plus-weights, analogous to a model
+checkpoint: swap the JSON to retune a deployment, never touch the code. Follows the same
+frozen-dataclass-with-`__post_init__`-validation shape already used by `HorizonConfig`
+(`config.py`) and `ConformalCalibrator` (`conformal_routing.py`) -- no new dependency, plain `json`.
+
+What is deliberately NOT in here, and why: the ZH word-segmentation dictionary and stopword list
+(`zh_word_dictionary.py`, `zh_anchor_stopwords.py`) are linguistic resource data for a different
+code path (`supersession_collapse.py`), not calibrated scoring weights, and nothing in this
+project's own research notes suggests they need per-deployment tuning. `proof_dossier.py`'s inline
+`asserted_bonus=0.3`/anchor-overlap `0.35` and `materialized_proof_pressure_search.py`'s `_bm25`
+formula constants (`2.2`/`1.2`/`.25`/`.75`) also stay inline -- turning those into parameters means
+new signature surface on two modules with hundreds of passing tests riding on them, for constants
+with no evidence yet that a different value is ever wanted. Both are a clearly-scoped future
+increment, not silently dropped.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import json
+from pathlib import Path
+
+from .claim_routing import DEFAULT_WEIGHTS as CLAIM_GENERATOR_DEFAULT_WEIGHTS
+from .conformal_routing import LEXICAL_SUBLEXICAL_WEIGHTS
+
+SCHEMA = "engine-profile.v1"
+
+# `(min_length, require_complete_sentence)` tiers the clean-answer picker falls back through in
+# order -- matches the three-tier fallback already validated in the demo webapp
+# (`_pick(90, True) or _pick(60, True) or _pick(40, False)`), so a corpus that yields mostly
+# short/fragmentary claims for a given question still produces *some* answer instead of none.
+_DEFAULT_LENGTH_TIERS: tuple[tuple[int, bool], ...] = ((90, True), (60, True), (40, False))
+
+
+@dataclass(frozen=True)
+class EngineProfile:
+    schema: str = SCHEMA
+    name: str = "default"
+
+    # Claim-generator / conformal-routing channel weights (see claim_routing.py,
+    # conformal_routing.py for the six-channel order: lexical, sublexical, entity, relation,
+    # observable, contradiction).
+    claim_weights: tuple[float, ...] = CLAIM_GENERATOR_DEFAULT_WEIGHTS
+    claim_specificity_bonus: float | None = None
+    conformal_weights: tuple[float, ...] = LEXICAL_SUBLEXICAL_WEIGHTS
+    bm25_k1: float = 1.2
+    bm25_b: float = 0.75
+
+    # Candidate-routing budget.
+    claim_limit: int = 800
+
+    # Dossier / composition budgets -- the exact values the published 0.95 judge-score result
+    # (MemGym-DR, D144) was measured at.
+    acquisition_bytes: int = 65_536
+    answer_bytes: int = 24_576
+    per_fiber: int = 64
+    global_sort_alpha: float = 0.3
+    anchor_bonus: float = 0.3
+    specificity_bonus: float = 0.5
+    dedup_threshold: float | None = None
+
+    # Clean-answer selection (adaptive length, relevance-gated -- see answer_engine.py).
+    # `answer_relevance_gate_ratio=0.3` was locked in from `lab/runners/
+    # validate_answer_relevance_gate.py`'s real sweep (2026-08-19, 50 MemGym-DR questions +
+    # ordinal 382's own BARM/UCEF case, ratios 0.10-0.90): mean coverage is fully saturated for
+    # every ratio <= 0.3 (79.6-79.8%, byte-identical answer_lines counts from 0.10-0.20), so 0.3
+    # is the tightest gate that already captures 100% of the achievable coverage on this data --
+    # going looser buys nothing, going tighter starts trading coverage away (0.5: 74.3%, 0.7:
+    # 53.9%, 0.9: 29.5%). At 0.3, ordinal 382's answer includes BARM (relevance 0.592, the real
+    # top claim in that corpus) alongside UCEF, not instead of it -- with the adaptive-length cap
+    # removed, the fix is about the correct claim never being *excluded*, not about picking order,
+    # matching the caller's own framing: Horizon hands its evidence to a downstream reader, it
+    # does not need to pre-decide which single fact matters most.
+    answer_shortlist_size: int = 50
+    answer_relevance_gate_ratio: float = 0.3
+    answer_min_length_tiers: tuple[tuple[int, bool], ...] = field(
+        default_factory=lambda: _DEFAULT_LENGTH_TIERS)
+
+    def __post_init__(self) -> None:
+        if self.schema != SCHEMA:
+            raise ValueError(f"unsupported EngineProfile schema: {self.schema!r}")
+        if not self.name:
+            raise ValueError("EngineProfile.name is required")
+        if len(self.claim_weights) != 6 or any(w < 0 for w in self.claim_weights):
+            raise ValueError("claim_weights requires six non-negative channel weights")
+        if len(self.conformal_weights) != 6 or any(w < 0 for w in self.conformal_weights):
+            raise ValueError("conformal_weights requires six non-negative channel weights")
+        if self.claim_specificity_bonus is not None and self.claim_specificity_bonus < 0:
+            raise ValueError("claim_specificity_bonus must be non-negative")
+        if self.bm25_k1 <= 0 or not 0 <= self.bm25_b <= 1:
+            raise ValueError("invalid BM25 parameters")
+        if self.claim_limit < 1:
+            raise ValueError("claim_limit must be positive")
+        if self.acquisition_bytes < 256 or self.answer_bytes < 256:
+            raise ValueError("acquisition_bytes/answer_bytes must be >= 256")
+        if self.answer_bytes > self.acquisition_bytes:
+            raise ValueError("answer_bytes cannot exceed acquisition_bytes")
+        if self.per_fiber < 1:
+            raise ValueError("per_fiber must be positive")
+        if not 0.0 <= self.global_sort_alpha <= 1.0:
+            raise ValueError("global_sort_alpha must be in [0,1]")
+        if self.anchor_bonus < 0 or self.specificity_bonus < 0:
+            raise ValueError("anchor_bonus/specificity_bonus must be non-negative")
+        if self.dedup_threshold is not None and not 0.0 <= self.dedup_threshold <= 1.0:
+            raise ValueError("dedup_threshold must be in [0,1]")
+        if self.answer_shortlist_size < 1:
+            raise ValueError("answer_shortlist_size must be positive")
+        if not 0.0 <= self.answer_relevance_gate_ratio <= 1.0:
+            raise ValueError("answer_relevance_gate_ratio must be in [0,1]")
+        if not self.answer_min_length_tiers:
+            raise ValueError("answer_min_length_tiers must not be empty")
+        for min_length, _require_sentence in self.answer_min_length_tiers:
+            if min_length < 1:
+                raise ValueError("answer_min_length_tiers entries must be positive")
+
+    def to_dict(self) -> dict:
+        return {
+            "schema": self.schema, "name": self.name,
+            "claim_weights": list(self.claim_weights),
+            "claim_specificity_bonus": self.claim_specificity_bonus,
+            "conformal_weights": list(self.conformal_weights),
+            "bm25_k1": self.bm25_k1, "bm25_b": self.bm25_b,
+            "claim_limit": self.claim_limit,
+            "acquisition_bytes": self.acquisition_bytes, "answer_bytes": self.answer_bytes,
+            "per_fiber": self.per_fiber, "global_sort_alpha": self.global_sort_alpha,
+            "anchor_bonus": self.anchor_bonus, "specificity_bonus": self.specificity_bonus,
+            "dedup_threshold": self.dedup_threshold,
+            "answer_shortlist_size": self.answer_shortlist_size,
+            "answer_relevance_gate_ratio": self.answer_relevance_gate_ratio,
+            "answer_min_length_tiers": [list(tier) for tier in self.answer_min_length_tiers],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "EngineProfile":
+        data = dict(payload)
+        if "claim_weights" in data:
+            data["claim_weights"] = tuple(data["claim_weights"])
+        if "conformal_weights" in data:
+            data["conformal_weights"] = tuple(data["conformal_weights"])
+        if "answer_min_length_tiers" in data:
+            data["answer_min_length_tiers"] = tuple(
+                tuple(tier) for tier in data["answer_min_length_tiers"])
+        return cls(**data)
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(
+            json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "EngineProfile":
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+DEFAULT_PROFILE = EngineProfile()
+
+__all__ = ["SCHEMA", "DEFAULT_PROFILE", "EngineProfile"]

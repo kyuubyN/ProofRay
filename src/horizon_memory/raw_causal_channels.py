@@ -104,17 +104,37 @@ def observe_raw_text(text: str, *, question: bool = False) -> RawCausalChannels:
 
 
 def _modal_is_confirmed_finding(text: str) -> bool:
-    """True if a confirmed-finding verb (`_CONFIRMING_REPORT`) appears before some modal
-    token in `text` -- i.e. that modal word is reporting something already established/observed
-    ("the study demonstrated X could improve...") rather than genuinely hedging. Checks every
-    modal occurrence (not just the first) so an earlier, unrelated modal word (e.g. "hopes")
-    cannot mask a later, genuinely confirmed modal clause. Token-index comparison over the same
-    raw tokenization `observe_raw_text` uses, not string search, so a verb appearing later in the
-    text (after a given modal) does not count for that modal."""
+    """True if at least one modal token in `text` is reporting something already established/
+    observed ("the study demonstrated X could improve...") rather than genuinely hedging. Token-
+    index comparison over the same raw tokenization `observe_raw_text` uses, not string search.
+
+    Checks every modal token, not only the first one (2026-08-19, real bug found via code
+    review, confirmed reproducible: a text with an early, unrelated modal -- "the team hopes to
+    expand, but the audit demonstrated the results could improve" -- had `_MODAL` match "hopes"
+    first and stop there, so a genuinely-confirmed "could" later in the same text was never
+    checked; fixed, verified True on that exact input). Each modal's own confirming-verb search
+    is bounded to the segment since the *previous modal* (or the start of `text` for the first
+    one) -- this stops a confirming verb from one clause spuriously excusing an unrelated,
+    genuinely-hedging *second* modal, but does NOT fully solve clause attribution in general:
+    for the *first* modal in a text, the search window is still the entire prefix, exactly like
+    the original implementation, so a confirming verb from an unrelated earlier clause can still
+    wrongly excuse a single genuine hedge (e.g. "the study demonstrated X, but analysts hope for
+    more" -- confirmed empirically still returns True for "hope" here, both before and after this
+    fix). That is a real, separate, pre-existing limitation of using "anywhere in the preceding
+    text" rather than clause-aware attribution -- not introduced or claimed to be fixed by this
+    change, and not yet fixed at all. For a single-modal text with nothing before it in
+    `_CONFIRMING_REPORT`, this reduces to exactly the original check, so the existing
+    IKEA-bookshelf regression coverage (`tests/test_horizon_claim_generator.py`) is unaffected."""
     tokens = tuple(token.casefold().replace("’", "'") for token in _WORD.findall(text))
-    modal_indexes = tuple(index for index, token in enumerate(tokens) if token in _MODAL)
-    return any(any(token in _CONFIRMING_REPORT for token in tokens[:modal_index])
-               for modal_index in modal_indexes)
+    modal_indices = [index for index, token in enumerate(tokens) if token in _MODAL]
+    if not modal_indices:
+        return False
+    segment_start = 0
+    for modal_index in modal_indices:
+        if any(token in _CONFIRMING_REPORT for token in tokens[segment_start:modal_index]):
+            return True
+        segment_start = modal_index + 1
+    return False
 
 
 @dataclass(frozen=True)

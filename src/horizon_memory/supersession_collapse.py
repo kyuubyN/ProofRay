@@ -299,6 +299,10 @@ def _anchor_type(anchor: str, surface: str, temporal: frozenset[str]) -> str:
     if anchor in temporal:
         return "date"
     if any(char.isdigit() for char in anchor):
+        # `str.find()` matches the anchor as a raw substring -- for anchor "52" against surface
+        # text containing "$1052 for item 52", it matches inside "1052" first, pulling the "$"
+        # into the context window and misclassifying a plain cardinal as "money". A word-boundary
+        # regex matches only the standalone token (2026-08-19, real bug, confirmed reproducible).
         match = re.search(r"\b" + re.escape(anchor) + r"\b", surface)
         index = match.start() if match else -1
         window = surface[max(0, index - 20):index + len(anchor) + 20] if index >= 0 else ""

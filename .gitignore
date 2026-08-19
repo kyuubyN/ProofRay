@@ -34,6 +34,10 @@ lab/datasets/raw/
 
 # External literature is inspected locally; redistribution rights are not assumed.
 /2601.09913v1.pdf
+
+# Third-party dictionaries/lexicons pulled in for local experimentation (Jieba's full
+# dictionary, PT lexicons, English word lists) -- large external data, not project source.
+/lang/
 /2605.20833v1.pdf
 /tmp/pdfs/
 
@@ -54,3 +58,10 @@ lab/datasets/raw/
 /logs/
 /tmp/
 /.agents/
+
+# Demo webapp: code is versioned, generated/derived corpora and the original
+# zip are not (largest is ~75 MB, regenerated from lab/results, not authored).
+/website/*.jsonl
+/website/Horizon_WebApp.zip
+/website/__pycache__/
+/website/horizon-data-web/
