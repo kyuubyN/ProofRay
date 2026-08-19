@@ -56,6 +56,61 @@ Evidence is treated as untrusted input until its identity, source digest, span,
 scope and version are checked. Candidate generators are replaceable and may be
 wrong. A verifier, not a ranking score, decides whether a result has authority.
 
+## Search and candidate routing
+
+Search never produces authority directly; it produces candidates a verifier
+then checks. A `CandidateGenerator` scores documents or claims against a
+query and returns a ranked `CandidateList`; `HorizonVerifier` re-opens each
+candidate's own source in the durable store and checks its identity, span,
+version and scope. `SemanticRouter.route()` ties the two together and
+returns exactly one `RouteState`: `EVIDENCE` when verified candidates
+satisfy the query, `ABSTENTION` when none do, or `ABSTAIN_SCOPE` when the
+query itself targets a scope the caller isn't authorized for — never a
+silent empty result standing in for a failure.
+
+Two granularities of candidate generator exist. Whole-document generators
+(lexical, BM25, dense, hybrid, causal-weave) return one candidate per fact.
+`ClaimGenerator` instead splits a document into sentence-level claims (never
+splitting a decimal number or code punctuation, `claim_spans`) and scores
+each one independently against six typed channels computed by
+`MaterializedRawCausalSyndromeIndex` — lexical overlap, character-trigram
+("sublexical") overlap for paraphrase and typo robustness, entity match,
+relation match, an "observable" exact-value-match signal, and a
+contradiction penalty when a claim's polarity or modality conflicts with the
+query — combined by a fixed weighted sum (`DEFAULT_WEIGHTS`; only lexical,
+sublexical and contradiction are non-zero by default, chosen and regression-
+tested against a real modal-distractor failure, not a default guess). A
+document can contain one claim that answers a query and several that don't;
+claim-level generation lets those compete independently for budget instead
+of the whole document winning or losing as one unit.
+
+Routing admission can also be conformally calibrated:
+`ConformalClaimGenerator`/`ConformalDocumentGenerator` wrap a base generator
+with a `ConformalCalibrator` fit on a held-out calibration set, and admit a
+candidate whenever its calibrated p-value exceeds `epsilon` — a statistical
+marginal-coverage guarantee ("the true source is in the routed set with
+probability at least 1-epsilon"), not a ranked top-k cutoff. A *smaller*
+epsilon is a *stronger* guarantee and admits *more* candidates, trading
+precision for a bound on how often the right source is missed outright.
+
+Selection happens at two budgets, not one. `EvidencePack.budgeted_items()`
+fills an acquisition-stage budget from verified candidates across every
+routed source, with optional merge behavior: `global_sort_alpha` replaces
+the default rank-major fill with one blended sort key per item (document-
+level `source_priority` weighted against the item's own channel relevance),
+and `dedup_threshold` rejects near-duplicate claims. `proof_dossier.
+build_proof_dossier` then fills a second, tighter final-answer budget from
+that acquisition pool — optionally as budget-constrained submodular
+selection (`submodular_budget_fill`) rather than a plain rank-major cut —
+with `anchor_bonus`/`specificity_bonus` biasing selection toward claims
+carrying a number, proper noun or other locally rare token: the kind of
+content most likely to be the one fact a query actually needs, not just a
+topically related sentence.
+
+None of this changes what counts as authoritative. However a candidate is
+scored, ranked or admitted, it only ever proposes; `HorizonVerifier` is
+still what decides whether a result is trustworthy, per the boundary above.
+
 ## Research retrieval
 
 `horizon_memory.research` exposes experimental proof-pressure and feedback
