@@ -10,6 +10,7 @@ from datetime import date
 from horizon_memory.codec import (
     ProofCarryingCodec, compile_query_equation, execute_exact, semantic_charges,
 )
+from horizon_memory.codec import _term_key
 from horizon_memory.boundary_ledger import BoundaryFiberLedger
 from horizon_memory.evidence import EvidenceItem, EvidencePack
 from horizon_memory.measurement_ledger import EventLedger
@@ -52,6 +53,15 @@ class ProofCarryingCodecTests(unittest.TestCase):
             EvidenceItem(1, "session-a", 1, None, "different", verifier_state="verified"),
         ), generation_id=2, recovery_reason="bulk")
         self.assertFalse(ProofCarryingCodec.verify(compressed, tampered))
+
+    def test_term_key_strips_only_a_literal_possessive_suffix(self):
+        # `_term_key` used to call `.rstrip("'s")`, which strips a *character set* (any
+        # trailing run of "'" or "s"), not the literal suffix -- corrupting ordinary words that
+        # simply end in "s" ("boss" -> "bo", "process" -> "proce") instead of only normalizing a
+        # genuine possessive (2026-08-19, found via code review).
+        self.assertEqual(_term_key("boss"), "boss")
+        self.assertEqual(_term_key("process"), "process")
+        self.assertEqual(_term_key("world's"), "world")
 
     def test_semantic_charges_track_number_negation_quote_and_tag(self):
         charges = semantic_charges('Not "Project Red": $720 in 4 days #Launch')

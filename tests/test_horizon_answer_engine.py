@@ -67,6 +67,23 @@ class ResolvedAnswerTests(unittest.TestCase):
         self.assertNotIn("pascals", answer_text)
 
 
+class VersionedDocumentTests(unittest.TestCase):
+    def test_resolves_when_document_version_is_not_one(self):
+        # `answer()` used to write every document into its ephemeral store with a hardcoded
+        # version=1 regardless of `RouteDocument.version`, so `HorizonVerifier.verify()`'s strict
+        # `read.version != document.version` check always failed for any document whose stated
+        # version wasn't 1, silently dropping it from the evidence pool (2026-08-19, found via
+        # code review).
+        engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE)
+        documents = (RouteDocument(
+            1, "The Meridian project reduced compute cost by exactly 42 percent compared to "
+               "the previous baseline architecture across every workload.",
+            SCOPE, "s1", 7, "doc:1"),)
+        result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
+        self.assertEqual(result.state, "RESOLVED")
+        self.assertIn("42", result.answer_text)
+
+
 class AbstentionTests(unittest.TestCase):
     def test_abstains_when_scope_mismatches(self):
         # A document scoped differently from the engine/query can never be verified by

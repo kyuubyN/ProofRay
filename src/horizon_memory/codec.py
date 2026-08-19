@@ -56,7 +56,7 @@ def _tokens(text: str) -> tuple[str, ...]:
 
 def _term_key(token: str) -> str:
     """Small deterministic morphology bridge; it is an address normalizer, not semantics."""
-    token = token.casefold().rstrip("'s")
+    token = token.casefold().removesuffix("'s")
     if len(token) > 5 and token.endswith("ies"):
         return token[:-3] + "y"
     if len(token) > 5 and token.endswith("ing"):

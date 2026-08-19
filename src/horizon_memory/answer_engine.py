@@ -118,7 +118,7 @@ class HorizonAnswerEngine:
                 HorizonConfig(workdir, self.scope_id, secrets.token_bytes(32)))
             try:
                 for document in documents:
-                    memory.put(self.scope_id, document.fact_id, 1, 1)
+                    memory.put(self.scope_id, document.fact_id, document.version, 1)
 
                 query = QueryEnvelope("q", question, self.scope_id, self.session_id, 10)
                 verifier = HorizonVerifier(memory, index)
