@@ -19,6 +19,10 @@ Co-author: **Yuri Yassumura Pecelin**<br>
 [ORCID 0009-0007-9766-9809](https://orcid.org/0009-0007-9766-9809) ·
 [yuripecelin@gmail.com](mailto:yuripecelin@gmail.com)
 
+Co-author: **Matheus Geraldi**<br>
+[ORCID 0009-0009-9059-7827](https://orcid.org/0009-0009-9059-7827) ·
+[Matheus.ge.si@gmail.com](mailto:Matheus.ge.si@gmail.com)
+
 See [AUTHORS.md](AUTHORS.md) for the full authorship record and
 [CONTRIBUTORS.md](CONTRIBUTORS.md) for the broader contributor roster.
 

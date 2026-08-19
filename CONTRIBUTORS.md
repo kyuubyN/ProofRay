@@ -12,6 +12,7 @@ that will govern accepting new contributions.
 - **Kaue Oliveira Costa (kyuubyN)** — creator, research lead, founding
   maintainer. See `AUTHORS.md` and `GOVERNANCE.md`.
 - **Yuri Yassumura Pecelin** — co-author. See `AUTHORS.md`.
+- **Matheus Geraldi** — co-author. See `AUTHORS.md`.
 
 Order reflects when each person joined the project, not weight of
 contribution. A listing here does not transfer the project's name, origin,

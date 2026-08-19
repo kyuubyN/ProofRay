@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+from .content_safety import SafetyPolicy, UnsafeContentError, screen_text
 from .evidence import EvidenceItem, EvidencePack
 from .types import ReadState
 
@@ -58,6 +59,14 @@ class RouteDocument:
     span: tuple | None = None
     role: str | None = None
     event_time: int | None = None
+    # Ingestion-time safety gate (2026-08-18): screens `text` before a document can ever enter
+    # the routing index at all -- see `content_safety.py` for the full design rationale and the
+    # honest scope of what this does and does not catch. Off by default (`None`) -- opt-in, not
+    # a hot-path default, per the project owner's own explicit call: pass a `SafetyPolicy`
+    # (e.g. `DEFAULT_POLICY` for every category, or a custom policy to disable individual
+    # non-CSAM categories) to enable it for a specific document/deployment. CSAM is never
+    # skippable, by construction of `screen_text` itself, whenever a non-`None` policy is passed.
+    safety_policy: SafetyPolicy | None = None
 
     def __post_init__(self):
         if self.fact_id < 0 or self.scope_id < 0 or self.version < 1:
@@ -66,6 +75,10 @@ class RouteDocument:
             raise ValueError("text, session_id and source are required")
         if self.sequence is not None and self.sequence < 0:
             raise ValueError("sequence must be non-negative")
+        if self.safety_policy is not None:
+            verdict = screen_text(self.text, self.safety_policy)
+            if not verdict.safe:
+                raise UnsafeContentError(verdict.category, verdict.reason)
         if self.event_time is not None and self.event_time < 0:
             raise ValueError("event_time must be non-negative")
         if self.role is not None and self.role not in ("user", "assistant", "system", "tool"):
@@ -111,6 +124,7 @@ class RouteState(Enum):
     EVIDENCE = "evidence"
     ABSTENTION = "abstention"
     ABSTAIN_SCOPE = "abstain_scope"
+    ABSTAIN_UNSAFE_CONTENT = "abstain_unsafe_content"
 
 
 @dataclass(frozen=True)
@@ -438,20 +452,38 @@ class SemanticRouter:
         self.generator = generator
         self.verifier = verifier
 
-    def route(self, query: QueryEnvelope, limit: int, allow_scope_fallback: bool = True) -> RoutedResult:
+    def route(self, query: QueryEnvelope, limit: int, allow_scope_fallback: bool = True, *,
+             safety_policy: SafetyPolicy | None = None) -> RoutedResult:
         """`limit` (relaxed 2026-08-17, FH-06.2): originally restricted to the V25 experiment's
         own `{1,2,4,8,16,32}` enum -- a historical convention, not a mechanism dependency (`limit`
         is only ever used here as a candidate-list slice bound, never in power-of-2 arithmetic).
         A claim-level generator (`ClaimGenerator`/`ConformalClaimGenerator`, FH-06.1/FH-06.2)
         filling a large byte budget (`EvidencePack.budgeted_items(max_chars=...)`) with many short
         sentence-level candidates needs a claim COUNT well above 32 to avoid the candidate cap
-        binding before the byte budget does -- any positive integer is accepted now."""
+        binding before the byte budget does -- any positive integer is accepted now.
+
+        `safety_policy` (2026-08-18): query-time content-safety gate, second layer alongside
+        `RouteDocument`'s own ingestion-time gate -- see `content_safety.py`'s module docstring
+        for the full design rationale. Covers two cases the ingestion gate alone cannot: the
+        QUERY text itself (never screened at ingestion, since a query is not a `RouteDocument`),
+        and evidence that entered the index before this gate existed or via `safety_policy=None`
+        at ingestion. Off by default (`None`), matching `RouteDocument.safety_policy`'s own
+        opt-in default (project owner's own explicit call, 2026-08-18) -- pass a `SafetyPolicy`
+        to enable it. When enabled, any unsafe query text, or any unsafe content among the
+        verified evidence, aborts the whole route to `RouteState.ABSTAIN_UNSAFE_CONTENT` rather
+        than silently dropping just the offending item -- consistent with this project's own "a
+        confident wrong/partial answer is worse than an honest abstention" principle."""
         if not isinstance(limit, int) or limit < 1:
             raise ValueError("limit must be a positive integer")
         if query.scope_id != self.verifier.memory.scope_id:
             trace = RouteTrace(query.query_id, self.generator.channel, limit, 0, 0, 0, False,
                                "scope_mismatch")
             return RoutedResult(RouteState.ABSTAIN_SCOPE, EvidencePack.empty(query.query_id), trace)
+        if safety_policy is not None and not screen_text(query.text, safety_policy).safe:
+            trace = RouteTrace(query.query_id, self.generator.channel, limit, 0, 0, 0, False,
+                               "unsafe_query")
+            return RoutedResult(RouteState.ABSTAIN_UNSAFE_CONTENT,
+                                EvidencePack.empty(query.query_id), trace)
 
         primary = self.generator.generate(query, self.index, limit, same_session=True)
         candidates = list(primary.candidates)
@@ -483,6 +515,14 @@ class SemanticRouter:
                 rejections += 1
             else:
                 items.append(item)
+        if safety_policy is not None and any(
+                item.content is not None and not screen_text(item.content, safety_policy).safe
+                for item in items):
+            trace = RouteTrace(query.query_id, self.generator.channel, limit,
+                               len(candidates[:limit]), len(candidates[:limit]), rejections,
+                               fallback_used, "unsafe_evidence")
+            return RoutedResult(RouteState.ABSTAIN_UNSAFE_CONTENT,
+                                EvidencePack.empty(query.query_id), trace)
         generation_id = (self.verifier.memory.get(query.scope_id, items[0].fact_id).generation_id
                          if items else None)
         pack = EvidencePack.build(query.query_id, items, generation_id=generation_id,

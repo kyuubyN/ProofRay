@@ -27,6 +27,22 @@ assessment of impact. There is no bug-bounty program; acknowledgement in
   anti-injection policy live in the reader/integration layer, not in the
   storage core — the core's guarantee is provenance and integrity of what was
   stored, not the safety of what a caller does with it afterward.
+- `horizon_memory.content_safety` is a narrow, deterministic, zero-LLM
+  keyword/pattern screen for physical-harm instructions, malware, sensitive
+  PII/credentials and CSAM indicators — a different, narrower concern than the
+  prompt-injection point above. It can run at two points: ingestion
+  (`RouteDocument.__post_init__`, blocking construction outright via
+  `UnsafeContentError`) and query time (`SemanticRouter.route`, aborting to
+  `RouteState.ABSTAIN_UNSAFE_CONTENT` for an unsafe query or unsafe verified
+  evidence). **Off by default at both points** (`safety_policy=None`) — an
+  opt-in tool, not a hot-path default; pass `SafetyPolicy` (e.g.
+  `DEFAULT_POLICY` for every category) to enable it for a specific document
+  or route call. When enabled, every non-CSAM category is individually
+  toggleable; CSAM has no override. It is a first-line, best-effort
+  heuristic, not a guarantee, even when turned on — see the module's own
+  docstring for its honest scope, including why CSAM specifically needs
+  dedicated hash-matching infrastructure this module does not attempt to
+  replace.
 - Report a vulnerability, not a design disagreement, through the channel
   above: a verified integrity bypass, an authentication/authorization gap, a
   memory-safety issue, or a way to make the store return content that fails
