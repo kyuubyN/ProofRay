@@ -67,10 +67,13 @@ confirmation split.
 
 | Dataset | Metric | Original | Reopened (current engine) | Delta |
 |---|---|---:|---:|---:|
+| LoCoMo (1,676 q) | Hit@10 | 0.695619 | 0.695619 | 0 |
 | LoCoMo (1,676 q) | Hit@32 | 0.812452 | 0.812452 | 0 |
 | LoCoMo (1,676 q) | Recall@32 | 0.737101 | 0.737101 | 0 |
+| SciFact (206 q) | Hit@10 | 0.820388 | 0.820388 | 0 |
 | SciFact (206 q) | Hit@32 | 0.898058 | 0.898058 | 0 |
 | SciFact (206 q) | Recall@32 | 0.885922 | 0.885922 | 0 |
+| NFCorpus (323 q, Pareto tail) | Hit@10 | 0.687306 | 0.690402 | +0.0031 |
 | NFCorpus (323 q, Pareto tail) | Hit@32 | 0.758514 | 0.755418 | -0.0031 |
 | NFCorpus (323 q, Pareto tail) | Recall@32 | 0.210711 | 0.210521 | -0.0002 |
 
