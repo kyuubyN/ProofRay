@@ -1,0 +1,8 @@
+# Dependencies for the api/ surface (HTTP + MCP transports). Not core `horizon_memory`
+# dependencies -- the installable package itself stays minimal (numpy only, see pyproject.toml).
+# `requests` is also required for real (non-dry-run) calls through
+# src/horizon_memory/adapters/openai_compatible.py's RequestsTransport -- see that module's
+# docstring for why plain urllib doesn't work reliably against Cloudflare-fronted providers.
+flask>=3.0
+mcp[cli]>=2.0
+requests>=2.31
