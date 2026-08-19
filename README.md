@@ -81,10 +81,43 @@ is intentional and will not be hidden behind a broader marketing claim.
 The repository intentionally excludes private theory notebooks, private
 datasets, unpublished papers, benchmark answer keys and development logs.
 
+## Connecting Horizon
+
+The core never calls a model, a database driver, or a chat client on its own
+— every connection point below is explicit, optional, and lives at the edge,
+never inside routing, verification or composition.
+
+- **A database**: Horizon takes `documents: list[str]` per call. Query your
+  own database yourself and hand the results in — this bring-your-own-data
+  pattern is the supported way in today; no native DB driver ships yet.
+- **An AI model, local or hosted**: the optional `polish` layer hands the
+  already-composed, already-verified answer to any OpenAI-compatible
+  `chat/completions` endpoint purely to smooth prose. It never decides facts,
+  and a failed or rate-limited call always degrades to the original,
+  unmodified verified answer.
+
+  ```python
+  from horizon_memory.adapters import OpenAICompatiblePolishAdapter, PolishConfig
+
+  adapter = OpenAICompatiblePolishAdapter(allow_network=True)
+  config = PolishConfig(model="llama-3.1-8b-instant", api_key_env="GROQ_KEY")
+  result = adapter.polish(question, answer_text, config)
+  ```
+
+- **A chat client** (Claude Desktop, Cursor, and similar): `api/mcp_server.py`
+  exposes the same deterministic answer engine as an MCP tool, `horizon_ask`.
+- **A REST client**: `api/server.py` exposes `POST /v1/answers` over HTTP,
+  with the same optional `polish` option available as a request field.
+
+Full tutorial, runnable examples (quickstart, database, local/hosted model,
+chat client) and licensing notes:
+[HorizonAI Engine](HorizonAI%20Engine/README.md).
+
 ## Documentation
 
 - [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [HorizonAI Engine — tutorial, examples, MCP/REST/polish](HorizonAI%20Engine/README.md)
 - [Benchmarks and claim boundaries](BENCHMARKS.md)
 - [Research module](RESEARCH.md)
 - [Licensing policy](LICENSE_POLICY.md)
