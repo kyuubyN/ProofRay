@@ -54,6 +54,15 @@ Evidence is treated as untrusted input until its identity, source digest, span,
 scope and version are checked. Candidate generators are replaceable and may be
 wrong. A verifier, not a ranking score, decides whether a result has authority.
 
+`horizon_memory.content_safety` adds a separate, narrower, **opt-in** gate on
+the content itself: a deterministic, zero-LLM keyword/pattern screen for
+physical-harm instructions, malware, sensitive PII/credentials and CSAM
+indicators. Off by default; pass a `SafetyPolicy` at ingestion
+(`RouteDocument`) or query time (`SemanticRouter.route`) to enable it, which
+aborts to `RouteState.ABSTAIN_UNSAFE_CONTENT` on an unsafe query or unsafe
+verified evidence rather than silently dropping the offending item. See
+`SECURITY.md` for the full scope and its explicit limits.
+
 ## Research retrieval
 
 `horizon_memory.research` exposes experimental proof-pressure and feedback
