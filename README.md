@@ -112,6 +112,9 @@ never inside routing, verification or composition.
 - **A database**: Horizon takes `documents: list[str]` per call. Query your
   own database yourself and hand the results in — this bring-your-own-data
   pattern is the supported way in today; no native DB driver ships yet.
+  Runnable examples exist for SQLite, DuckDB, MongoDB, Redis, DynamoDB,
+  PostgreSQL, MySQL, Elasticsearch/OpenSearch and SpacetimeDB — see
+  [HorizonAI Engine](HorizonAI%20Engine/README.md#connect-a-database-bring-your-own-documents).
 - **An AI model, local or hosted**: the optional `polish` layer hands the
   already-composed, already-verified answer to any OpenAI-compatible
   `chat/completions` endpoint purely to smooth prose. It never decides facts,
