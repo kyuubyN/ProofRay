@@ -48,3 +48,10 @@ lab/datasets/raw/
 /logs/
 /tmp/
 /.agents/
+
+# Demo webapp: code is versioned, generated/derived corpora and the original
+# zip are not (largest is ~75 MB, regenerated from lab/results, not authored).
+/website/*.jsonl
+/website/Horizon_WebApp.zip
+/website/__pycache__/
+/website/horizon-data-web/

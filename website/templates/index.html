@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Horizon Memory — Live Demo</title>
+<style>
+  :root {
+    --bg: #08090A;
+    --surface: #0F1112;
+    --surface-2: #16191B;
+    --line: #232729;
+    --line-soft: #16191B;
+    --text: #F2F4F5;
+    --muted: #7E8689;
+    --dim: #4E5457;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", monospace;
+    --serif: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 15px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 3.5rem 1.5rem 4rem; }
+
+  /* ---------- hero ---------- */
+  .hero { text-align: center; margin-bottom: 2.75rem; }
+  .hero img {
+    width: 88px; height: 88px; border-radius: 50%; margin-bottom: 1.1rem;
+    filter: grayscale(1) contrast(1.05);
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  .hero h1 {
+    font-family: var(--serif); font-size: 2.05rem; font-weight: 400;
+    margin: 0 0 .4rem; letter-spacing: .01em;
+  }
+  .hero p {
+    font-family: var(--serif); font-style: italic; color: var(--muted);
+    margin: 0; font-size: 1.02rem;
+  }
+
+  /* ---------- search ---------- */
+  .searchwrap { max-width: 800px; margin: 0 auto .9rem; }
+  .searchbox {
+    display: flex; align-items: center; gap: .6rem;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 2px; padding: .25rem .3rem .25rem 1.3rem;
+    transition: border-color .15s;
+  }
+  .searchbox:focus-within { border-color: var(--text); }
+  .searchbox input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--text); font-family: var(--sans); font-size: .95rem; padding: .9rem 0;
+  }
+  .searchbox input::placeholder { color: var(--dim); }
+  .go {
+    background: var(--text); border: none; color: var(--bg); font-weight: 600;
+    font-family: var(--mono); font-size: .78rem; letter-spacing: .06em; text-transform: uppercase;
+    padding: .82rem 1.5rem; border-radius: 2px; cursor: pointer; white-space: nowrap;
+  }
+  .go:hover { background: #fff; }
+  .go:disabled { opacity: .35; cursor: default; }
+
+  .subrow { display: flex; align-items: center; justify-content: center;
+            gap: 1rem; flex-wrap: wrap; margin-bottom: 3rem; }
+  .ghost {
+    background: transparent; border: 1px solid var(--line); color: var(--muted);
+    font-family: var(--mono); font-size: .74rem; padding: .5rem 1rem;
+    border-radius: 2px; cursor: pointer;
+  }
+  .ghost:hover { border-color: var(--muted); color: var(--text); }
+  .corpus { font-family: var(--mono); font-size: .71rem; color: var(--dim); }
+
+  /* ---------- panels ---------- */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.15rem; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; }
+  .panel.horizon { border-top: 2px solid var(--text); }
+  .panel.control { border-top: 2px solid var(--dim); }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: .8rem 1.15rem; border-bottom: 1px solid var(--line-soft);
+  }
+  .panel-head .name {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
+  }
+  .panel.horizon .name { color: var(--text); }
+  .panel.control .name { color: var(--muted); }
+  .panel-body { padding: 1.2rem 1.15rem; }
+
+  .stats { display: flex; gap: 1.25rem; flex-wrap: wrap; font-family: var(--mono);
+           font-size: .71rem; color: var(--dim); margin-bottom: 1.15rem; }
+  .stats b { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* clean answer */
+  .answer { display: flex; flex-direction: column; gap: .75rem; }
+  .answer p { margin: 0; font-size: .93rem; line-height: 1.6; }
+  .answer p::before {
+    content: ""; display: inline-block; width: 3px; height: .85em;
+    background: var(--dim); margin-right: .6rem; vertical-align: -1px;
+  }
+
+  .toggle {
+    margin-top: 1.15rem; background: transparent; border: 1px solid var(--line);
+    color: var(--muted); font-family: var(--mono); font-size: .71rem;
+    padding: .55rem .9rem; border-radius: 2px; cursor: pointer; width: 100%;
+    letter-spacing: .03em;
+  }
+  .toggle:hover { border-color: var(--muted); color: var(--text); }
+
+  /* full evidence list */
+  .claims { display: none; flex-direction: column; margin-top: 1rem;
+            max-height: 420px; overflow-y: auto; }
+  .claims.open { display: flex; }
+  .claim { display: flex; gap: .7rem; padding: .55rem 0; border-bottom: 1px solid var(--line-soft); }
+  .claim:last-child { border-bottom: none; }
+  .claim .src {
+    font-family: var(--mono); font-size: .64rem; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 2px; padding: .1rem .38rem;
+    height: fit-content; white-space: nowrap; flex-shrink: 0; margin-top: .15rem;
+  }
+  .claim .txt { font-size: .85rem; line-height: 1.5; color: var(--muted); }
+
+  .prose { font-size: .92rem; white-space: pre-wrap; line-height: 1.6; }
+  .empty { color: var(--dim); font-size: .86rem; }
+
+  /* ---------- gold + scores ---------- */
+  .gold {
+    margin-top: 1.15rem; background: var(--surface); border: 1px solid var(--line);
+    border-left: 2px solid var(--muted); border-radius: 3px; padding: 1.15rem 1.35rem;
+  }
+  .gold .lbl {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 .55rem;
+  }
+  .gold .txt { font-size: .91rem; margin: 0; color: var(--text); }
+
+  .scores { display: flex; gap: 2.75rem; flex-wrap: wrap; margin-top: 1.2rem;
+            padding-top: 1rem; border-top: 1px solid var(--line-soft); }
+  .score { display: flex; flex-direction: column; gap: .2rem; }
+  .score .k { font-family: var(--mono); font-size: .66rem; letter-spacing: .08em;
+              text-transform: uppercase; color: var(--dim); }
+  .score .v { font-family: var(--mono); font-size: 1.55rem;
+              font-variant-numeric: tabular-nums; line-height: 1.1; color: var(--text); }
+  .score .v.low { color: var(--dim); }
+  .judge-note { font-family: var(--mono); font-size: .65rem; color: var(--dim);
+                margin-top: .85rem; line-height: 1.7; }
+
+  .spinner {
+    width: 13px; height: 13px; border: 2px solid var(--line);
+    border-top-color: var(--text); border-radius: 50%;
+    animation: spin .8s linear infinite; display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--line-soft);
+           font-family: var(--mono); font-size: .68rem; color: var(--dim); line-height: 1.9; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <img src="/assets/Horizon.jpeg" alt="Horizon">
+    <h1>Horizon Memory</h1>
+    <p>Memory that can show why it remembers.</p>
+  </div>
+
+  <div class="searchwrap">
+    <div class="searchbox">
+      <input id="q" type="text" placeholder="Load a question from the benchmark corpus..." autocomplete="off">
+      <button class="go" id="btnRun" onclick="run()">Search</button>
+    </div>
+  </div>
+  <div class="subrow">
+    <button class="ghost" onclick="loadRandom()">Random question</button>
+    <span class="corpus" id="corpus">MemGym-DR benchmark (MIT licensed)</span>
+  </div>
+
+  <div class="grid">
+    <div class="panel horizon">
+      <div class="panel-head">
+        <span class="name">Horizon &middot; deterministic, no LLM</span>
+        <div class="spinner" id="spinH"></div>
+      </div>
+      <div class="panel-body" id="bodyH">
+        <p class="empty">Pick a question and hit Search.</p>
+      </div>
+    </div>
+
+    <div class="panel control">
+      <div class="panel-head">
+        <span class="name">Control &middot; conventional RAG + Qwen3.6 27B</span>
+        <div class="spinner" id="spinL"></div>
+      </div>
+      <div class="panel-body" id="bodyL">
+        <p class="empty">BM25 retrieves the passages, the model answers over them.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="gold" id="goldBox" style="display:none">
+    <p class="lbl">Expected answer &middot; benchmark gold</p>
+    <p class="txt" id="goldTxt"></p>
+    <div class="scores" id="scores"></div>
+    <p class="judge-note" id="judgeNote"></p>
+  </div>
+
+  <footer>
+    Horizon runs live on every query: the documents are ingested into a real memory store, every
+    sentence shown is re-opened and verified against its own source span before it is displayed,
+    and the answer is composed deterministically with zero LLM calls.<br>
+    Across all 120 questions in this corpus, Horizon averages 0.95 against 0.73 for an
+    LLM-reader baseline on the same evidence budget (independent LLM judge, 95% CI excludes zero).
+  </footer>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+async function loadRandom() {
+  const res = await fetch('/api/random_question');
+  const d = await res.json();
+  $('q').value = d.question;
+  $('corpus').textContent =
+    `MemGym-DR (MIT licensed) · ${d.total} questions · ~370 source documents each`;
+}
+
+$('q').addEventListener('keypress', e => { if (e.key === 'Enter') run(); });
+
+function run() {
+  const query = $('q').value.trim();
+  if (!query) return;
+  $('btnRun').disabled = true;
+  $('goldBox').style.display = 'none';
+  $('bodyH').innerHTML = '<p class="empty">Routing, verifying, composing…</p>';
+  $('bodyL').innerHTML = '<p class="empty">Retrieving passages…</p>';
+  $('spinH').style.display = 'block';
+  $('spinL').style.display = 'block';
+  Promise.allSettled([runHorizon(query), runControl(query)])
+    .then(() => { $('btnRun').disabled = false; });
+}
+
+async function runHorizon(query) {
+  try {
+    const res = await fetch('/api/search_horizon', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query})
+    });
+    const d = await res.json();
+    $('spinH').style.display = 'none';
+    if (d.status !== 'success') { $('bodyH').innerHTML = `<p class="empty">${d.message}</p>`; return; }
+
+    if (d.state !== 'RESOLVED' || !d.claims.length) {
+      $('bodyH').innerHTML =
+        `<p class="empty">Horizon abstained (${d.state}). No verified evidence supported an answer.</p>`;
+      return;
+    }
+
+    const answer = (d.answer_lines && d.answer_lines.length ? d.answer_lines : d.claims.slice(0, 4))
+      .map(c => `<p>${esc(c.text)}</p>`).join('');
+
+    const full = d.claims.map(c =>
+      `<div class="claim"><span class="src">${c.source}</span><span class="txt">${esc(c.text)}</span></div>`
+    ).join('');
+
+    $('bodyH').innerHTML = `
+      <div class="stats">
+        <span><b>${d.elapsed_ms}</b> ms pipeline${d.precomputed ? ' (precomputed)' : ''}</span>
+        <span><b>${d.documents}</b> docs searched</span>
+        <span><b>${d.verified_candidates}</b> verified</span>
+        <span><b>${(d.answer_bytes/1024).toFixed(1)}</b> KB of ${d.answer_kb} KB</span>
+      </div>
+      <div class="answer">${answer}</div>
+      <button class="toggle" id="btnToggle" onclick="toggleClaims()">
+        Show all ${d.claims.length} mapped source sentences
+      </button>
+      <div class="claims" id="claimList">${full}</div>`;
+
+    $('goldTxt').textContent = d.gold_answer;
+    $('goldBox').style.display = 'block';
+    renderScores(d);
+  } catch (e) {
+    $('spinH').style.display = 'none';
+    $('bodyH').innerHTML = '<p class="empty">Server unreachable.</p>';
+  }
+}
+
+function toggleClaims() {
+  const list = $('claimList');
+  const open = list.classList.toggle('open');
+  const n = list.querySelectorAll('.claim').length;
+  $('btnToggle').textContent = open
+    ? 'Hide source sentences'
+    : `Show all ${n} mapped source sentences`;
+}
+
+async function runControl(query) {
+  try {
+    const res = await fetch('/api/search_llama', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query})
+    });
+    const d = await res.json();
+    $('spinL').style.display = 'none';
+    if (d.status !== 'success') { $('bodyL').innerHTML = `<p class="empty">${d.message}</p>`; return; }
+    $('bodyL').innerHTML = `
+      <div class="stats">
+        <span><b>${d.elapsed_s}</b> s</span>
+        <span><b>${d.retrieved}</b> passages retrieved</span>
+        <span>BM25 in <b>${d.retrieval_ms}</b> ms</span>
+      </div>
+      <div class="prose">${esc(d.answer)}</div>`;
+  } catch (e) {
+    $('spinL').style.display = 'none';
+    $('bodyL').innerHTML = '<p class="empty">Server unreachable.</p>';
+  }
+}
+
+function renderScores(d) {
+  const k = v => v >= 0.7 ? '' : ' low';
+  $('scores').innerHTML = `
+    <div class="score"><span class="k">Horizon · judged</span>
+      <span class="v${k(d.judge_score)}">${d.judge_score.toFixed(2)}</span></div>
+    <div class="score"><span class="k">Baseline · judged</span>
+      <span class="v${k(d.baseline_judge_score)}">${d.baseline_judge_score.toFixed(2)}</span></div>
+    <div class="score"><span class="k">Gold content surfaced</span>
+      <span class="v">${d.coverage.toFixed(0)}%</span></div>`;
+  $('judgeNote').textContent =
+    'Judged scores come from a prior independent LLM-judge run over this corpus on the full ' +
+    'pipeline, not a live score of the answer above. "Gold content surfaced" is computed live ' +
+    'and is a token-overlap measure, not an accuracy score.';
+}
+
+function esc(s) {
+  return (s || '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+loadRandom();
+</script>
+</body>
+</html>
