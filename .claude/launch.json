@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "horizon-webapp",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["website/web_app.py"],
+      "port": 5050
+    }
+  ]
+}

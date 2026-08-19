@@ -1,0 +1,5 @@
+# Install the core package first (from the repo root): pip install -e .
+# Then this file's own dependencies:
+flask>=3.0
+mcp[cli]>=2.0
+requests>=2.31

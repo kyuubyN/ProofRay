@@ -28,6 +28,10 @@ lab/datasets/raw/
 
 # External literature is inspected locally; redistribution rights are not assumed.
 /2601.09913v1.pdf
+
+# Third-party dictionaries/lexicons pulled in for local experimentation (Jieba's full
+# dictionary, PT lexicons, English word lists) -- large external data, not project source.
+/lang/
 /2605.20833v1.pdf
 /tmp/pdfs/
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from .api import HorizonMemory
 from .config import HorizonConfig, VALUE_MAX, VALUE_MIN
+from .engine_profile import DEFAULT_PROFILE, EngineProfile
+from .answer_engine import AnsweredClaim, AnsweredResult, HorizonAnswerEngine
 from .partition import (
     CausalPartitioner, PartitionContext, PartitionIndex, PartitionResult, PartitionStrategy,
 )
@@ -56,6 +58,7 @@ from .types import (
 
 __all__ = [
     "HorizonMemory", "HorizonConfig", "VALUE_MAX", "VALUE_MIN",
+    "DEFAULT_PROFILE", "EngineProfile", "AnsweredClaim", "AnsweredResult", "HorizonAnswerEngine",
     "WriteResult", "WriteState", "ReadResult", "ReadState", "ReadViewHandle",
     "QueryResult", "QueryState", "Provenance", "CompactResult", "CompactState",
     "RecoverResult", "RecoverState", "ExportResult", "ExportedFact", "AuditReport",
