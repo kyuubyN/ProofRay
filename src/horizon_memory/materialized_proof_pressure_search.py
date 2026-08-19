@@ -75,8 +75,21 @@ class MaterializedRawCausalSyndromeIndex:
             if query.numbers and set(query.numbers).intersection(value.numbers):
                 observable += 1.0
             contradiction = 0.0
-            if query.numbers and value.numbers and not set(query.numbers).intersection(value.numbers):
-                contradiction += 1.0
+            # A prior version of this rule fired the FULL 1.0 contradiction penalty whenever the
+            # query and a candidate both mentioned some number and those specific numbers didn't
+            # match -- e.g. a MemGym-DR question giving "approximately 52% of such faults" as
+            # unrelated background context, penalizing a candidate correctly discussing a totally
+            # different metric ("5.3% computational area overhead") as if it contradicted the
+            # question. Confirmed 2026-08-18 as a real, severe defect, not a tuning question:
+            # traced a specific real case (MemGym-DR ordinal 52) where this rule alone crushed a
+            # gold-critical, otherwise well-matching candidate (lexical=0.44, sublexical=0.62,
+            # entity=0.67, relation=0.8) down to amplitude ~0.01, well below weaker but
+            # number-free competitors. "The question and this candidate both mention some number,
+            # and the numbers differ" has no reliable way to tell "these are the same fact stated
+            # differently" from "these are two different facts, only one of which the question
+            # even asked about" -- removed rather than re-tuned, since there is no cheap general
+            # signal here to recover (this is not the same kind of fix as the polarity/modality
+            # rules below, which key on an actual negation/hedge word, a real per-claim signal).
             if query.polarity == "negative" and value.polarity == "positive":
                 contradiction += .5
             if query.modality == "asserted" and value.modality == "modal":
