@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from _engine_bridge import (
     build_documents, build_polish_config, new_answer_id_and_timestamp, run_polish, serialize,
-    ENGINE,
+    ENGINE, MAX_DOCUMENTS,
 )
 from mcp.server.mcpserver import MCPServer
 
@@ -37,6 +37,8 @@ def _horizon_ask_impl(question: str, documents: list[str], include_sources: bool
         raise ValueError("`question` is required")
     if not documents:
         raise ValueError("`documents` must be a non-empty array of strings")
+    if len(documents) > MAX_DOCUMENTS:
+        raise ValueError(f"`documents` exceeds the {MAX_DOCUMENTS}-document limit")
 
     doc_tuple = build_documents(documents)
 

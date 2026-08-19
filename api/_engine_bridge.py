@@ -29,7 +29,10 @@ from horizon_memory.adapters.openai_compatible import Transport, RequestsTranspo
 SCOPE_ID = 1
 SESSION_ID = "api"
 ENGINE = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
-STORE: dict[str, tuple[AnsweredResult, int]] = {}  # id -> (result, created_unix_ts)
+STORE: dict[str, tuple[AnsweredResult, int, str | None, str | None]] = {}
+# id -> (result, created_unix_ts, polished_answer, polish_state) -- the polish fields are
+# persisted alongside the result so a later GET doesn't silently lose the polish work a POST
+# already paid for (2026-08-19, found via code review).
 
 MAX_DOCUMENTS = 2000  # a defensive ceiling, not a tuned limit -- see api/README.md
 

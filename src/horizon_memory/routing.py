@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
-from .content_safety import DEFAULT_POLICY, SafetyPolicy, UnsafeContentError, screen_text
+from .content_safety import SafetyPolicy, UnsafeContentError, screen_text
 from .evidence import EvidenceItem, EvidencePack
 from .types import ReadState
 

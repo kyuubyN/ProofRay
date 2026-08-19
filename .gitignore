@@ -11,9 +11,15 @@ venv/
 .env.*
 !.env.example
 horizon-data/
+horizon-data-web/
 *.key
 *.pem
 *.log
+
+# Local copies of the MemGym-DR benchmark (huggingface.co/datasets/MemGym/memgym-dr-instances)
+# used to test the webapp demo -- multi-GB, never meant to be versioned here.
+/mock_dataset.jsonl
+/real_mock.jsonl
 
 # Laboratório: dados brutos externos NUNCA versionados (licença + holdout selado)
 lab/datasets/raw/
