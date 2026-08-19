@@ -51,6 +51,43 @@ Hit@1 was preserved in these evaluations. Horizon also used fewer mean
 evidence bytes in the reported protocols. The supported claim is improvement
 over BM25 on these frozen evaluations, not universal search superiority.
 
+### Diagnostic re-open with the current engine (not a fresh holdout claim)
+
+All three rows above come from one-shot frozen holdouts already opened once
+against a 2026-08-13 engine snapshot. At the project owner's explicit
+direction, the same three holdouts were reopened against the current engine
+(this session's contradiction-channel numbers-rule fix and
+modality-confirmed-finding exception, both found and fixed on an unrelated
+dataset) to check whether either fix changes retrieval quality here too.
+**This is a genuine, acknowledged departure from this project's own "open a
+holdout exactly once" discipline** — the numbers below are diagnostic-only,
+not a second independent holdout confirmation, following the same downgrade
+already applied elsewhere in this project's own record to a re-read
+confirmation split.
+
+| Dataset | Metric | Original | Reopened (current engine) | Delta |
+|---|---|---:|---:|---:|
+| LoCoMo (1,676 q) | Hit@32 | 0.812452 | 0.812452 | 0 |
+| LoCoMo (1,676 q) | Recall@32 | 0.737101 | 0.737101 | 0 |
+| SciFact (206 q) | Hit@32 | 0.898058 | 0.898058 | 0 |
+| SciFact (206 q) | Recall@32 | 0.885922 | 0.885922 | 0 |
+| NFCorpus (323 q, Pareto tail) | Hit@32 | 0.758514 | 0.755418 | -0.0031 |
+| NFCorpus (323 q, Pareto tail) | Recall@32 | 0.210711 | 0.210521 | -0.0002 |
+
+LoCoMo and SciFact's headline Hit@32/Recall@32 are byte-identical to the
+original holdout run. The fixes found this session (on MemGym-DR, an
+unrelated multi-hop QA dataset) don't move these two benchmarks: their
+queries are short, single-topic factual or conversational questions that
+rarely contain the "the question also mentions an unrelated number" pattern
+the contradiction-channel fix specifically targeted. NFCorpus's Pareto-tail
+arm shows a small, real shift — Hit@32 down 0.31pp, Hit@10 up an equal and
+opposite 0.31pp, every other secondary metric moving by under 0.1pp in
+either direction — consistent with the fix causing genuine, small reranking
+noise near the tail of the candidate list, not a systematic regression.
+BM25's own numbers (which never touch the contradiction channel) are
+unchanged to the last decimal in all three datasets, confirming nothing else
+in the pipeline shifted.
+
 ## Natural-language reader pilot
 
 A public 30-question LongMemEval-S pilot compared no memory, turn-level BM25
