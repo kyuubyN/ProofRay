@@ -42,10 +42,42 @@ name; a confident wrong answer never happens, Horizon declines instead.
 ## Connect a database (bring your own documents)
 
 Horizon has no database of its own -- `documents` is always a plain list/tuple you build. "Connect
-a database" means: run your own query, turn each row into a `RouteDocument`, pass them in. See
-[`examples/sqlite_documents_example.py`](examples/sqlite_documents_example.py) for a complete,
-runnable walkthrough (builds a small SQLite fixture, queries it, feeds the rows to Horizon) --
-swap the SQLite connection for Postgres/MySQL/an API call/anything else and the rest is unchanged:
+a database" means: run your own query, turn each row into a `RouteDocument`, pass them in. Nine
+complete, runnable walkthroughs:
+
+- [`examples/sqlite_documents_example.py`](examples/sqlite_documents_example.py) -- builds a
+  small SQLite fixture, queries it, feeds the rows to Horizon. No server, nothing to install.
+- [`examples/duckdb_documents_example.py`](examples/duckdb_documents_example.py) -- same idea,
+  embedded and in-memory by default. No server, always works.
+- [`examples/mongodb_documents_example.py`](examples/mongodb_documents_example.py) -- same
+  pattern against a MongoDB collection; runs with no server at all against `mongomock` by
+  default, or point it at a real deployment with `MONGODB_URI`.
+- [`examples/redis_documents_example.py`](examples/redis_documents_example.py) -- same pattern
+  against Redis keys; runs with no server against `fakeredis` by default, or point it at a real
+  deployment with `REDIS_URL`.
+- [`examples/dynamodb_documents_example.py`](examples/dynamodb_documents_example.py) -- same
+  pattern against a DynamoDB table; runs with no real AWS account against `moto` by default, or
+  point it at a real table with `DYNAMODB_USE_REAL_AWS=1`.
+- [`examples/postgres_documents_example.py`](examples/postgres_documents_example.py) -- needs a
+  real Postgres instance (`POSTGRES_DSN`); there's no in-process stand-in for Postgres, so this
+  one won't run until you point it at a server you already have.
+- [`examples/mysql_documents_example.py`](examples/mysql_documents_example.py) -- same idea for
+  MySQL (`MYSQL_HOST`/`MYSQL_USER`/`MYSQL_PASSWORD`/`MYSQL_DB`), also requires a real instance.
+- [`examples/elasticsearch_documents_example.py`](examples/elasticsearch_documents_example.py)
+  -- same idea for Elasticsearch/OpenSearch (`ELASTICSEARCH_URL`); the most direct "already
+  have a search index, want deterministic answers instead" example here, also requires a real
+  cluster.
+- [`examples/spacetimedb_documents_example.py`](examples/spacetimedb_documents_example.py) --
+  talks to SpacetimeDB's HTTP SQL endpoint directly (no maintained Python SDK exists); needs a
+  local `spacetime start` + a published module (`SPACETIMEDB_URL`/`SPACETIMEDB_DATABASE`).
+
+None of these examples start a database server on your behalf -- the five with a pure-Python,
+no-server mode (SQLite, DuckDB, MongoDB via `mongomock`, Redis via `fakeredis`, DynamoDB via
+`moto`) run out of the box; the other four (Postgres, MySQL, Elasticsearch, SpacetimeDB) print
+setup instructions and exit cleanly if their server isn't already running, rather than trying to
+launch one.
+
+Swap any one's query for your own schema/API call and the rest is unchanged:
 
 ```python
 rows = your_db_connection.execute("SELECT id, body FROM articles").fetchall()

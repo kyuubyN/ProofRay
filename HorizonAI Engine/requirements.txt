@@ -3,3 +3,34 @@
 flask>=3.0
 mcp[cli]>=2.0
 requests>=2.31
+
+# Only needed for examples/mongodb_documents_example.py -- not a Horizon dependency, this
+# example just demonstrates the bring-your-own-database pattern against MongoDB specifically.
+pymongo>=4.6
+mongomock>=4.1
+
+# Only needed for examples/postgres_documents_example.py.
+psycopg2-binary>=2.9
+
+# Only needed for examples/mysql_documents_example.py.
+pymysql>=1.1
+
+# Only needed for examples/redis_documents_example.py -- fakeredis lets it run with no server.
+redis>=5.0
+fakeredis>=2.20
+
+# examples/spacetimedb_documents_example.py needs no extra package beyond `requests` above --
+# there's no maintained official Python SDK for SpacetimeDB, so that example talks to its
+# HTTP SQL endpoint directly.
+
+# Only needed for examples/duckdb_documents_example.py -- embedded, no server, in-memory by
+# default, so this one has no "no-server fallback" to document: it just always works.
+duckdb>=1.0
+
+# Only needed for examples/elasticsearch_documents_example.py.
+elasticsearch>=8.0
+
+# Only needed for examples/dynamodb_documents_example.py -- moto[dynamodb] lets it run with no
+# real AWS account or server, the same spirit as mongomock/fakeredis above.
+boto3>=1.34
+moto[dynamodb]>=5.0

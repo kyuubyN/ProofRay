@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "horizon-webapp",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["website/web_app.py"],
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd website && python3 web_app.py"],
       "port": 5050
     }
   ]
