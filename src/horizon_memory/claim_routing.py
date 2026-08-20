@@ -52,7 +52,21 @@ from .routing import Candidate, CandidateGenerator, CandidateList
 # followed by whitespace/EOL (file extensions, code operators like `(?.)`), validated against
 # 8,956 real MemGym-DR excerpts with zero fragments worse than the prior regex. See that file's
 # own comment for the full rationale and the accepted terminal-quote under-segmentation trade-off.
-_SENTENCE = re.compile(r"(?:[^\n.!?]|[.!?](?!\s|\Z))+(?:[.!?]+(?=\s|\Z)|(?=\n|\Z))", re.UNICODE)
+#
+# CJK terminators (。！？…) added (2026-08-19, found via code review, confirmed reproducible: a
+# 3-sentence Chinese document collapsed into one giant claim span, defeating this module's own
+# stated purpose -- "sentence-level extraction, not whole-document candidates" -- for CJK text
+# entirely). They can't reuse the ASCII terminators' own `(?!\s|\Z)`/`(?=\s|\Z)` whitespace
+# lookaround: CJK writing has no space after sentence punctuation at all ("北京很好。上海也很
+# 好。" -- requiring trailing whitespace would mean these never terminate anything), and unlike
+# ASCII "." they are never ambiguous with a decimal point or file extension, so no lookaround
+# protection is needed for them -- they always terminate. Accepted trade-off, same shape as the
+# terminal-quote one already documented above for the ASCII case: quoted CJK dialogue containing
+# 。！？ inside the quotes under-segments into fragments starting with a bare closing quote,
+# rather than corrupting into worse fragments -- not attempted to fix here, matching the existing
+# precedent for the identical ASCII trade-off.
+_SENTENCE = re.compile(
+    r"(?:[^\n.!?。！？…]|[.!?](?!\s|\Z))+(?:[.!?]+(?=\s|\Z)|[。！？…]+|(?=\n|\Z))", re.UNICODE)
 
 # (lexical, sublexical, entity, relation, observable, contradiction)
 DEFAULT_WEIGHTS: tuple[float, float, float, float, float, float] = (0.6, 0.4, 0.0, 0.0, 0.0, 0.5)
