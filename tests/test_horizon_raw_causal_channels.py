@@ -118,3 +118,52 @@ def test_is_cjk_and_segment_zh_basic_behavior():
     words = segment_zh("北京的地铁系统")
     assert "北京" in words
     assert "".join(words) == "北京的地铁系统"
+
+
+def test_portuguese_no_preposition_is_not_english_negation():
+    # 2026-08-20 (found via code review): PT "no" (em+o, a locative/temporal preposition) used to
+    # be an unconditional member of `_NEGATION`, so every PT sentence using it as a preposition
+    # had its polarity silently inverted -- measured at 22.0% of real PT texts in this project's
+    # own dataset_chat corpora, feeding spurious contradiction penalties and fact retractions
+    # downstream. Covers accented, unaccented, and short informal PT phrasing.
+    for text in (
+        "Trabalho no escritório todos os dias.",
+        "O churrasco será no sábado às 14h.",
+        "Salvamos o arquivo no servidor de produção.",
+        "Bota no carro.",
+        "Deixei no carro.",
+        "No Rio comprei suvenir.",
+        "No dia 15 teremos novidades.",
+    ):
+        assert observe_raw_text(text).polarity == "positive", text
+
+
+def test_english_no_negation_still_recognized_after_pt_disambiguation():
+    for text in (
+        "No way we are doing that.",
+        "No problem, I can help with that.",
+        "There is no doubt about the results.",
+        "No.",
+        "I vote no.",
+        "She is no longer working here.",
+        "We have no more budget this quarter.",
+    ):
+        assert observe_raw_text(text).polarity == "negative", text
+
+
+def test_portuguese_genuine_negation_still_recognized():
+    for text in (
+        "Eu não vou ao escritório hoje.",
+        "Nunca estive em Florianópolis.",
+        "Ficamos sem conexão durante a tarde.",
+    ):
+        assert observe_raw_text(text).polarity == "negative", text
+
+
+def test_known_gap_short_present_tense_pt_verb_before_no_is_not_recognized():
+    # Documented, accepted gap (see `_is_negation_no`'s own docstring): a present-tense 3rd-person
+    # PT verb ending in a bare "-a"/"-e" right before "no" is not enough signal on its own, because
+    # that suffix shape also matches ordinary English words in the same position ("vote no" must
+    # keep working). Pinned here so a future change to the verb-suffix heuristic is a deliberate,
+    # measured decision, not an accidental behavior change.
+    assert observe_raw_text("Chove no campo.").polarity == "negative"

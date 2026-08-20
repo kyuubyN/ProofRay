@@ -130,8 +130,62 @@ _CLOCK = re.compile(
     r"saturday|sunday|today|tomorrow|yesterday|week|month|year|morning|afternoon|"
     r"evening|night|january|february|march|april|may|june|july|august|september|"
     r"october|november|december)\b", re.IGNORECASE)
-_NEGATION = frozenset(("no", "not", "never", "neither", "nor", "without", "didn't",
+_NEGATION = frozenset(("not", "never", "neither", "nor", "without", "didn't",
                        "doesn't", "don't", "wasn't", "weren't", "isn't", "aren't"))
+_PT_NEGATION = frozenset(("não", "nao", "nunca", "jamais", "nem", "nada", "ninguém",
+                          "ninguem", "nenhum", "nenhuma", "tampouco", "sem"))
+# "no" is handled separately from the two unconditional sets above: it is the ONLY token in either
+# language that collides with the other -- Portuguese "no" (em+o, a locative/temporal preposition:
+# "no escritorio", "no sabado") is a homograph of English negation "no" ("no way", "there is no
+# doubt"). No other PT contraction (na, nos, nas, num...) happens to spell an English word, so this
+# is a one-token problem, not a general PT/EN collision. Before this fix (2026-08-20, found via
+# code review), EVERY Portuguese sentence containing "no" as a preposition had its polarity
+# silently inverted to "negative" -- measured at 823/3,739 (22.0%) of real PT texts across this
+# project's own `dataset_chat` corpora, which in turn fed spurious contradiction penalties into
+# `materialized_proof_pressure_search.py`'s ranking and spurious fact retraction into
+# `supersession_collapse.py`'s polarity assignment for any PT text mentioning a place or date.
+_EN_NO_COLLOCATIONS = frozenset((
+    "way", "problem", "problems", "worries", "doubt", "doubts", "longer", "more", "one", "matter",
+    "clue", "idea", "ideas", "thanks", "comment", "comments", "chance", "chances", "risk", "risks",
+    "stress", "biggie", "shot", "issue", "issues", "error", "errors", "bug", "bugs", "data",
+    "match", "matches", "effect", "effects", "need", "point", "reason", "reasons", "wonder", "cap",
+    "hesitation", "exception", "exceptions", "harm", "hit", "hits", "disk", "space", "question",
+    "questions", "luck", "further", "less", "sooner", "meetings", "meeting", "other", "new",
+    "where", "how", "what", "who", "which", "when", "why", "we", "i", "you", "they", "he", "she"))
+_EN_NO_PRECEDERS = frozenset((
+    "ain't", "aint", "there", "is", "was", "are", "were", "have", "has", "had", "with", "wait",
+    "oh", "said", "say", "says", "voted", "vote", "answered", "answer", "replied", "reply"))
+_STANDALONE_NO = re.compile(
+    r"(?:^|\s)no\s*[,!?;:—](?:\s|$)|(?:^|\s)no\.(?:\s|$|[\"'\)\]])", re.IGNORECASE)
+_PT_ACCENT_CHAR = re.compile(r"[ºªáéíóúâêôãõçàüÁÉÍÓÚÂÊÔÃÕÇÀÜ]")
+# Closed-class PT words that never double as English content words, so their presence anywhere in
+# the sentence is unambiguous evidence of Portuguese context -- includes common informal/chat
+# abbreviations (blz, vlw, mano...), matching this module's own established practice of covering
+# casual register rather than only formal PT (see `_zh_dictionary`'s own corpus-vocabulary stance).
+_PT_CONTEXT_WORDS = frozenset("""
+da das dos na nas nos pra pro pras pros pelo pela pelos pelas num numa nuns numas
+mais mas como quando onde quem qual quais quanto quanta quantos quantas
+esse essa esses essas este esta estes estas aquele aquela aqueles aquelas isto isso aquilo
+meu minha meus minhas seu sua seus suas nosso nossa nossos nossas dele dela deles delas
+voce você vocês voces ele ela eles elas muito muita muitos muitas tao tão ja já tambem também
+aqui ali la lá ai aí foi foram era eram sou somos sao são vai vao vão vou vamos bora
+tem têm tinha tinham esta está estao estão estava estavam tava tavam temos tive teve tiveram
+fiz fez fizemos fizeram deu dei demos deram fica ficou ficam ficamos
+mandei mandou pedi pediu achou colocou coloquei pegou peguei comprei comprou pagou paguei
+fechou fechei abriu abri saiu saí cheguei chegou passei passou dia dias mes mês meses ano anos
+hoje hj ontem amanha amanhã hora horas minuto minutos semana feira domingo segunda terca terça
+quarta quinta sexta sabado sábado chave sala andar casa quarto porta carro rua cidade projeto
+arquivo não nao nunca jamais nem nada ninguem ninguém nenhum nenhuma
+blz vlw slk tamo mano nois gnt krl agr mto mt dboa msm
+""".split())
+_PT_VERB_SUFFIX = re.compile(
+    r"(?:[aei]ram|[aei]vam|[aei]mos|ando|endo|indo|ou|ei|eu|iu|aria|ariam|asse|esse|isse"
+    # Past participles (-ado/-ada/-ido/-ida, singular or plural: "aprovado", "confirmada",
+    # "instalados") -- added separately from the tense suffixes above (2026-08-20, found by
+    # re-measuring real corpus impact after the initial fix): unlike the present-tense "-a"/"-e"
+    # ending deliberately left uncovered above, ordinary English vocabulary essentially never ends
+    # in "-ado"/"-ida", so this carries materially lower collision risk.
+    r"|ad[oa]s?|id[oa]s?)$")
 _MODAL = frozenset(("may", "might", "could", "would", "should", "perhaps", "maybe", "plan",
                     "plans", "planned", "hope", "hopes", "want", "wants"))
 # 2026-08-18 (plan item 1b): a claim reporting an already-confirmed finding ("the study
@@ -165,6 +219,37 @@ def _stem(token: str) -> str:
 def _grams(token: str) -> tuple[str, ...]:
     padded = f"^{token}$"
     return tuple(sorted({padded[index:index + 3] for index in range(max(0, len(padded) - 2))}))
+
+
+def _is_negation_no(text: str, lowered: tuple[str, ...], index: int) -> bool:
+    """True if the "no" token at `lowered[index]` is English negation, not Portuguese "no"
+    (em+o). See `_EN_NO_COLLOCATIONS`'s own comment for why this token specifically needs
+    disambiguation. Checked in order: a single-word utterance ("No." alone); an English word
+    immediately before/after that only makes sense with negation "no" ("no way", "there is no");
+    a standalone punctuated particle ("No,"/"No."); then Portuguese context (accented character,
+    a closed-class PT word, or a PT verb-suffix-shaped token anywhere in the sentence) rules it a
+    preposition. English negation otherwise.
+
+    Known, accepted gap: a short PT sentence whose only clue is a PRESENT-tense 3rd-person verb
+    right before "no" ("Chove no campo.", "Cai no chao.") is not recognized -- present-tense PT
+    verbs end in a bare "-a"/"-e", a suffix pattern too broad to add here without also matching
+    ordinary English words in exactly this position ("I vote no." would flip to PT context and
+    silently stop being recognized as negation). Not fixed; a materially different, narrower
+    signal would be needed first, per this project's own resurrection-matrix discipline."""
+    if len(lowered) == 1:
+        return True
+    next_token = lowered[index + 1] if index + 1 < len(lowered) else None
+    prev_token = lowered[index - 1] if index > 0 else None
+    if next_token in _EN_NO_COLLOCATIONS or prev_token in _EN_NO_PRECEDERS:
+        return True
+    if _STANDALONE_NO.search(text):
+        return True
+    if _PT_ACCENT_CHAR.search(text):
+        return False
+    for token in lowered:
+        if token in _PT_CONTEXT_WORDS or (len(token) >= 4 and _PT_VERB_SUFFIX.search(token)):
+            return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -202,8 +287,10 @@ def observe_raw_text(text: str, *, question: bool = False) -> RawCausalChannels:
     relations = tuple(sorted({f"{left}>{right}" for left, right in zip(lexical, lexical[1:])
                               if left != right}))
     lowered = tuple(token.casefold().replace("’", "'") for token in raw_tokens)
-    polarity = "negative" if any(token in _NEGATION or token.endswith("n't")
-                                  for token in lowered) else "positive"
+    polarity = "negative" if any(
+        token in _NEGATION or token in _PT_NEGATION or token.endswith("n't")
+        or (token == "no" and _is_negation_no(text, lowered, index))
+        for index, token in enumerate(lowered)) else "positive"
     modality = "modal" if any(token in _MODAL for token in lowered) else "asserted"
     interrogative = "none"
     if question:

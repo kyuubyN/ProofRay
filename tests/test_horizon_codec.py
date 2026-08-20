@@ -70,6 +70,14 @@ class ProofCarryingCodecTests(unittest.TestCase):
         self.assertIn("quote:project red", charges)
         self.assertIn("tag:#launch", charges)
 
+    def test_semantic_charges_do_not_flag_portuguese_no_preposition(self):
+        # 2026-08-20 (found via code review): "no" (em+o, a PT preposition) used to be an
+        # unconditional member of `_NEGATION`, so an ordinary PT sentence like this one would
+        # spuriously carry a "neg:no" loss-sensitive charge. See `raw_causal_channels.py`'s
+        # sibling fix for the full history of this collision.
+        charges = semantic_charges("Salvamos o arquivo no servidor de produção.")
+        self.assertFalse(any(charge == "neg:no" for charge in charges))
+
     def test_budget_never_slices_a_measurement(self):
         _, parent = self._pack()
         compressed, _ = ProofCarryingCodec().compress("smoker", parent, max_chars=1)
