@@ -10,7 +10,98 @@ from dataclasses import dataclass
 
 
 _WORD = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
-_NUMBER = re.compile(r"\b\d+(?:[.,]\d+)?\b")
+# `\b\d+\b` used to require a real Unicode word-boundary on both sides -- but CJK ideographs are
+# `\w`, so a digit run glued directly to CJK text on either side (e.g. "在2023年", completely
+# ordinary Chinese phrasing, not an identifier) never had a `\b` transition and was silently
+# invisible to this channel. Uses explicit ASCII-alphanumeric lookaround instead of `\b` so a CJK
+# neighbor counts as a boundary while "abc123def" still correctly does not split out "123"
+# (2026-08-19, found via code review, confirmed by direct reproduction).
+_NUMBER = re.compile(r"(?<![A-Za-z0-9_])\d+(?:[.,]\d+)?(?![A-Za-z0-9_])")
+# CJK ideographs (CJK Unified Ideographs + Extension A) -- no letter-casing, no whitespace between
+# words, so neither `_WORD`'s regex nor `_stem`'s suffix rules apply meaningfully to them.
+_CJK_CHAR = re.compile(r"[一-鿿㐀-䶿]")
+_CJK_RUN = re.compile(r"[一-鿿㐀-䶿]+|[^一-鿿㐀-䶿]+")
+_MAX_ZH_WORD_LEN = 4
+
+
+def is_cjk(text: str) -> bool:
+    return bool(_CJK_CHAR.search(text))
+
+
+def segment_zh(text: str) -> list[str]:
+    """Bidirectional maximum-matching segmentation against `ZH_WORD_DICTIONARY`. Falls back to
+    single characters for spans the dictionary doesn't cover -- an incomplete dictionary fails
+    toward more (but still real) single-character tokens, not spurious multi-character ones.
+    Ported here (2026-08-19) from `supersession_collapse.py`, its original home -- this is now
+    the canonical copy; `supersession_collapse.py` imports it from here instead of keeping its
+    own duplicate, since `observe_raw_text` below needed the same segmentation to fix a much
+    more fundamental gap: `_WORD`'s regex has no concept of CJK word boundaries at all, so an
+    entire punctuation-delimited Chinese clause previously matched as ONE opaque token -- two
+    clauses describing the same fact in different words shared exactly zero lexical overlap,
+    confirmed end-to-end: a trivial Chinese question with an unambiguous answer in the same
+    document abstained completely through the real `HorizonAnswerEngine` pipeline."""
+    from .zh_word_dictionary import ZH_WORD_DICTIONARY as _DICT
+
+    chars = list(text)
+    n = len(chars)
+
+    def _forward() -> list[str]:
+        words, i = [], 0
+        while i < n:
+            if not _CJK_CHAR.match(chars[i]):
+                words.append(chars[i])
+                i += 1
+                continue
+            matched = None
+            for length in range(min(_MAX_ZH_WORD_LEN, n - i), 1, -1):
+                candidate = "".join(chars[i:i + length])
+                if candidate in _DICT:
+                    matched = candidate
+                    break
+            words.append(matched or chars[i])
+            i += len(matched) if matched else 1
+        return words
+
+    def _backward() -> list[str]:
+        words, i = [], n
+        while i > 0:
+            if not _CJK_CHAR.match(chars[i - 1]):
+                words.append(chars[i - 1])
+                i -= 1
+                continue
+            matched = None
+            for length in range(min(_MAX_ZH_WORD_LEN, i), 1, -1):
+                candidate = "".join(chars[i - length:i])
+                if candidate in _DICT:
+                    matched = candidate
+                    break
+            words.append(matched or chars[i - 1])
+            i -= len(matched) if matched else 1
+        return list(reversed(words))
+
+    forward, backward = _forward(), _backward()
+    if len(forward) != len(backward):
+        return forward if len(forward) < len(backward) else backward
+    singles = lambda seq: sum(1 for w in seq if len(w) == 1 and _CJK_CHAR.match(w))
+    return forward if singles(forward) <= singles(backward) else backward
+
+
+def _split_cjk(token: str) -> list[str]:
+    """A `_WORD` match may glue a CJK run directly to adjacent Latin/digit characters with no
+    separator (e.g. "Meridian项目" or "2023年") since both scripts are `\\w`. Splits back into
+    maximal same-script pieces first (so `segment_zh` only ever receives pure CJK text -- it
+    treats any non-CJK character as a single-character passthrough, which would otherwise shred
+    an embedded Latin word into individual letters), then segments each CJK piece into real
+    dictionary words instead of leaving it as one opaque blob."""
+    if not _CJK_CHAR.search(token):
+        return [token]
+    pieces = []
+    for piece in _CJK_RUN.findall(token):
+        if _CJK_CHAR.match(piece):
+            pieces.extend(segment_zh(piece))
+        else:
+            pieces.append(piece)
+    return pieces
 _CLOCK = re.compile(
     r"\b(?:mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|"
     r"saturday|sunday|today|tomorrow|yesterday|week|month|year|morning|afternoon|"
@@ -69,9 +160,15 @@ class RawCausalChannels:
 def observe_raw_text(text: str, *, question: bool = False) -> RawCausalChannels:
     if not isinstance(text, str):
         raise TypeError("raw text must be str")
-    raw_tokens = _WORD.findall(text)
+    raw_tokens = tuple(piece for match in _WORD.findall(text) for piece in _split_cjk(match))
     stems = tuple(_stem(token) for token in raw_tokens)
-    lexical = tuple(token for token in stems if len(token) >= 3 and token not in _STOP)
+    # The `len(token) >= 3` floor exists to drop short, low-signal Latin fragments -- it does not
+    # apply to CJK tokens, which are now real dictionary-segmented words (see `segment_zh`), not
+    # arbitrary substrings: a 2-character word like "北京" or "会议" is already a complete,
+    # meaningful unit, and requiring 3+ characters silently discarded most ordinary Chinese
+    # vocabulary (2026-08-19, found via code review).
+    lexical = tuple(token for token in stems
+                    if (len(token) >= 3 or _CJK_CHAR.match(token)) and token not in _STOP)
     sublexical = tuple(sorted({gram for token in lexical for gram in _grams(token)}))
     # Capitalization is only a weak observable; sentence-initial words are excluded unless repeated.
     capitalized = [token.casefold() for index, token in enumerate(raw_tokens)

@@ -158,7 +158,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from .evidence import EvidenceItem
-from .raw_causal_channels import observe_raw_text
+from .raw_causal_channels import _CJK_CHAR, is_cjk as _is_cjk, observe_raw_text, segment_zh as _segment_zh
 from .typed_causal_program import (
     CausalSelector, TypedCausalExecutor, TypedCausalFact, TypedCausalProgram,
 )
@@ -183,63 +183,12 @@ DEFAULT_RELEVANCE_FLOOR = 0.0
 # anchor space to the same order of magnitude as PT/EN's naturally sparse numbers/proper-noun
 # anchors. Only genuine multi-character dictionary matches count; a leftover single character
 # from incomplete segmentation is not a word and is dropped, not kept.
-_CJK_CHAR = re.compile(r"[一-鿿㐀-䶿]")
+#
+# `_is_cjk`/`_segment_zh` (and `_CJK_CHAR`) used to be defined locally in this module; they now
+# live in `raw_causal_channels.py` (2026-08-19) since `observe_raw_text` itself needed the same
+# segmentation to fix a more fundamental gap -- see that module for the full rationale. Imported
+# here under their original names so nothing else in this file changes.
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9_+.'-]*")
-_MAX_ZH_WORD_LEN = 4
-
-
-def _is_cjk(text: str) -> bool:
-    return bool(_CJK_CHAR.search(text))
-
-
-def _segment_zh(text: str) -> list[str]:
-    """Bidirectional maximum-matching segmentation against `ZH_WORD_DICTIONARY`. Falls back to
-    single characters for spans the dictionary doesn't cover -- those never become anchors (see
-    `_cjk_anchors`), so an incomplete dictionary fails toward fewer anchors, not spurious ones."""
-    from .zh_word_dictionary import ZH_WORD_DICTIONARY as _DICT
-
-    chars = list(text)
-    n = len(chars)
-
-    def _forward() -> list[str]:
-        words, i = [], 0
-        while i < n:
-            if not _CJK_CHAR.match(chars[i]):
-                words.append(chars[i])
-                i += 1
-                continue
-            matched = None
-            for length in range(min(_MAX_ZH_WORD_LEN, n - i), 1, -1):
-                candidate = "".join(chars[i:i + length])
-                if candidate in _DICT:
-                    matched = candidate
-                    break
-            words.append(matched or chars[i])
-            i += len(matched) if matched else 1
-        return words
-
-    def _backward() -> list[str]:
-        words, i = [], n
-        while i > 0:
-            if not _CJK_CHAR.match(chars[i - 1]):
-                words.append(chars[i - 1])
-                i -= 1
-                continue
-            matched = None
-            for length in range(min(_MAX_ZH_WORD_LEN, i), 1, -1):
-                candidate = "".join(chars[i - length:i])
-                if candidate in _DICT:
-                    matched = candidate
-                    break
-            words.append(matched or chars[i - 1])
-            i -= len(matched) if matched else 1
-        return list(reversed(words))
-
-    forward, backward = _forward(), _backward()
-    if len(forward) != len(backward):
-        return forward if len(forward) < len(backward) else backward
-    singles = lambda seq: sum(1 for w in seq if len(w) == 1 and _CJK_CHAR.match(w))
-    return forward if singles(forward) <= singles(backward) else backward
 
 
 def _cjk_anchors(text: str) -> frozenset[str]:
