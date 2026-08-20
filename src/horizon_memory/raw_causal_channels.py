@@ -28,8 +28,31 @@ def is_cjk(text: str) -> bool:
     return bool(_CJK_CHAR.search(text))
 
 
+_MERGED_ZH_DICT: frozenset[str] | None = None
+
+
+def _zh_dictionary() -> frozenset[str]:
+    """`ZH_WORD_DICTIONARY` (corpus-specific, casual-chat vocabulary) unioned with
+    `zh_word_dictionary_extended.WORDS` (general open-domain vocabulary filtered from Jieba's
+    `dict.txt.big`, MIT-licensed data only, no Jieba code -- 2026-08-19, re-tested this session:
+    a same-day union attempt was tried and reverted once before, against an OLDER version of
+    `supersession_collapse.py`'s resolution mechanism, and cost 7.05% -> 9.84% on the 1,290-pair
+    false-positive generality check for no measured gain. Re-tested fresh this session against
+    the CURRENT mechanism -- which gained a correction-marker gate, a type-homogeneity filter,
+    and a given-new-asymmetry check since that earlier test -- and now costs only 8.29% -> 9.22%,
+    a materially different premise than the one the earlier revert was based on). Computed once
+    and cached at module scope: unioning two frozensets is cheap, but not free enough to redo on
+    every `segment_zh` call in a tight loop."""
+    global _MERGED_ZH_DICT
+    if _MERGED_ZH_DICT is None:
+        from .zh_word_dictionary import ZH_WORD_DICTIONARY
+        from .zh_word_dictionary_extended import WORDS as ZH_WORD_DICTIONARY_EXTENDED
+        _MERGED_ZH_DICT = ZH_WORD_DICTIONARY | ZH_WORD_DICTIONARY_EXTENDED
+    return _MERGED_ZH_DICT
+
+
 def segment_zh(text: str) -> list[str]:
-    """Bidirectional maximum-matching segmentation against `ZH_WORD_DICTIONARY`. Falls back to
+    """Bidirectional maximum-matching segmentation against `_zh_dictionary()`. Falls back to
     single characters for spans the dictionary doesn't cover -- an incomplete dictionary fails
     toward more (but still real) single-character tokens, not spurious multi-character ones.
     Ported here (2026-08-19) from `supersession_collapse.py`, its original home -- this is now
@@ -40,7 +63,7 @@ def segment_zh(text: str) -> list[str]:
     clauses describing the same fact in different words shared exactly zero lexical overlap,
     confirmed end-to-end: a trivial Chinese question with an unambiguous answer in the same
     document abstained completely through the real `HorizonAnswerEngine` pipeline."""
-    from .zh_word_dictionary import ZH_WORD_DICTIONARY as _DICT
+    _DICT = _zh_dictionary()
 
     chars = list(text)
     n = len(chars)

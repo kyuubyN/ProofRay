@@ -97,6 +97,21 @@ def test_mixed_latin_and_cjk_token_keeps_the_latin_word_intact():
     assert "项目" in value.lexical
 
 
+def test_open_domain_cjk_vocabulary_segments_via_the_extended_dictionary():
+    # `ZH_WORD_DICTIONARY` alone is a small, corpus-specific dictionary (casual chat vocabulary)
+    # -- open-domain words like "银行" (bank) or "经理" (manager) were never in it and fell back
+    # to single, low-signal characters. `segment_zh` now also draws from
+    # `zh_word_dictionary_extended.WORDS` (filtered from Jieba's dict.txt.big, MIT-licensed data,
+    # 2026-08-19), re-tested and kept this session against the current supersession_collapse
+    # mechanism after an earlier attempt (against an older version of that mechanism) was
+    # reverted for a much higher false-positive cost.
+    value = observe_raw_text("他在银行工作，收入不错。")
+    assert "银行" in value.lexical
+    words = segment_zh("北京大学计算机学院的经理去酒店开会")
+    for expected in ("经理", "酒店"):
+        assert expected in words
+
+
 def test_is_cjk_and_segment_zh_basic_behavior():
     assert is_cjk("北京")
     assert not is_cjk("Beijing")
