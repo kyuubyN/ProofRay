@@ -45,6 +45,23 @@ def new_id() -> str:
     return f"ans_{secrets.token_hex(12)}"
 
 
+def json_bool(value, default: bool = False) -> bool:
+    """A JSON request body's boolean-shaped field, read defensively: `bool()` on a non-empty
+    string is always True regardless of its content (`bool("false")` is True), so naively
+    `bool()`-casting a caller's `"polish": "false"` or `"include_sources": "0"` -- a stringified
+    boolean, plausible from a client that serializes form values -- silently does the opposite
+    of what was asked (2026-08-19, found via code review). Missing/None uses `default`; a real
+    JSON boolean passes through as-is; a string is matched case-insensitively against the same
+    truthy set `_include_sources_from_query()` already uses for the GET query-string path."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes")
+    return bool(value)
+
+
 def build_documents(raw_documents: list) -> tuple[RouteDocument, ...]:
     documents = []
     for i, text in enumerate(raw_documents, start=1):
@@ -82,7 +99,7 @@ def serialize(answer_id: str, created: int, result: AnsweredResult, include_sour
 def build_polish_config(body: dict) -> PolishConfig | None:
     """Returns None when polish was not requested; raises ValueError (-> 400 in server.py /
     a clean tool error in mcp_server.py) when `polish: true` but `polish_model` is missing."""
-    if not body.get("polish", False):
+    if not json_bool(body.get("polish")):
         return None
     model = body.get("polish_model")
     if not model:
