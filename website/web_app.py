@@ -183,11 +183,19 @@ def generate_control(prompt, model=GROQ_MODEL):
 
 
 def _warm_one(ordinal):
-    """Worker: computes one question's full result in a separate process."""
+    """Worker: computes one question's full result in a separate process.
+
+    Catches its own exception rather than letting it propagate into the pool's
+    `imap_unordered` iterator -- an exception raised there aborts the `with Pool(...)` block for
+    every ordinal not yet reached, not just this one (2026-08-19, found via code review: one bad
+    question used to silently cancel warm-up for the rest of the corpus)."""
     row = next(r for r in ROWS if r["ordinal"] == ordinal)
-    payload = run_horizon(row)
+    try:
+        payload = run_horizon(row)
+    except Exception as error:
+        return ordinal, None, str(error)
     payload.pop("cached", None)
-    return ordinal, payload
+    return ordinal, payload, None
 
 
 def _warm_cache():
@@ -202,18 +210,23 @@ def _warm_cache():
     # pipeline. An earlier 5-worker version, running alongside another parallel job, exhausted
     # a 15 GB machine. Two workers keep the warm-up under ~1 GB total.
     workers = min(WARM_WORKERS, max(1, (os.cpu_count() or 2) - 1))
+    failed = 0
     try:
         with multiprocessing.Pool(workers) as pool:
-            for done, (ordinal, payload) in enumerate(
+            for done, (ordinal, payload, error) in enumerate(
                     pool.imap_unordered(_warm_one, ordinals), start=1):
-                _RESULT_CACHE[ordinal] = payload
+                if error is not None:
+                    failed += 1
+                    print(f"[horizon] warm-up failed for ordinal {ordinal}: {error}", flush=True)
+                else:
+                    _RESULT_CACHE[ordinal] = payload
                 if done % 20 == 0:
                     print(f"[horizon] warmed {done}/{len(ordinals)}", flush=True)
     except Exception as error:          # a failed warm-up must never take the server down
         print(f"[horizon] warm-up stopped: {error}", flush=True)
         return
     print(f"[horizon] warm-up complete in {time.time() - started:.0f}s "
-          f"({len(_RESULT_CACHE)}/{len(ordinals)} ready)", flush=True)
+          f"({len(_RESULT_CACHE)}/{len(ordinals)} ready, {failed} failed)", flush=True)
 
 
 @app.route("/")
@@ -246,18 +259,40 @@ def questions():
 
 
 def _row_for(query):
+    """Exact match first (case-insensitive), substring only as a last-resort typing-convenience
+    fallback -- a first-dict-order substring match silently binds a short/generic query to
+    whichever question happens to be inserted first, returning that row's claims/gold answer/
+    judge scores as a "success" with no sign the match was inexact (2026-08-19, found via code
+    review)."""
     query = query.strip()
+    if not query:
+        return None
     if query in BY_QUESTION:
         return BY_QUESTION[query]
+    query_lower = query.lower()
     for question, row in BY_QUESTION.items():
-        if query and (query in question or question in query):
+        if question.lower() == query_lower:
+            return row
+    for question, row in BY_QUESTION.items():
+        if query in question or question in query:
             return row
     return None
 
 
+def _query_from_body() -> str:
+    """A valid JSON body that isn't an object (e.g. a bare array or string) makes `.get()` raise
+    `AttributeError` -- `request.json` only guards against invalid/missing JSON, not against
+    valid JSON of the wrong shape (2026-08-19, found via code review, reproduced: POSTing `[1,2,3]`
+    crashed this route with an unhandled 500)."""
+    body = request.json
+    if not isinstance(body, dict):
+        return ""
+    return (body.get("query") or "").strip()
+
+
 @app.route("/api/search_horizon", methods=["POST"])
 def search_horizon():
-    query = (request.json or {}).get("query", "").strip()
+    query = _query_from_body()
     row = _row_for(query)
     if row is None:
         return jsonify({"status": "error",
@@ -285,7 +320,7 @@ def search_horizon():
 
 @app.route("/api/search_llama", methods=["POST"])
 def search_llama():
-    query = (request.json or {}).get("query", "").strip()
+    query = _query_from_body()
     row = _row_for(query)
     if row is None:
         return jsonify({"status": "error",

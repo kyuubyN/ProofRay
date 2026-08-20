@@ -30,7 +30,7 @@ from flask import Flask, jsonify, request
 
 from _engine_bridge import (
     DEFAULT_PROFILE, ENGINE, MAX_DOCUMENTS, STORE, build_documents, build_polish_config,
-    new_answer_id_and_timestamp, run_polish, serialize,
+    json_bool, new_answer_id_and_timestamp, run_polish, serialize,
 )
 
 app = Flask(__name__)
@@ -52,10 +52,12 @@ def health():
 
 @app.route("/v1/answers", methods=["POST"])
 def create_answer():
-    body = request.get_json(silent=True) or {}
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        body = {}
     question = (body.get("question") or "").strip()
     raw_documents = body.get("documents")
-    include_sources = bool(body.get("include_sources", False))
+    include_sources = json_bool(body.get("include_sources"))
 
     if not question:
         return _bad_request("`question` is required")
