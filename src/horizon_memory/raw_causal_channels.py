@@ -10,14 +10,182 @@ from dataclasses import dataclass
 
 
 _WORD = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
-_NUMBER = re.compile(r"\b\d+(?:[.,]\d+)?\b")
+# `\b\d+\b` used to require a real Unicode word-boundary on both sides -- but CJK ideographs are
+# `\w`, so a digit run glued directly to CJK text on either side (e.g. "在2023年", completely
+# ordinary Chinese phrasing, not an identifier) never had a `\b` transition and was silently
+# invisible to this channel. Uses explicit ASCII-alphanumeric lookaround instead of `\b` so a CJK
+# neighbor counts as a boundary while "abc123def" still correctly does not split out "123"
+# (2026-08-19, found via code review, confirmed by direct reproduction).
+_NUMBER = re.compile(r"(?<![A-Za-z0-9_])\d+(?:[.,]\d+)?(?![A-Za-z0-9_])")
+# CJK ideographs (CJK Unified Ideographs + Extension A) -- no letter-casing, no whitespace between
+# words, so neither `_WORD`'s regex nor `_stem`'s suffix rules apply meaningfully to them.
+_CJK_CHAR = re.compile(r"[一-鿿㐀-䶿]")
+_CJK_RUN = re.compile(r"[一-鿿㐀-䶿]+|[^一-鿿㐀-䶿]+")
+_MAX_ZH_WORD_LEN = 4
+
+
+def is_cjk(text: str) -> bool:
+    return bool(_CJK_CHAR.search(text))
+
+
+_MERGED_ZH_DICT: frozenset[str] | None = None
+
+
+def _zh_dictionary() -> frozenset[str]:
+    """`ZH_WORD_DICTIONARY` (corpus-specific, casual-chat vocabulary) unioned with
+    `zh_word_dictionary_extended.WORDS` (general open-domain vocabulary filtered from Jieba's
+    `dict.txt.big`, MIT-licensed data only, no Jieba code -- 2026-08-19, re-tested this session:
+    a same-day union attempt was tried and reverted once before, against an OLDER version of
+    `supersession_collapse.py`'s resolution mechanism, and cost 7.05% -> 9.84% on the 1,290-pair
+    false-positive generality check for no measured gain. Re-tested fresh this session against
+    the CURRENT mechanism -- which gained a correction-marker gate, a type-homogeneity filter,
+    and a given-new-asymmetry check since that earlier test -- and now costs only 8.29% -> 9.22%,
+    a materially different premise than the one the earlier revert was based on). Computed once
+    and cached at module scope: unioning two frozensets is cheap, but not free enough to redo on
+    every `segment_zh` call in a tight loop."""
+    global _MERGED_ZH_DICT
+    if _MERGED_ZH_DICT is None:
+        from .zh_word_dictionary import ZH_WORD_DICTIONARY
+        from .zh_word_dictionary_extended import WORDS as ZH_WORD_DICTIONARY_EXTENDED
+        _MERGED_ZH_DICT = ZH_WORD_DICTIONARY | ZH_WORD_DICTIONARY_EXTENDED
+    return _MERGED_ZH_DICT
+
+
+def segment_zh(text: str) -> list[str]:
+    """Bidirectional maximum-matching segmentation against `_zh_dictionary()`. Falls back to
+    single characters for spans the dictionary doesn't cover -- an incomplete dictionary fails
+    toward more (but still real) single-character tokens, not spurious multi-character ones.
+    Ported here (2026-08-19) from `supersession_collapse.py`, its original home -- this is now
+    the canonical copy; `supersession_collapse.py` imports it from here instead of keeping its
+    own duplicate, since `observe_raw_text` below needed the same segmentation to fix a much
+    more fundamental gap: `_WORD`'s regex has no concept of CJK word boundaries at all, so an
+    entire punctuation-delimited Chinese clause previously matched as ONE opaque token -- two
+    clauses describing the same fact in different words shared exactly zero lexical overlap,
+    confirmed end-to-end: a trivial Chinese question with an unambiguous answer in the same
+    document abstained completely through the real `HorizonAnswerEngine` pipeline."""
+    _DICT = _zh_dictionary()
+
+    chars = list(text)
+    n = len(chars)
+
+    def _forward() -> list[str]:
+        words, i = [], 0
+        while i < n:
+            if not _CJK_CHAR.match(chars[i]):
+                words.append(chars[i])
+                i += 1
+                continue
+            matched = None
+            for length in range(min(_MAX_ZH_WORD_LEN, n - i), 1, -1):
+                candidate = "".join(chars[i:i + length])
+                if candidate in _DICT:
+                    matched = candidate
+                    break
+            words.append(matched or chars[i])
+            i += len(matched) if matched else 1
+        return words
+
+    def _backward() -> list[str]:
+        words, i = [], n
+        while i > 0:
+            if not _CJK_CHAR.match(chars[i - 1]):
+                words.append(chars[i - 1])
+                i -= 1
+                continue
+            matched = None
+            for length in range(min(_MAX_ZH_WORD_LEN, i), 1, -1):
+                candidate = "".join(chars[i - length:i])
+                if candidate in _DICT:
+                    matched = candidate
+                    break
+            words.append(matched or chars[i - 1])
+            i -= len(matched) if matched else 1
+        return list(reversed(words))
+
+    forward, backward = _forward(), _backward()
+    if len(forward) != len(backward):
+        return forward if len(forward) < len(backward) else backward
+    singles = lambda seq: sum(1 for w in seq if len(w) == 1 and _CJK_CHAR.match(w))
+    return forward if singles(forward) <= singles(backward) else backward
+
+
+def _split_cjk(token: str) -> list[str]:
+    """A `_WORD` match may glue a CJK run directly to adjacent Latin/digit characters with no
+    separator (e.g. "Meridian项目" or "2023年") since both scripts are `\\w`. Splits back into
+    maximal same-script pieces first (so `segment_zh` only ever receives pure CJK text -- it
+    treats any non-CJK character as a single-character passthrough, which would otherwise shred
+    an embedded Latin word into individual letters), then segments each CJK piece into real
+    dictionary words instead of leaving it as one opaque blob."""
+    if not _CJK_CHAR.search(token):
+        return [token]
+    pieces = []
+    for piece in _CJK_RUN.findall(token):
+        if _CJK_CHAR.match(piece):
+            pieces.extend(segment_zh(piece))
+        else:
+            pieces.append(piece)
+    return pieces
 _CLOCK = re.compile(
     r"\b(?:mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|"
     r"saturday|sunday|today|tomorrow|yesterday|week|month|year|morning|afternoon|"
     r"evening|night|january|february|march|april|may|june|july|august|september|"
     r"october|november|december)\b", re.IGNORECASE)
-_NEGATION = frozenset(("no", "not", "never", "neither", "nor", "without", "didn't",
+_NEGATION = frozenset(("not", "never", "neither", "nor", "without", "didn't",
                        "doesn't", "don't", "wasn't", "weren't", "isn't", "aren't"))
+_PT_NEGATION = frozenset(("não", "nao", "nunca", "jamais", "nem", "nada", "ninguém",
+                          "ninguem", "nenhum", "nenhuma", "tampouco", "sem"))
+# "no" is handled separately from the two unconditional sets above: it is the ONLY token in either
+# language that collides with the other -- Portuguese "no" (em+o, a locative/temporal preposition:
+# "no escritorio", "no sabado") is a homograph of English negation "no" ("no way", "there is no
+# doubt"). No other PT contraction (na, nos, nas, num...) happens to spell an English word, so this
+# is a one-token problem, not a general PT/EN collision. Before this fix (2026-08-20, found via
+# code review), EVERY Portuguese sentence containing "no" as a preposition had its polarity
+# silently inverted to "negative" -- measured at 823/3,739 (22.0%) of real PT texts across this
+# project's own `dataset_chat` corpora, which in turn fed spurious contradiction penalties into
+# `materialized_proof_pressure_search.py`'s ranking and spurious fact retraction into
+# `supersession_collapse.py`'s polarity assignment for any PT text mentioning a place or date.
+_EN_NO_COLLOCATIONS = frozenset((
+    "way", "problem", "problems", "worries", "doubt", "doubts", "longer", "more", "one", "matter",
+    "clue", "idea", "ideas", "thanks", "comment", "comments", "chance", "chances", "risk", "risks",
+    "stress", "biggie", "shot", "issue", "issues", "error", "errors", "bug", "bugs", "data",
+    "match", "matches", "effect", "effects", "need", "point", "reason", "reasons", "wonder", "cap",
+    "hesitation", "exception", "exceptions", "harm", "hit", "hits", "disk", "space", "question",
+    "questions", "luck", "further", "less", "sooner", "meetings", "meeting", "other", "new",
+    "where", "how", "what", "who", "which", "when", "why", "we", "i", "you", "they", "he", "she"))
+_EN_NO_PRECEDERS = frozenset((
+    "ain't", "aint", "there", "is", "was", "are", "were", "have", "has", "had", "with", "wait",
+    "oh", "said", "say", "says", "voted", "vote", "answered", "answer", "replied", "reply"))
+_STANDALONE_NO = re.compile(
+    r"(?:^|\s)no\s*[,!?;:—](?:\s|$)|(?:^|\s)no\.(?:\s|$|[\"'\)\]])", re.IGNORECASE)
+_PT_ACCENT_CHAR = re.compile(r"[ºªáéíóúâêôãõçàüÁÉÍÓÚÂÊÔÃÕÇÀÜ]")
+# Closed-class PT words that never double as English content words, so their presence anywhere in
+# the sentence is unambiguous evidence of Portuguese context -- includes common informal/chat
+# abbreviations (blz, vlw, mano...), matching this module's own established practice of covering
+# casual register rather than only formal PT (see `_zh_dictionary`'s own corpus-vocabulary stance).
+_PT_CONTEXT_WORDS = frozenset("""
+da das dos na nas nos pra pro pras pros pelo pela pelos pelas num numa nuns numas
+mais mas como quando onde quem qual quais quanto quanta quantos quantas
+esse essa esses essas este esta estes estas aquele aquela aqueles aquelas isto isso aquilo
+meu minha meus minhas seu sua seus suas nosso nossa nossos nossas dele dela deles delas
+voce você vocês voces ele ela eles elas muito muita muitos muitas tao tão ja já tambem também
+aqui ali la lá ai aí foi foram era eram sou somos sao são vai vao vão vou vamos bora
+tem têm tinha tinham esta está estao estão estava estavam tava tavam temos tive teve tiveram
+fiz fez fizemos fizeram deu dei demos deram fica ficou ficam ficamos
+mandei mandou pedi pediu achou colocou coloquei pegou peguei comprei comprou pagou paguei
+fechou fechei abriu abri saiu saí cheguei chegou passei passou dia dias mes mês meses ano anos
+hoje hj ontem amanha amanhã hora horas minuto minutos semana feira domingo segunda terca terça
+quarta quinta sexta sabado sábado chave sala andar casa quarto porta carro rua cidade projeto
+arquivo não nao nunca jamais nem nada ninguem ninguém nenhum nenhuma
+blz vlw slk tamo mano nois gnt krl agr mto mt dboa msm
+""".split())
+_PT_VERB_SUFFIX = re.compile(
+    r"(?:[aei]ram|[aei]vam|[aei]mos|ando|endo|indo|ou|ei|eu|iu|aria|ariam|asse|esse|isse"
+    # Past participles (-ado/-ada/-ido/-ida, singular or plural: "aprovado", "confirmada",
+    # "instalados") -- added separately from the tense suffixes above (2026-08-20, found by
+    # re-measuring real corpus impact after the initial fix): unlike the present-tense "-a"/"-e"
+    # ending deliberately left uncovered above, ordinary English vocabulary essentially never ends
+    # in "-ado"/"-ida", so this carries materially lower collision risk.
+    r"|ad[oa]s?|id[oa]s?)$")
 _MODAL = frozenset(("may", "might", "could", "would", "should", "perhaps", "maybe", "plan",
                     "plans", "planned", "hope", "hopes", "want", "wants"))
 # 2026-08-18 (plan item 1b): a claim reporting an already-confirmed finding ("the study
@@ -53,6 +221,37 @@ def _grams(token: str) -> tuple[str, ...]:
     return tuple(sorted({padded[index:index + 3] for index in range(max(0, len(padded) - 2))}))
 
 
+def _is_negation_no(text: str, lowered: tuple[str, ...], index: int) -> bool:
+    """True if the "no" token at `lowered[index]` is English negation, not Portuguese "no"
+    (em+o). See `_EN_NO_COLLOCATIONS`'s own comment for why this token specifically needs
+    disambiguation. Checked in order: a single-word utterance ("No." alone); an English word
+    immediately before/after that only makes sense with negation "no" ("no way", "there is no");
+    a standalone punctuated particle ("No,"/"No."); then Portuguese context (accented character,
+    a closed-class PT word, or a PT verb-suffix-shaped token anywhere in the sentence) rules it a
+    preposition. English negation otherwise.
+
+    Known, accepted gap: a short PT sentence whose only clue is a PRESENT-tense 3rd-person verb
+    right before "no" ("Chove no campo.", "Cai no chao.") is not recognized -- present-tense PT
+    verbs end in a bare "-a"/"-e", a suffix pattern too broad to add here without also matching
+    ordinary English words in exactly this position ("I vote no." would flip to PT context and
+    silently stop being recognized as negation). Not fixed; a materially different, narrower
+    signal would be needed first, per this project's own resurrection-matrix discipline."""
+    if len(lowered) == 1:
+        return True
+    next_token = lowered[index + 1] if index + 1 < len(lowered) else None
+    prev_token = lowered[index - 1] if index > 0 else None
+    if next_token in _EN_NO_COLLOCATIONS or prev_token in _EN_NO_PRECEDERS:
+        return True
+    if _STANDALONE_NO.search(text):
+        return True
+    if _PT_ACCENT_CHAR.search(text):
+        return False
+    for token in lowered:
+        if token in _PT_CONTEXT_WORDS or (len(token) >= 4 and _PT_VERB_SUFFIX.search(token)):
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class RawCausalChannels:
     lexical: tuple[str, ...]
@@ -69,9 +268,15 @@ class RawCausalChannels:
 def observe_raw_text(text: str, *, question: bool = False) -> RawCausalChannels:
     if not isinstance(text, str):
         raise TypeError("raw text must be str")
-    raw_tokens = _WORD.findall(text)
+    raw_tokens = tuple(piece for match in _WORD.findall(text) for piece in _split_cjk(match))
     stems = tuple(_stem(token) for token in raw_tokens)
-    lexical = tuple(token for token in stems if len(token) >= 3 and token not in _STOP)
+    # The `len(token) >= 3` floor exists to drop short, low-signal Latin fragments -- it does not
+    # apply to CJK tokens, which are now real dictionary-segmented words (see `segment_zh`), not
+    # arbitrary substrings: a 2-character word like "北京" or "会议" is already a complete,
+    # meaningful unit, and requiring 3+ characters silently discarded most ordinary Chinese
+    # vocabulary (2026-08-19, found via code review).
+    lexical = tuple(token for token in stems
+                    if (len(token) >= 3 or _CJK_CHAR.match(token)) and token not in _STOP)
     sublexical = tuple(sorted({gram for token in lexical for gram in _grams(token)}))
     # Capitalization is only a weak observable; sentence-initial words are excluded unless repeated.
     capitalized = [token.casefold() for index, token in enumerate(raw_tokens)
@@ -82,8 +287,10 @@ def observe_raw_text(text: str, *, question: bool = False) -> RawCausalChannels:
     relations = tuple(sorted({f"{left}>{right}" for left, right in zip(lexical, lexical[1:])
                               if left != right}))
     lowered = tuple(token.casefold().replace("’", "'") for token in raw_tokens)
-    polarity = "negative" if any(token in _NEGATION or token.endswith("n't")
-                                  for token in lowered) else "positive"
+    polarity = "negative" if any(
+        token in _NEGATION or token in _PT_NEGATION or token.endswith("n't")
+        or (token == "no" and _is_negation_no(text, lowered, index))
+        for index, token in enumerate(lowered)) else "positive"
     modality = "modal" if any(token in _MODAL for token in lowered) else "asserted"
     interrogative = "none"
     if question:

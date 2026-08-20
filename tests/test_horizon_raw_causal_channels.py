@@ -1,7 +1,7 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from horizon_memory.raw_causal_channels import (
-    RawCausalDocument, RawCausalSyndromeIndex, observe_raw_text,
+    RawCausalDocument, RawCausalSyndromeIndex, is_cjk, observe_raw_text, segment_zh,
 )
 
 
@@ -48,3 +48,122 @@ def test_one_amplitude_contains_all_channels_not_independent_rank_votes():
                 weights[2] * result.entity + weights[3] * result.relation +
                 weights[4] * result.observable - weights[5] * result.contradiction)
     assert result.amplitude == expected
+
+
+def test_cjk_clauses_segment_into_real_words_not_one_opaque_token():
+    # `_WORD`'s regex has no concept of CJK word boundaries (CJK ideographs are `\w`, and Chinese
+    # has no whitespace between words), so an entire punctuation-delimited clause used to match
+    # as ONE token -- two sentences describing the same fact in different words shared exactly
+    # zero lexical overlap (2026-08-19, found via code review, confirmed by a real end-to-end
+    # HorizonAnswerEngine reproduction that fully abstained on a trivially answerable question).
+    value = observe_raw_text("北京的地铁系统在2023年运送了超过一百万名乘客。")
+    assert "北京" in value.lexical
+    assert value.lexical != (
+        "北京的地铁系统在2023年运送了超过一百万名乘客",
+    ), "the whole clause must not still collapse into one opaque token"
+    # A short (< 3 char) real dictionary word must survive -- the `len(token) >= 3` floor is a
+    # Latin-script heuristic and does not apply to CJK, where most words are 2 characters.
+    assert any(len(token) == 2 for token in value.lexical)
+
+
+def test_cjk_related_sentences_share_real_lexical_overlap():
+    a = observe_raw_text("北京的地铁系统在2023年运送了超过一百万名乘客。")
+    b = observe_raw_text("根据数据，北京地铁在2023年的乘客运送量创下新高。")
+    overlap = set(a.lexical) & set(b.lexical)
+    assert overlap, "two related Chinese sentences must not have zero lexical overlap"
+
+
+def test_cjk_numbers_are_detected_even_when_glued_to_surrounding_characters():
+    # `\b\d+\b` requires a real Unicode word-boundary on both sides, but CJK ideographs are `\w`,
+    # so "2023" glued directly to Chinese text on both sides (ordinary phrasing, not an
+    # identifier) never had a `\b` transition and was invisible to this channel.
+    value = observe_raw_text("在2023年发布")
+    assert "2023" in value.numbers
+
+
+def test_number_regex_still_does_not_split_out_digits_from_an_identifier():
+    # The CJK fix must not regress the original purpose of requiring a boundary: "123" glued to
+    # Latin letters on both sides (an identifier, not a standalone number) must still not match.
+    value = observe_raw_text("see item abc123def for details")
+    assert "123" not in value.numbers
+
+
+def test_mixed_latin_and_cjk_token_keeps_the_latin_word_intact():
+    # A `_WORD` match can glue a CJK run directly onto Latin letters with no separator (both
+    # scripts are `\w`) -- segmentation must split back into same-script pieces first, or the
+    # embedded Latin word gets shredded into individual letters.
+    value = observe_raw_text("Meridian项目在2023年完成")
+    assert "meridian" in value.lexical
+    assert "项目" in value.lexical
+
+
+def test_open_domain_cjk_vocabulary_segments_via_the_extended_dictionary():
+    # `ZH_WORD_DICTIONARY` alone is a small, corpus-specific dictionary (casual chat vocabulary)
+    # -- open-domain words like "银行" (bank) or "经理" (manager) were never in it and fell back
+    # to single, low-signal characters. `segment_zh` now also draws from
+    # `zh_word_dictionary_extended.WORDS` (filtered from Jieba's dict.txt.big, MIT-licensed data,
+    # 2026-08-19), re-tested and kept this session against the current supersession_collapse
+    # mechanism after an earlier attempt (against an older version of that mechanism) was
+    # reverted for a much higher false-positive cost.
+    value = observe_raw_text("他在银行工作，收入不错。")
+    assert "银行" in value.lexical
+    words = segment_zh("北京大学计算机学院的经理去酒店开会")
+    for expected in ("经理", "酒店"):
+        assert expected in words
+
+
+def test_is_cjk_and_segment_zh_basic_behavior():
+    assert is_cjk("北京")
+    assert not is_cjk("Beijing")
+    words = segment_zh("北京的地铁系统")
+    assert "北京" in words
+    assert "".join(words) == "北京的地铁系统"
+
+
+def test_portuguese_no_preposition_is_not_english_negation():
+    # 2026-08-20 (found via code review): PT "no" (em+o, a locative/temporal preposition) used to
+    # be an unconditional member of `_NEGATION`, so every PT sentence using it as a preposition
+    # had its polarity silently inverted -- measured at 22.0% of real PT texts in this project's
+    # own dataset_chat corpora, feeding spurious contradiction penalties and fact retractions
+    # downstream. Covers accented, unaccented, and short informal PT phrasing.
+    for text in (
+        "Trabalho no escritório todos os dias.",
+        "O churrasco será no sábado às 14h.",
+        "Salvamos o arquivo no servidor de produção.",
+        "Bota no carro.",
+        "Deixei no carro.",
+        "No Rio comprei suvenir.",
+        "No dia 15 teremos novidades.",
+    ):
+        assert observe_raw_text(text).polarity == "positive", text
+
+
+def test_english_no_negation_still_recognized_after_pt_disambiguation():
+    for text in (
+        "No way we are doing that.",
+        "No problem, I can help with that.",
+        "There is no doubt about the results.",
+        "No.",
+        "I vote no.",
+        "She is no longer working here.",
+        "We have no more budget this quarter.",
+    ):
+        assert observe_raw_text(text).polarity == "negative", text
+
+
+def test_portuguese_genuine_negation_still_recognized():
+    for text in (
+        "Eu não vou ao escritório hoje.",
+        "Nunca estive em Florianópolis.",
+        "Ficamos sem conexão durante a tarde.",
+    ):
+        assert observe_raw_text(text).polarity == "negative", text
+
+
+def test_known_gap_short_present_tense_pt_verb_before_no_is_not_recognized():
+    # Documented, accepted gap (see `_is_negation_no`'s own docstring): a present-tense 3rd-person
+    # PT verb ending in a bare "-a"/"-e" right before "no" is not enough signal on its own, because
+    # that suffix shape also matches ordinary English words in the same position ("vote no" must
+    # keep working). Pinned here so a future change to the verb-suffix heuristic is a deliberate,
+    # measured decision, not an accidental behavior change.
+    assert observe_raw_text("Chove no campo.").polarity == "negative"

@@ -32,7 +32,14 @@ _TOKEN = re.compile(r"[^\W_]+|#[^\W_]+", re.UNICODE)
 _BOUNDARY = re.compile(r"(?<=[.!?])(?:\s+|$)|\n+")
 _NUMBER = re.compile(r"(?<!\w)[+-]?(?:[$€£]\s*)?\d+(?:[.,]\d+)*(?:%|\s*(?:days?|weeks?|months?|years?|dias?|semanas?|meses?|anos?))?", re.I)
 _QUOTE = re.compile(r"[\"'`]([^\"'`]{1,100})[\"'`]")
-_NEGATION = frozenset(("no", "not", "never", "without", "nao", "não", "nunca", "sem"))
+# "no" deliberately excluded: it collides with the PT preposition "no" (em+o, e.g. "no sabado"),
+# which every PT sentence using it as a preposition would otherwise flag as a spurious negation
+# charge -- see `raw_causal_channels.py`'s own `_EN_NO_COLLOCATIONS` comment for the full history
+# (2026-08-20). This module works on a bag of tokens with no position information, so the same
+# collocation/context disambiguation used there isn't cheaply reusable here; the conservative fix
+# is to not track "no" as a semantic charge at all rather than risk either false-negative English
+# negation loss-tracking or false-positive PT compression-fidelity failures.
+_NEGATION = frozenset(("not", "never", "without", "nao", "não", "nunca", "sem"))
 _STOP = frozenset((
     "a", "an", "and", "are", "as", "at", "be", "by", "did", "do", "for", "from", "had",
     "has", "have", "how", "i", "in", "is", "it", "of", "on", "or", "the", "to", "was",
@@ -56,7 +63,7 @@ def _tokens(text: str) -> tuple[str, ...]:
 
 def _term_key(token: str) -> str:
     """Small deterministic morphology bridge; it is an address normalizer, not semantics."""
-    token = token.casefold().rstrip("'s")
+    token = token.casefold().removesuffix("'s")
     if len(token) > 5 and token.endswith("ies"):
         return token[:-3] + "y"
     if len(token) > 5 and token.endswith("ing"):

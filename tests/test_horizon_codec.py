@@ -10,6 +10,7 @@ from datetime import date
 from horizon_memory.codec import (
     ProofCarryingCodec, compile_query_equation, execute_exact, semantic_charges,
 )
+from horizon_memory.codec import _term_key
 from horizon_memory.boundary_ledger import BoundaryFiberLedger
 from horizon_memory.evidence import EvidenceItem, EvidencePack
 from horizon_memory.measurement_ledger import EventLedger
@@ -53,12 +54,29 @@ class ProofCarryingCodecTests(unittest.TestCase):
         ), generation_id=2, recovery_reason="bulk")
         self.assertFalse(ProofCarryingCodec.verify(compressed, tampered))
 
+    def test_term_key_strips_only_a_literal_possessive_suffix(self):
+        # `_term_key` used to call `.rstrip("'s")`, which strips a *character set* (any
+        # trailing run of "'" or "s"), not the literal suffix -- corrupting ordinary words that
+        # simply end in "s" ("boss" -> "bo", "process" -> "proce") instead of only normalizing a
+        # genuine possessive (2026-08-19, found via code review).
+        self.assertEqual(_term_key("boss"), "boss")
+        self.assertEqual(_term_key("process"), "process")
+        self.assertEqual(_term_key("world's"), "world")
+
     def test_semantic_charges_track_number_negation_quote_and_tag(self):
         charges = semantic_charges('Not "Project Red": $720 in 4 days #Launch')
         self.assertIn("neg:not", charges)
         self.assertTrue(any(charge.startswith("num:") for charge in charges))
         self.assertIn("quote:project red", charges)
         self.assertIn("tag:#launch", charges)
+
+    def test_semantic_charges_do_not_flag_portuguese_no_preposition(self):
+        # 2026-08-20 (found via code review): "no" (em+o, a PT preposition) used to be an
+        # unconditional member of `_NEGATION`, so an ordinary PT sentence like this one would
+        # spuriously carry a "neg:no" loss-sensitive charge. See `raw_causal_channels.py`'s
+        # sibling fix for the full history of this collision.
+        charges = semantic_charges("Salvamos o arquivo no servidor de produção.")
+        self.assertFalse(any(charge == "neg:no" for charge in charges))
 
     def test_budget_never_slices_a_measurement(self):
         _, parent = self._pack()

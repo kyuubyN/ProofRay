@@ -51,6 +51,7 @@ from .config import HorizonConfig
 from .api import HorizonMemory
 from .engine_profile import DEFAULT_PROFILE, EngineProfile
 from .proof_dossier import ProofDossier, build_proof_dossier
+from .raw_causal_channels import is_cjk
 from .routing import HorizonVerifier, QueryEnvelope, RouteDocument, RouteState, RoutingIndex, \
     SemanticRouter
 
@@ -118,7 +119,7 @@ class HorizonAnswerEngine:
                 HorizonConfig(workdir, self.scope_id, secrets.token_bytes(32)))
             try:
                 for document in documents:
-                    memory.put(self.scope_id, document.fact_id, 1, 1)
+                    memory.put(self.scope_id, document.fact_id, document.version, 1)
 
                 query = QueryEnvelope("q", question, self.scope_id, self.session_id, 10)
                 verifier = HorizonVerifier(memory, index)
@@ -230,10 +231,28 @@ def _pick_clean_answer(chosen, relevance: dict, origin: dict, question: str,
         for claim in sorted(chosen, key=lambda c: -relevance.get(c.source_id, 0.0)):
             text = claim.surface.strip()
             normalized = " ".join(text.split()).lower()
-            if normalized in seen_clean or len(text) < min_length:
+            if normalized in seen_clean:
                 continue
-            if require_sentence and not (text.endswith(".") and text[0].isupper()):
+            # These tiers are calibrated against MemGym-DR's own English academic prose (see the
+            # module docstring) -- CJK conveys substantially more content per character, so
+            # applying the same character counts unscaled silently discarded ordinary, complete
+            # Chinese sentences (2026-08-19, found via code review + direct reproduction: a
+            # fully-verified, correctly-relevant 24-character Chinese claim produced an empty
+            # answer_lines). The /3 divisor is a reasonable estimate, not a swept constant like
+            # `answer_relevance_gate_ratio` -- it stops the total failure without claiming to be
+            # precisely calibrated. `.isupper()` never applies to CJK (no letter-casing) and a
+            # sentence there ends in a full-width terminator, not ".", so `require_sentence` is
+            # checked on its own terms for CJK text instead of via the ASCII-only rule.
+            cjk = is_cjk(text)
+            effective_min_length = max(1, min_length // 3) if cjk else min_length
+            if len(text) < effective_min_length:
                 continue
+            if require_sentence:
+                if cjk:
+                    if not text.endswith(("。", "！", "？", "…")):
+                        continue
+                elif not (text.endswith(".") and text[0].isupper()):
+                    continue
             seen_clean.add(normalized)
             shortlist.append(claim)
             if len(shortlist) >= profile.answer_shortlist_size:

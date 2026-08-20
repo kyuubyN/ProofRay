@@ -158,7 +158,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from .evidence import EvidenceItem
-from .raw_causal_channels import observe_raw_text
+from .raw_causal_channels import _CJK_CHAR, is_cjk as _is_cjk, observe_raw_text, segment_zh as _segment_zh
 from .typed_causal_program import (
     CausalSelector, TypedCausalExecutor, TypedCausalFact, TypedCausalProgram,
 )
@@ -183,63 +183,12 @@ DEFAULT_RELEVANCE_FLOOR = 0.0
 # anchor space to the same order of magnitude as PT/EN's naturally sparse numbers/proper-noun
 # anchors. Only genuine multi-character dictionary matches count; a leftover single character
 # from incomplete segmentation is not a word and is dropped, not kept.
-_CJK_CHAR = re.compile(r"[一-鿿㐀-䶿]")
+#
+# `_is_cjk`/`_segment_zh` (and `_CJK_CHAR`) used to be defined locally in this module; they now
+# live in `raw_causal_channels.py` (2026-08-19) since `observe_raw_text` itself needed the same
+# segmentation to fix a more fundamental gap -- see that module for the full rationale. Imported
+# here under their original names so nothing else in this file changes.
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9_+.'-]*")
-_MAX_ZH_WORD_LEN = 4
-
-
-def _is_cjk(text: str) -> bool:
-    return bool(_CJK_CHAR.search(text))
-
-
-def _segment_zh(text: str) -> list[str]:
-    """Bidirectional maximum-matching segmentation against `ZH_WORD_DICTIONARY`. Falls back to
-    single characters for spans the dictionary doesn't cover -- those never become anchors (see
-    `_cjk_anchors`), so an incomplete dictionary fails toward fewer anchors, not spurious ones."""
-    from .zh_word_dictionary import ZH_WORD_DICTIONARY as _DICT
-
-    chars = list(text)
-    n = len(chars)
-
-    def _forward() -> list[str]:
-        words, i = [], 0
-        while i < n:
-            if not _CJK_CHAR.match(chars[i]):
-                words.append(chars[i])
-                i += 1
-                continue
-            matched = None
-            for length in range(min(_MAX_ZH_WORD_LEN, n - i), 1, -1):
-                candidate = "".join(chars[i:i + length])
-                if candidate in _DICT:
-                    matched = candidate
-                    break
-            words.append(matched or chars[i])
-            i += len(matched) if matched else 1
-        return words
-
-    def _backward() -> list[str]:
-        words, i = [], n
-        while i > 0:
-            if not _CJK_CHAR.match(chars[i - 1]):
-                words.append(chars[i - 1])
-                i -= 1
-                continue
-            matched = None
-            for length in range(min(_MAX_ZH_WORD_LEN, i), 1, -1):
-                candidate = "".join(chars[i - length:i])
-                if candidate in _DICT:
-                    matched = candidate
-                    break
-            words.append(matched or chars[i - 1])
-            i -= len(matched) if matched else 1
-        return list(reversed(words))
-
-    forward, backward = _forward(), _backward()
-    if len(forward) != len(backward):
-        return forward if len(forward) < len(backward) else backward
-    singles = lambda seq: sum(1 for w in seq if len(w) == 1 and _CJK_CHAR.match(w))
-    return forward if singles(forward) <= singles(backward) else backward
 
 
 def _cjk_anchors(text: str) -> frozenset[str]:
@@ -287,6 +236,23 @@ _ZH_CORRECTION_MARKER = re.compile(
 
 def _has_zh_correction_marker(text: str) -> bool:
     return bool(_ZH_CORRECTION_MARKER.search(text))
+
+
+# A PURE retraction ("forget it", "esquece isso") carries no replacement value at all -- no
+# number, no proper noun, nothing `_text_anchors` recognizes -- so it never became a candidate,
+# never reached `TypedCausalExecutor`, and the stale fact it was retracting stayed active forever
+# (2026-08-19, found via code review, confirmed reproducible). This is a fixed phrase list, the
+# same discipline as `_ZH_CORRECTION_MARKER` above -- not a general sentiment/negation classifier.
+_RETRACTION_MARKER = re.compile(
+    r"\b(?:forget (?:it|that|about it)|never ?mind|scratch that|ignore (?:that|it|what i said)|"
+    r"disregard (?:that|it)|cancel that|nu ?ll (?:and void)?|"
+    r"esque[cç]e(?:\s+isso)?|esque[çc]a(?:\s+isso)?|deixa\s+pra\s+l[aá]|deixa\s+para\s+l[aá]|"
+    r"cancela(?:\s+tudo|\s+isso)?|ignora\s+isso|desconsidera(?:\s+isso)?|n[aã]o\s+vale(?:\s+mais)?|"
+    r"foi\s+cancelad[oa])\b", re.IGNORECASE)
+
+
+def _has_retraction_marker(text: str) -> bool:
+    return bool(_RETRACTION_MARKER.search(text))
 
 
 def _anchor_type(anchor: str, surface: str, temporal: frozenset[str]) -> str:
@@ -362,7 +328,12 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
             continue
         channels = observe_raw_text(item.content)
         anchors = _text_anchors(item.content)
-        if not anchors:
+        # A pure retraction ("forget it", "esquece isso") carries no anchor at all -- it isn't
+        # proposing a replacement value, just negating the prior one -- so it used to be silently
+        # dropped here before it could ever reach the resolution step below (2026-08-19, found
+        # via code review, confirmed reproducible). Admitted with an empty anchor set; every
+        # later gate that assumes a non-empty anchor set is explicitly exempted for it below.
+        if not anchors and not _has_retraction_marker(item.content):
             continue
         if not _is_cjk(item.content):
             # A real anchor (number/proper noun) is itself sufficient relevance for non-CJK text
@@ -396,7 +367,8 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
         shared_anchors = anchors if shared_anchors is None else shared_anchors & anchors
     value_bearing = [(item, anchors - (shared_anchors or frozenset()), channels)
                      for item, anchors, channels in candidates]
-    value_bearing = [row for row in value_bearing if row[1]]
+    value_bearing = [row for row in value_bearing
+                     if row[1] or _has_retraction_marker(row[0].content)]
 
     groups_detected = 1
     if len(value_bearing) < 2:
@@ -426,7 +398,8 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
     majority_type = type_votes.most_common(1)[0][0] if type_votes else None
     if majority_type is not None:
         value_bearing = [(item, value, channels) for item, value, channels in value_bearing
-                         if majority_type in item_types[(item.fact_id, item.content_span)]]
+                         if majority_type in item_types[(item.fact_id, item.content_span)]
+                         or _has_retraction_marker(item.content)]
     if len(value_bearing) < 2:
         return items, SupersessionReport(groups_detected, 0, {"type_mismatch": 1}, frozenset())
 
@@ -466,10 +439,18 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
     item_by_fact_id: dict[int, EvidenceItem] = {}
     for index, (item, value, channels) in enumerate(value_bearing):
         turn = item.fact_id
+        # A pure retraction has no distinguishing value to offer (`value` is empty, admitted
+        # above via `_has_retraction_marker`) -- `TypedCausalFact.value` still needs a non-empty
+        # placeholder to sit in the same fiber as the fact(s) it's retracting. Its polarity is
+        # forced negative regardless of `channels.polarity` (`_NEGATION`/`.endswith("n't")` are
+        # English-only literal negation words and do not recognize "esquece"/"cancela" or their
+        # English equivalents as negating the prior state).
+        is_retraction = _has_retraction_marker(item.content)
         fact = TypedCausalFact(
             fact_id=index, scope=_SCOPE, subject="tracked_fact", predicate="value",
-            value=" ".join(sorted(value)), observed_at=turn, event_time=turn, version=1,
-            polarity=-1 if channels.polarity == "negative" else 1,
+            value=" ".join(sorted(value)) if value else "<retracted>",
+            observed_at=turn, event_time=turn, version=1,
+            polarity=-1 if (channels.polarity == "negative" or is_retraction) else 1,
             asserted=(channels.modality == "asserted"), event_id=f"turn:{turn}",
             source_id=f"{item.source}:{item.fact_id}:{item.content_span}",
             source_sha256=item.parent_sha256, source_span=item.content_span,
@@ -481,6 +462,25 @@ def collapse_evidence_items(items: tuple[EvidenceItem, ...], question: str, *,
     result = TypedCausalExecutor(facts, _SCOPE).execute(
         TypedCausalProgram("LOOKUP", CausalSelector("tracked_fact", "value")))
     if result.state != "resolved":
+        if result.reason == "latest_state_is_negative":
+            # Pure contraction (AGM K÷phi, not revision K*phi): the most recent statement about
+            # this fact is a negation with no replacement value -- `TypedCausalExecutor` (kept
+            # UNMODIFIED, per this module's own docstring) correctly declines to pick a *new*
+            # value, since there isn't one, but this caller used to treat that abstention as "do
+            # nothing at all," leaving the now-stale positive assertion active in memory
+            # (2026-08-19, found via code review, confirmed reproducible). Excludes every
+            # positive-polarity fact at or before the latest negation's own turn; the negating
+            # statement itself is left in place -- it is real, verified content, it just carries
+            # no replacement value to render as "the current answer."
+            latest_negative_at = max(fact.observed_at for fact in facts if fact.polarity < 0)
+            superseded_keys = frozenset(
+                (item_by_fact_id[fact.fact_id].fact_id, item_by_fact_id[fact.fact_id].content_span)
+                for fact in facts
+                if fact.polarity > 0 and fact.observed_at <= latest_negative_at)
+            if superseded_keys:
+                kept = tuple(item for item in items
+                            if (item.fact_id, item.content_span) not in superseded_keys)
+                return kept, SupersessionReport(groups_detected, 1, {}, superseded_keys)
         return items, SupersessionReport(groups_detected, 0, {result.reason: 1}, frozenset())
 
     winner = item_by_fact_id[result.fact_ids[0]]

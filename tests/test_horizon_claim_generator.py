@@ -58,6 +58,35 @@ class ClaimSpansTests(unittest.TestCase):
         spans = claim_spans(text)
         self.assertEqual(len(spans), 1)
 
+    def test_splits_on_cjk_sentence_boundaries(self):
+        # CJK terminators (。！？…) used to be entirely invisible to this regex -- a whole
+        # multi-sentence Chinese document matched as ONE claim span, defeating this module's own
+        # stated purpose of sentence-level (not whole-document) candidates for CJK text
+        # (2026-08-19, found via code review, confirmed reproducible).
+        text = "北京的地铁系统在2023年运送了超过一百万名乘客。上海的天气今天很好，适合出去散步。"
+        spans = claim_spans(text)
+        surfaces = [text[start:end] for start, end in spans]
+        self.assertEqual(len(surfaces), 2)
+        self.assertTrue(surfaces[0].endswith("。"))
+        self.assertTrue(surfaces[1].endswith("。"))
+
+    def test_cjk_terminators_do_not_require_trailing_whitespace(self):
+        # Unlike ASCII ".", CJK writing has no space after sentence punctuation at all -- a fix
+        # that only recognized a CJK terminator when followed by whitespace would never actually
+        # terminate anything on real Chinese text.
+        text = "第一句。第二句！第三句？"
+        spans = claim_spans(text)
+        self.assertEqual(len(spans), 3)
+
+    def test_ascii_decimal_and_code_punctuation_protection_unaffected_by_cjk_terminators(self):
+        # The CJK terminator addition must not weaken the existing ASCII protections above --
+        # re-checked directly rather than assumed safe by construction.
+        text = "SeqFlow-Net achieves 3.8x faster runtime than baseline. It also uses less memory."
+        spans = claim_spans(text)
+        surfaces = [text[start:end] for start, end in spans]
+        self.assertEqual(len(surfaces), 2)
+        self.assertIn("3.8x", surfaces[0])
+
 
 class ClaimGeneratorScoringTests(unittest.TestCase):
     def test_rejects_invalid_weights(self):

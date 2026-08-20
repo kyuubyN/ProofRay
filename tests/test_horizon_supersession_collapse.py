@@ -111,6 +111,45 @@ class SupersessionCollapseTests(unittest.TestCase):
         self.assertIn("会议", anchors)
         self.assertFalse(any(len(a) == 1 for a in anchors))
 
+    def test_pure_retraction_with_no_replacement_value_excludes_the_stale_fact(self):
+        # A pure retraction ("forget it") carries no anchor at all -- no number, no proper noun
+        # -- so it used to be silently dropped before it could ever reach the resolution step,
+        # leaving the stale fact it was retracting active in memory (2026-08-19, found via code
+        # review, confirmed reproducible: AGM contraction K/phi, not revision K*phi -- there is
+        # no replacement value, just an exclusion).
+        items = (
+            _item(1, "The meeting is scheduled for March 25th."),
+            _item(2, "Actually, forget that, the meeting is off entirely."),
+        )
+        kept, report = collapse_evidence_items(items, "When is the meeting?")
+        self.assertEqual(report.groups_detected, 1)
+        self.assertEqual(report.resolved_groups, 1)
+        kept_ids = {item.fact_id for item in kept}
+        self.assertNotIn(1, kept_ids)
+        self.assertIn(2, kept_ids)
+
+    def test_pure_retraction_in_portuguese_excludes_the_stale_fact(self):
+        items = (
+            _item(1, "O evento vai acontecer dia 25 de março."),
+            _item(2, "Esquece isso, cancela tudo, não vai ter evento nenhum."),
+        )
+        kept, report = collapse_evidence_items(items, "Quando vai acontecer o evento?")
+        self.assertEqual(report.resolved_groups, 1)
+        kept_ids = {item.fact_id for item in kept}
+        self.assertNotIn(1, kept_ids)
+        self.assertIn(2, kept_ids)
+
+    def test_retraction_marker_does_not_falsely_exclude_unrelated_content(self):
+        # Adversarial control: retraction-shaped language present in the pool must not cause an
+        # unrelated fact to be excluded when there is nothing for it to actually retract.
+        items = (
+            _item(1, "The team ordered 7 sensors on Tuesday."),
+            _item(2, "The budget for next quarter is still under review."),
+        )
+        kept, report = collapse_evidence_items(items, "How many sensors did the team order?")
+        self.assertEqual(report.groups_detected, 0)
+        self.assertEqual(kept, items)
+
     def test_no_distractor_or_gold_answer_parameter_exists(self):
         params = set(inspect.signature(collapse_evidence_items).parameters)
         self.assertFalse(any("distractor" in p or "gold" in p for p in params))
