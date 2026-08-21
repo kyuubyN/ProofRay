@@ -28,12 +28,14 @@ from __future__ import annotations
 
 from flask import Flask, jsonify, request
 
-from _engine_bridge import (
-    DEFAULT_PROFILE, ENGINE, MAX_DOCUMENTS, STORE, build_documents, build_polish_config,
-    json_bool, new_answer_id_and_timestamp, run_polish, serialize,
+from _engine_bridge import (  # STORE is unused here but re-exported for tests (`from server import STORE`)
+    DEFAULT_PROFILE, ENGINE, MAX_DOCUMENTS, STORE, build_documents, build_polish_config,  # noqa: F401
+    json_bool, load_answer, new_answer_id_and_timestamp, run_polish, serialize, store_answer,
+    validate_question_length,
 )
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MiB; Werkzeug returns 413 above this
 
 
 def _include_sources_from_query() -> bool:
@@ -61,6 +63,10 @@ def create_answer():
 
     if not question:
         return _bad_request("`question` is required")
+    try:
+        validate_question_length(question)
+    except ValueError as exc:
+        return _bad_request(str(exc))
     if not isinstance(raw_documents, list) or not raw_documents:
         return _bad_request("`documents` must be a non-empty array of strings")
     if len(raw_documents) > MAX_DOCUMENTS:
@@ -86,7 +92,7 @@ def create_answer():
             polish_state = "skipped_abstained"
 
     answer_id, created = new_answer_id_and_timestamp()
-    STORE[answer_id] = (result, created, polished_answer, polish_state)
+    store_answer(answer_id, (result, created, polished_answer, polish_state))
 
     return jsonify(serialize(answer_id, created, result, include_sources,
                              polished_answer, polish_state)), 201
@@ -94,7 +100,7 @@ def create_answer():
 
 @app.route("/v1/answers/<answer_id>", methods=["GET"])
 def get_answer(answer_id: str):
-    entry = STORE.get(answer_id)
+    entry = load_answer(answer_id)
     if entry is None:
         return jsonify({"error": {"message": f"no answer found with id '{answer_id}'",
                                    "type": "not_found_error"}}), 404

@@ -9,10 +9,13 @@ not the `Apache-2.0 OR AGPL-3.0-or-later` carve-out reserved for `src/horizon_me
 """
 from __future__ import annotations
 
+import os
 import secrets
 import sys
 import time
+from collections import OrderedDict
 from pathlib import Path
+from threading import RLock
 from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,12 +32,53 @@ from horizon_memory.adapters.openai_compatible import Transport, RequestsTranspo
 SCOPE_ID = 1
 SESSION_ID = "api"
 ENGINE = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
-STORE: dict[str, tuple[AnsweredResult, int, str | None, str | None]] = {}
+
 # id -> (result, created_unix_ts, polished_answer, polish_state) -- the polish fields are
 # persisted alongside the result so a later GET doesn't silently lose the polish work a POST
-# already paid for (2026-08-19, found via code review).
+# already paid for (2026-08-19, found via code review). Bounded by TTL + LRU eviction below --
+# an unauthenticated POST loop used to grow this without limit until the process restarted
+# (2026-08-2x, found via security review): every resolved answer retains its full claims/
+# sources, so an attacker didn't even need to guess ids to exhaust memory, just POST repeatedly.
+STORE_TTL_SECONDS = 3600
+STORE_MAX_ENTRIES = 1000
+STORE: OrderedDict[str, tuple[AnsweredResult, int, str | None, str | None]] = OrderedDict()
+_STORE_LOCK = RLock()
+
+
+def _prune_store(now: int) -> None:
+    expired = [answer_id for answer_id, entry in STORE.items()
+               if now - entry[1] >= STORE_TTL_SECONDS]
+    for answer_id in expired:
+        STORE.pop(answer_id, None)
+    while len(STORE) > STORE_MAX_ENTRIES:
+        STORE.popitem(last=False)
+
+
+def store_answer(answer_id: str, entry: tuple[AnsweredResult, int, str | None, str | None]) -> None:
+    with _STORE_LOCK:
+        _prune_store(int(time.time()))
+        STORE[answer_id] = entry
+        STORE.move_to_end(answer_id)
+
+
+def load_answer(answer_id: str):
+    with _STORE_LOCK:
+        _prune_store(int(time.time()))
+        entry = STORE.get(answer_id)
+        if entry is not None:
+            STORE.move_to_end(answer_id)
+        return entry
+
 
 MAX_DOCUMENTS = 2000  # a defensive ceiling, not a tuned limit -- see api/README.md
+MAX_QUESTION_BYTES = 16 * 1024
+MAX_DOCUMENT_BYTES = 64 * 1024
+
+# Deploy-time config for the optional `polish` step -- never caller input (see
+# build_polish_config's docstring for why).
+POLISH_BASE_URL = os.environ.get(
+    "HORIZON_POLISH_BASE_URL", "https://api.groq.com/openai/v1/chat/completions")
+POLISH_API_KEY_ENV = os.environ.get("HORIZON_POLISH_API_KEY_ENV")
 
 # Overridable by tests, matching how tests already reach into STORE directly. None (the default)
 # means "construct a real network-capable RequestsTransport" -- see build_polish_adapter().
@@ -62,11 +106,22 @@ def json_bool(value, default: bool = False) -> bool:
     return bool(value)
 
 
+def _utf8_size(value: str) -> int:
+    return len(value.encode("utf-8"))
+
+
+def validate_question_length(question: str) -> None:
+    if _utf8_size(question) > MAX_QUESTION_BYTES:
+        raise ValueError(f"`question` exceeds the {MAX_QUESTION_BYTES}-byte limit")
+
+
 def build_documents(raw_documents: list) -> tuple[RouteDocument, ...]:
     documents = []
     for i, text in enumerate(raw_documents, start=1):
         if not isinstance(text, str) or not text.strip():
             raise ValueError(f"documents[{i - 1}] must be a non-empty string")
+        if _utf8_size(text) > MAX_DOCUMENT_BYTES:
+            raise ValueError(f"documents[{i - 1}] exceeds the {MAX_DOCUMENT_BYTES}-byte limit")
         documents.append(RouteDocument(i, text.strip(), SCOPE_ID, SESSION_ID, 1, f"doc:{i}"))
     return tuple(documents)
 
@@ -98,18 +153,30 @@ def serialize(answer_id: str, created: int, result: AnsweredResult, include_sour
 
 def build_polish_config(body: dict) -> PolishConfig | None:
     """Returns None when polish was not requested; raises ValueError (-> 400 in server.py /
-    a clean tool error in mcp_server.py) when `polish: true` but `polish_model` is missing."""
+    a clean tool error in mcp_server.py) when `polish: true` but `polish_model` is missing.
+
+    `base_url` and `api_key_env` come only from this process's own environment
+    (HORIZON_POLISH_BASE_URL / HORIZON_POLISH_API_KEY_ENV), never from the request body. An
+    earlier version let an unauthenticated caller set both directly: pointing `polish_base_url`
+    at an attacker-controlled host while naming a real secret in `polish_api_key_env` made this
+    process read that secret from its own environment and hand it to the attacker as a Bearer
+    token; even without a key name, an arbitrary `base_url` is an open SSRF proxy into internal
+    network/metadata endpoints (2026-08-2x, found via security review). `timeout_seconds`/
+    `max_retries` are also tightened here rather than left at the adapter's own defaults: with no
+    request auth on this API (see api/README.md's "Deferred" section), a caller could otherwise
+    chain up to ~5 network attempts per polish call to pin a worker thread for minutes."""
     if not json_bool(body.get("polish")):
         return None
     model = body.get("polish_model")
     if not model:
         raise ValueError("`polish_model` is required when `polish` is true")
-    kwargs = {"model": model}
-    if body.get("polish_base_url"):
-        kwargs["base_url"] = body["polish_base_url"]
-    if body.get("polish_api_key_env"):
-        kwargs["api_key_env"] = body["polish_api_key_env"]
-    return PolishConfig(**kwargs)
+    return PolishConfig(
+        model=model,
+        base_url=POLISH_BASE_URL,
+        api_key_env=POLISH_API_KEY_ENV,
+        timeout_seconds=10.0,
+        max_retries=0,
+    )
 
 
 def build_polish_adapter() -> OpenAICompatiblePolishAdapter:

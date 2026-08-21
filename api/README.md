@@ -60,11 +60,15 @@ Request body:
   itself is never affected by `polish` -- see `polished_answer`/`polish_state` below.
 - `polish_model` (string) -- **required** when `polish: true`; the model name as the
   provider expects it (e.g. `"qwen/qwen3.6-27b"`).
-- `polish_base_url` (string, optional) -- the provider's `/chat/completions` URL; defaults
-  to Groq's endpoint if omitted.
-- `polish_api_key_env` (string, optional) -- the *name* of an environment variable holding
-  the API key, never the key itself. Omit (or pass `null`) for an unauthenticated local
-  server.
+
+The polish destination and credential are **deploy-time configuration, not request fields**:
+`HORIZON_POLISH_BASE_URL` (env var, defaults to Groq's `/chat/completions` endpoint) and
+`HORIZON_POLISH_API_KEY_ENV` (env var naming *another* environment variable that holds the
+API key, never the key itself; unset means an unauthenticated call). An earlier version
+accepted `polish_base_url`/`polish_api_key_env` directly in the request body; that let any
+caller of this unauthenticated API redirect the server's outbound polish call to a host of
+its choosing while naming a real secret to attach as a Bearer token (SSRF + credential
+exfiltration) -- removed for that reason, not replaced.
 
 Response (`201 Created`):
 
@@ -119,9 +123,16 @@ curl http://127.0.0.1:8420/v1/answers/ans_1a2b3c4d5e6f7a8b9c0d1e2f?include_sourc
 
 - **Auth / API keys / rate limiting.** This increment has no request-auth mechanism.
   Needed before this is exposed outside a private demo; the scheme (API-key header vs.
-  OAuth vs. something else) hasn't been chosen yet.
-- **Persistent answer storage.** The in-memory `{id: answer}` store is lost on restart.
-  Fine for a demo; a real deployment needs a persistent store or a documented TTL.
+  OAuth vs. something else) hasn't been chosen yet. The absence of auth is why the store
+  bound and body-size limits below exist -- they cap how much an anonymous caller can make
+  this process retain or process per request, they are not a substitute for real auth.
+- **Persistent answer storage.** The in-memory `{id: answer}` store is lost on restart --
+  still true, and still fine for a demo -- but it is now bounded rather than unbounded: at
+  most `STORE_MAX_ENTRIES` (1000) entries, each evicted after `STORE_TTL_SECONDS` (3600s) at
+  the latest (LRU + TTL, see `api/_engine_bridge.py`). A real deployment still needs an
+  actual persistent store; this only stops an anonymous POST loop from growing memory
+  without bound in the meantime. Request bodies are capped at 1 MiB total, each document at
+  64 KiB, and the question at 16 KiB, for the same reason.
 - **Corpus/ingest reuse.** Every `POST /v1/answers` resends the full document set and
   builds a fresh ephemeral store -- there is no "upload a corpus once, ask many questions
   against it by id" mode yet (the OpenAI Files-API shape). Real, valuable, not built here.

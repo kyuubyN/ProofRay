@@ -58,7 +58,13 @@ class TemporalHSSDProgramCompiler:
         if len(ranked) < needed:
             return None
         chosen = tuple(ranked[:needed])
-        if not query.intersection(fibers[chosen[0]]):
+        # Every chosen fiber must relate to the query, not just the first: for a 2-operand
+        # program (duration/interval), a query naming only one entity still fills the second
+        # slot from whatever fiber sorts next -- checking only chosen[0] let a fiber with ZERO
+        # query overlap (an unrelated support document) become the second operand, producing a
+        # numerically "resolved" but meaningless duration between unrelated entities (found via
+        # code review, 2026-08-2x). Fall back to "unsupported" instead of guessing.
+        if any(not query.intersection(fibers[fiber]) for fiber in chosen):
             return None
         return TemporalHSSDProgram(operator, chosen)
 
@@ -70,15 +76,34 @@ class StandaloneTemporalHSSDEngine:
         self.compiler = TemporalHSSDProgramCompiler()
 
     def _latest(self, fiber: tuple[str, str]) -> TypedCausalFact | None:
+        # Group by orbit (event identity, `TypedCausalFact.orbit`) before resolving "latest",
+        # not by fiber alone: a fiber is (subject, predicate), and the design explicitly allows
+        # multiple distinct events under one fiber (e.g. "John visited Paris" and "John visited
+        # London" share the fiber (John, visited) but are different orbits). Computing one
+        # max(version, observed_at) across all of them mixed together made two genuinely
+        # different, individually unambiguous events look like one internally-conflicting report
+        # (their event_times legitimately differ), wrongly aborting recurring-action queries that
+        # had a perfectly good single answer (found via code review, 2026-08-2x; mirrors the same
+        # per-orbit collapse already used by typed_causal_program.TypedCausalExecutor).
         rows = [item for item in self.facts if (item.subject, item.predicate) == fiber]
         if not rows:
             return None
-        clock = max((item.version, item.observed_at) for item in rows)
-        latest = [item for item in rows if (item.version, item.observed_at) == clock]
-        signatures = {(item.event_time, item.polarity, item.asserted) for item in latest}
-        if len(signatures) != 1 or not latest[0].asserted or latest[0].polarity < 0:
+        by_orbit: dict[str, list[TypedCausalFact]] = {}
+        for item in rows:
+            by_orbit.setdefault(item.orbit, []).append(item)
+        candidates = []
+        for orbit_rows in by_orbit.values():
+            clock = max((item.version, item.observed_at) for item in orbit_rows)
+            latest = [item for item in orbit_rows if (item.version, item.observed_at) == clock]
+            signatures = {(item.event_time, item.polarity, item.asserted) for item in latest}
+            if len(signatures) != 1:
+                continue  # conflicting reports within this one event's own history
+            candidate = min(latest, key=lambda item: item.fact_id)
+            if candidate.asserted and candidate.polarity > 0:
+                candidates.append(candidate)
+        if len(candidates) != 1:
             return None
-        return min(latest, key=lambda item: item.fact_id)
+        return candidates[0]
 
     def query(self, question: str, *, max_results: int = 32,
               max_bytes: int | None = None) -> TemporalHSSDResult:

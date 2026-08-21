@@ -22,19 +22,18 @@ from __future__ import annotations
 
 from _engine_bridge import (
     build_documents, build_polish_config, new_answer_id_and_timestamp, run_polish, serialize,
-    ENGINE, MAX_DOCUMENTS,
+    validate_question_length, ENGINE, MAX_DOCUMENTS,
 )
 from mcp.server.mcpserver import MCPServer
 
 
 def _horizon_ask_impl(question: str, documents: list[str], include_sources: bool = False,
-                       polish: bool = False, polish_model: str | None = None,
-                       polish_base_url: str | None = None,
-                       polish_api_key_env: str | None = None) -> dict:
+                       polish: bool = False, polish_model: str | None = None) -> dict:
     """The plain-Python implementation behind the `horizon_ask` tool -- kept separate from the
     `@mcp.tool()` decoration so it can be unit-tested directly, without any MCP transport."""
     if not question or not question.strip():
         raise ValueError("`question` is required")
+    validate_question_length(question)
     if not documents:
         raise ValueError("`documents` must be a non-empty array of strings")
     if len(documents) > MAX_DOCUMENTS:
@@ -42,8 +41,7 @@ def _horizon_ask_impl(question: str, documents: list[str], include_sources: bool
 
     doc_tuple = build_documents(documents)
 
-    body = {"polish": polish, "polish_model": polish_model,
-            "polish_base_url": polish_base_url, "polish_api_key_env": polish_api_key_env}
+    body = {"polish": polish, "polish_model": polish_model}
     polish_config = build_polish_config(body)
 
     result = ENGINE.answer(question, doc_tuple)
@@ -64,16 +62,15 @@ mcp = MCPServer("horizon-memory")
 
 @mcp.tool()
 def horizon_ask(question: str, documents: list[str], include_sources: bool = False,
-                 polish: bool = False, polish_model: str | None = None,
-                 polish_base_url: str | None = None,
-                 polish_api_key_env: str | None = None) -> dict:
+                 polish: bool = False, polish_model: str | None = None) -> dict:
     """Ask Horizon a question over a caller-supplied document set. Returns a deterministic,
     verified answer (`sources: null` unless `include_sources` is set). Pass `polish: true` with
     `polish_model` to also get `polished_answer`: the same answer rewritten for fluency by an
-    OpenAI-compatible model (`polish_base_url` for a local/alternate endpoint, `polish_api_key_env`
-    for the name of an environment variable holding an API key -- never pass a literal key)."""
-    return _horizon_ask_impl(question, documents, include_sources, polish, polish_model,
-                              polish_base_url, polish_api_key_env)
+    OpenAI-compatible model. The polish endpoint and API-key env var name are fixed by this
+    server's own deployment config (HORIZON_POLISH_BASE_URL / HORIZON_POLISH_API_KEY_ENV), not
+    caller-selectable -- letting a caller pick both let them redirect the server's outbound
+    request and its stored credential to a host of their choosing."""
+    return _horizon_ask_impl(question, documents, include_sources, polish, polish_model)
 
 
 if __name__ == "__main__":
