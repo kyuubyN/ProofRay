@@ -30,6 +30,7 @@ truncar um ACTIVE que outro writer já avançou.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import stat
 from dataclasses import dataclass
@@ -159,7 +160,8 @@ def _verify_and_truncate_fd(fd: int, active_dir, published_length: int, publishe
         if st.st_size < published_length:
             return (False, "físico < prefixo publicado")
         prefix = _pread_exact(fd, published_length)
-        if len(prefix) != published_length or hashlib.sha256(prefix).digest() != published_sha:
+        if (len(prefix) != published_length
+                or not hmac.compare_digest(hashlib.sha256(prefix).digest(), published_sha)):
             return (False, "prefixo físico não casa o sha publicado")   # nunca trunca sem prova
         if st.st_size != published_length:
             failpoint("before_ftruncate")
@@ -245,7 +247,7 @@ def resume_from_recovery(recovery_result, publication_store, wal_store, object_s
     cursor = fresh.published_cursor
     handle = fresh.generation_handle
     plan = fresh.writer_resume_plan
-    if cursor.proof.publication_sha256 != intended_pub_sha:
+    if not hmac.compare_digest(cursor.proof.publication_sha256, intended_pub_sha):
         return _abort(ActivationState.STALE_RECOVERY, "CURRENT avançou entre recovery e resume")
     identity = plan.identity
     seg_key = keyring.get(plan.key_id)

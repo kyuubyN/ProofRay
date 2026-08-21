@@ -20,6 +20,7 @@ os usa sem saber se é clone integral ou COW.
 
 from __future__ import annotations
 
+import hmac
 import struct
 from dataclasses import dataclass
 
@@ -158,7 +159,7 @@ class ShardedTxIdIndex:
         e = self.shards[self._shard(operation_id)].get(operation_id)
         if e is None:
             return "new"
-        return "dedup_replay" if e[0] == digest else "txid_conflict"
+        return "dedup_replay" if hmac.compare_digest(e[0], digest) else "txid_conflict"
 
     def get_seq(self, operation_id: bytes):
         e = self.shards[self._shard(operation_id)].get(operation_id)
@@ -190,7 +191,7 @@ class TxIdIndexBuilder:
         e = (d.get(operation_id) if d is not None else self.base.shards[idx].get(operation_id))
         if e is None:
             return "new"
-        return "dedup_replay" if e[0] == digest else "txid_conflict"
+        return "dedup_replay" if hmac.compare_digest(e[0], digest) else "txid_conflict"
 
     def get_seq(self, operation_id: bytes):
         idx = shard_of_opid(operation_id, self.base.shard_seed, self.base._mask)

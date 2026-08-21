@@ -368,7 +368,7 @@ def check_coverage(man: EpochManifest) -> tuple:
             return (False, f"durable_prefix vazio em {i}")
         if s.status == STATE_SEALED:
             if (s.sealed_object_length != s.durable_prefix_length
-                    or s.sealed_object_sha256 != s.durable_prefix_sha256
+                    or not hmac.compare_digest(s.sealed_object_sha256, s.durable_prefix_sha256)
                     or s.sealed_object_sha256 == _ZERO32):
                 return (False, f"SEALED não canônico em {i}")
         else:  # ACTIVE
@@ -376,7 +376,7 @@ def check_coverage(man: EpochManifest) -> tuple:
                 return (False, f"ACTIVE não canônico em {i} (sealed_object deve ser vazio)")
         # encadeamento
         prev_expected = _ZERO16 if i == 0 else man.segments[i - 1].sealed_object_sha256[:16]
-        if s.prev_segment_digest != prev_expected:
+        if not hmac.compare_digest(s.prev_segment_digest, prev_expected):
             return (False, f"cadeia quebrada em {i}")
         expected += s.record_count
         if expected >= MAX_SEQ:
@@ -555,7 +555,8 @@ def open_generation(manifest_blob: bytes | None, object_store, wal_store,
         if h is None or h.format_version != WAL_FORMAT_VERSION:
             return _fail(OpenGenerationState.INCOMPATIBLE, f"{tag}: WAL versão")
         if (h.scope_id != man.scope_id or h.segment_id != s.segment_id or h.first_seq != s.first_seq
-                or h.key_id != s.key_id or h.previous_segment_digest != s.prev_segment_digest):
+                or h.key_id != s.key_id
+                or not hmac.compare_digest(h.previous_segment_digest, s.prev_segment_digest)):
             return _fail(OpenGenerationState.COVERAGE_ERROR, f"{tag}: header diverge do descriptor")
         step = reducer.feed_segment(seg, s)
         if not step.ok:
@@ -579,7 +580,8 @@ def open_generation(manifest_blob: bytes | None, object_store, wal_store,
         p_state, p_man, _ = parse_manifest(parent_manifest_blob, keyring)
         if p_state != OpenGenerationState.VALID:
             return _fail(OpenGenerationState.CORRUPT, "manifesto pai ilegível/não autenticado")
-        if hashlib.sha256(parent_manifest_blob).digest() != man.parent_manifest_digest:
+        if not hmac.compare_digest(hashlib.sha256(parent_manifest_blob).digest(),
+                                   man.parent_manifest_digest):
             return _fail(OpenGenerationState.CORRUPT, "SHA-256 do pai não confere")
         if p_man.scope_id != man.scope_id or p_man.generation_id != man.parent_generation_id:
             return _fail(OpenGenerationState.CORRUPT, "pai com scope/generation incompatível")

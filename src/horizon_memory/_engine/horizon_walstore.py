@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import hmac
 import os
 import stat
 import struct
@@ -439,7 +440,7 @@ class WalStore:
         if len(data) != expected.byte_length:
             return ActivePrefixResult(ActivePrefixState.MISSING_COMMITTED_PREFIX, None,
                                       "prefixo incompleto")
-        if hashlib.sha256(data).digest() != expected.sha256:   # mutação em qualquer byte do prefixo
+        if not hmac.compare_digest(hashlib.sha256(data).digest(), expected.sha256):   # mutação em qualquer byte do prefixo
             return ActivePrefixResult(ActivePrefixState.CORRUPT, None, "prefixo diverge do digest")
         hst, hi, hwhy = self._authenticate_header(data, identity)
         if hst == WalStoreState.INCOMPATIBLE:
@@ -527,7 +528,8 @@ class WalStore:
             if st_.st_size != expected_length:                 # header-only exige tamanho EXATO
                 return (WalStoreState.CORRUPT, None, "comprimento != esperado")
             data = _pread_exact(fd, expected_length)
-            if len(data) != expected_length or hashlib.sha256(data).digest() != expected_sha256:
+            if (len(data) != expected_length
+                    or not hmac.compare_digest(hashlib.sha256(data).digest(), expected_sha256)):
                 return (WalStoreState.CORRUPT, None, "digest do ACTIVE diverge")
             hst, hi, hwhy = self._authenticate_header(data, identity)
             if hst != WalStoreState.VALID:
@@ -574,7 +576,8 @@ class WalStore:
             if st_.st_size < expected.byte_length:
                 return SealActiveResult(WalStoreState.CORRUPT, "arquivo menor que o prefixo declarado")
             prefix = _pread_exact(fd, expected.byte_length)
-            if len(prefix) != expected.byte_length or hashlib.sha256(prefix).digest() != expected.sha256:
+            if (len(prefix) != expected.byte_length
+                    or not hmac.compare_digest(hashlib.sha256(prefix).digest(), expected.sha256)):
                 return SealActiveResult(WalStoreState.CORRUPT, "prefixo diverge do digest")
             hst, hi, hwhy = self._authenticate_header(prefix, identity)
             if hst != WalStoreState.VALID:
@@ -647,7 +650,7 @@ class WalStore:
         st, data, why = self._safe_read(path, limits.max_sealed_bytes)
         if st != WalStoreState.VALID:
             return SealedWalOpenResult(st, None, why)
-        if hashlib.sha256(data).hexdigest() != sha256_hex:
+        if not hmac.compare_digest(hashlib.sha256(data).hexdigest(), sha256_hex):
             return SealedWalOpenResult(WalStoreState.CORRUPT, None, "digest não confere")
         return SealedWalOpenResult(WalStoreState.VALID, data, "ok")
 

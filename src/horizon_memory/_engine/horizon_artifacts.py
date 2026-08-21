@@ -300,7 +300,7 @@ def open_artifact(descriptor: ArtifactDescriptor, blob: bytes | None, key: bytes
         return OpenArtifact(ArtifactOpenState.RESOURCE_LIMIT, kind, None, COUNT_LIMIT)
     if len(blob) != descriptor.byte_length:
         return OpenArtifact(ArtifactOpenState.CORRUPT, kind, None, NON_CANONICAL_LENGTH)
-    if hashlib.sha256(blob).digest() != descriptor.sha256:
+    if not hmac.compare_digest(hashlib.sha256(blob).digest(), descriptor.sha256):
         return OpenArtifact(ArtifactOpenState.CORRUPT, kind, None, DIGEST_MISMATCH)
     # limites de contagem ANTES do parser (que aloca)
     try:

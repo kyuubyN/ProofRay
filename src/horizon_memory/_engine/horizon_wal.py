@@ -283,7 +283,8 @@ class WalWriter:
         if expected_key_id is not None and h.key_id != expected_key_id:
             raise WalError("key_id do header diverge do esperado")
         if (expected_previous_segment_digest is not None
-                and h.previous_segment_digest != expected_previous_segment_digest):
+                and not hmac.compare_digest(h.previous_segment_digest,
+                                            expected_previous_segment_digest)):
             raise WalError("previous_segment_digest do header diverge do esperado")
         # reconstrói L0 + TxIdIndex pelo MESMO reducer que o recover usa (autoridade única)
         rr = reduce_frames(sr.frames)
@@ -478,13 +479,14 @@ def scan(blob: bytes | None, key: bytes, *, required: bool, scope_id: int, segme
                 return ScanResult(CORRUPT_COMMITTED_PREFIX, frames, last_seq, off, 0, False)
             if off + _SEAL.size + TAG_BYTES != n:
                 return ScanResult(CORRUPT_COMMITTED_PREFIX, frames, last_seq, off, 0, False)  # lixo após o seal
-            if s_len != off or s_last != last_seq or s_dig != hashlib.sha256(blob[:off]).digest()[:16]:
+            if (s_len != off or s_last != last_seq
+                    or not hmac.compare_digest(s_dig, hashlib.sha256(blob[:off]).digest()[:16])):
                 return ScanResult(CORRUPT_COMMITTED_PREFIX, frames, last_seq, off, 0, False)
             # autoridade do manifesto: se `expected_seal` foi declarado, o footer TEM que casar com
             # ele; footer ≠ declaração → fail-closed (não se aceita cobertura divergente).
             if expected_seal is not None and (
                     s_last != expected_seal.last_seq or s_len != expected_seal.byte_length
-                    or s_dig != expected_seal.prefix_digest):
+                    or not hmac.compare_digest(s_dig, expected_seal.prefix_digest)):
                 return ScanResult(MISSING_COMMITTED_PREFIX, [], last_seq, off, 0, False)
             sealed = True
             off = n
@@ -534,8 +536,9 @@ def scan(blob: bytes | None, key: bytes, *, required: bool, scope_id: int, segme
     if expected_seal is not None:
         covers = (not tail and n == expected_seal.byte_length
                   and last_seq == expected_seal.last_seq
-                  and hashlib.sha256(blob[:expected_seal.byte_length]).digest()[:16]
-                  == expected_seal.prefix_digest)
+                  and hmac.compare_digest(
+                      hashlib.sha256(blob[:expected_seal.byte_length]).digest()[:16],
+                      expected_seal.prefix_digest))
         if not covers:
             return ScanResult(MISSING_COMMITTED_PREFIX, [], last_seq, off, 0, False)
     return ScanResult(classification, frames, last_seq, off, tail_bytes, False, hi)
