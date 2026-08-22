@@ -366,6 +366,12 @@ class AuthorizedSidecarMemory:
         self._sources: dict[str, CausalSourceEnvelope] = {}
         self._completeness: dict[tuple[str, str], AttestedCompletenessClaim] = {}
         self._superseded_by: dict[int, int] = {}
+        # Secondary index, maintained incrementally alongside `_attestations` (never rebuilt
+        # from scratch): every completeness read used to rescan the WHOLE scope's attestations
+        # to find one (subject, predicate)'s own population, an O(total attested facts in the
+        # scope) cost paid on every certified query regardless of how small that population
+        # actually is. This index makes that lookup O(population size for this key) instead.
+        self._facts_by_key: dict[tuple[str, str], dict[int, AttestedSidecarFact]] = {}
 
     @staticmethod
     def _selected_population(facts: tuple[TypedCausalFact, ...], subject: str,
@@ -467,16 +473,28 @@ class AuthorizedSidecarMemory:
                                         source.sha256,
                                         "one atomic batch may update an event orbit only once")
         pending_superseded: dict[int, int] = {}
-        existing_facts = tuple(item.fact for item in self._attestations.values())
+        # Prospective (not-yet-committed) per-key view, built only for the keys this batch
+        # actually touches -- a copy-on-write overlay on top of the existing incremental index,
+        # never a rescan of the whole scope's attestations. Orbits are unique per batch (checked
+        # just above), so a proposed fact's "previous" orbit members can only be already-committed
+        # facts, never siblings within this same batch -- the existing index alone is sufficient
+        # for that lookup, only the completeness-claim check below needs the merged view.
+        touched_keys = {(item.fact.subject, item.fact.predicate) for item in proposed}
+        needed_keys = touched_keys | {(claim.subject, claim.predicate) for claim in claims}
+        prospective_by_key: dict[tuple[str, str], dict[int, AttestedSidecarFact]] = {
+            key: dict(self._facts_by_key.get(key, {})) for key in needed_keys
+        }
+        for item in proposed:
+            key = (item.fact.subject, item.fact.predicate)
+            prospective_by_key[key][item.fact.fact_id] = item
         for item in proposed:
             fact = item.fact
             if self._attestations.get(fact.fact_id) == item:
                 continue
-            previous = tuple(sorted(old.fact_id for old in existing_facts
-                                    if old.subject == fact.subject and
-                                    old.predicate == fact.predicate and
-                                    old.orbit == fact.orbit and
-                                    old.fact_id not in self._superseded_by))
+            same_key_existing = self._facts_by_key.get((fact.subject, fact.predicate), {})
+            previous = tuple(sorted(old_id for old_id, old_item in same_key_existing.items()
+                                    if old_item.fact.orbit == fact.orbit and
+                                    old_id not in self._superseded_by))
             if item.lifecycle.supersedes != previous:
                 return SidecarIngestReceipt("REJECTED_UPDATE", adapter_id, authority_sha256, (),
                                             source.sha256,
@@ -492,7 +510,6 @@ class AuthorizedSidecarMemory:
         # source, FactIds, causal edges and index construction before its own atomic swap.
         prospective = {**self._attestations,
                        **{item.fact.fact_id: item for item in proposed}}
-        prospective_facts = tuple(item.fact for item in prospective.values())
         if any(not isinstance(claim, AttestedCompletenessClaim) for claim in claims):
             return SidecarIngestReceipt("REJECTED_COMPLETENESS", adapter_id,
                                         authority_sha256, (), source.sha256,
@@ -503,8 +520,9 @@ class AuthorizedSidecarMemory:
                                         authority_sha256, (), source.sha256,
                                         "completeness claims must be typed, unique and canonical")
         for claim in claims:
-            selected = self._selected_population(
-                prospective_facts, claim.subject, claim.predicate)
+            key_facts = tuple(item.fact for item in
+                              prospective_by_key.get((claim.subject, claim.predicate), {}).values())
+            selected = self._selected_population(key_facts, claim.subject, claim.predicate)
             if (not claim.verify(trusted, source) or selected is None or
                     claim.scope != self.scope or claim.fact_ids != selected):
                 return SidecarIngestReceipt("REJECTED_COMPLETENESS", adapter_id,
@@ -527,6 +545,10 @@ class AuthorizedSidecarMemory:
                 for claim in claims)
             core_state, core_fact_ids = ("IDEMPOTENT" if identical else "APPLIED"), ()
         self._attestations = prospective
+        # Commit the same incremental update to the secondary index: only the keys this batch
+        # touched are replaced (from the already-built `prospective_by_key` overlay), never a
+        # full rebuild from `self._attestations`.
+        self._facts_by_key = {**self._facts_by_key, **prospective_by_key}
         self._sources[source.source_id] = source
         self._completeness = {**self._completeness,
                               **{(claim.subject, claim.predicate): claim for claim in claims}}
@@ -580,8 +602,9 @@ class AuthorizedSidecarMemory:
         claim = self._completeness.get((subject, predicate))
         if claim is None:
             return None
-        population = self._selected_population(
-            tuple(item.fact for item in self._attestations.values()), subject, predicate)
+        key_facts = tuple(item.fact for item in
+                          self._facts_by_key.get((subject, predicate), {}).values())
+        population = self._selected_population(key_facts, subject, predicate)
         if population is None or population != claim.fact_ids:
             return None
         lifecycles = tuple(self._attestations[fact_id].lifecycle for fact_id in population)
