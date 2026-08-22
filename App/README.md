@@ -1,0 +1,242 @@
+# App — Horizon database connector (Go)
+
+A Go-side companion to `HorizonAI Engine/examples/*_documents_example.py`. HorizonMemory itself
+has no database backend — every call to `HorizonAnswerEngine`, and its HTTP twin
+`POST /v1/answers` (see `../api/README.md`), takes a plain `[]string` of documents. "Connecting a
+database" is entirely the caller's own query; this app is that caller, written in Go instead of
+Python, so a single compiled binary can pull from a real database and hit the running Horizon API
+without a Python runtime on the connector side.
+
+The Python engine (`../api/server.py`) still does all the actual work — routing, verification,
+composition. This binary's only job is: fetch rows from one backend, hand them to
+`POST /v1/answers` as `documents`, print (or render) the answer.
+
+## Layout
+
+```
+App/
+  cmd/horizon-connect/main.go     CLI entry point — env vars in, one answer printed as JSON
+  cmd/horizon-web/main.go         web UI entry point — form in the browser instead of env vars
+  internal/config/                env-var configuration (CLI only)
+  internal/horizonclient/         HTTP client for api/server.py (types.go mirrors its JSON contract)
+  internal/webui/                 the /ask form handler + embedded html/template
+  internal/connectors/
+    connector.go                  the Connector interface, Options, ValidateIdentifier, registry
+    postgres/                     github.com/jackc/pgx/v5
+    sqlite/                       modernc.org/sqlite (pure Go, no cgo)
+    mysql/                        github.com/go-sql-driver/mysql
+    mongodb/                      go.mongodb.org/mongo-driver
+    redis/                        github.com/redis/go-redis/v9
+    dynamodb/                     github.com/aws/aws-sdk-go-v2 (+ DynamoDB Local support)
+    elasticsearch/                github.com/elastic/go-elasticsearch/v8
+  testdata/
+    docker-compose.yml            one throwaway container per backend, for local testing
+    seed.sh / seed_dynamodb.go    loads the same "Meridian"/"Solstice" fixture into all of them
+```
+
+All seven connectors are real implementations, not stubs — every one has been run end-to-end
+against a real instance of its backend (see "How this was verified" below). Both entry points
+share every connector: `cmd/horizon-connect` builds a connector's `Options` from env vars
+(`config.Load`), `cmd/horizon-web` builds the same `Options` from submitted form fields
+(`internal/webui`) — neither the `connectors.Connector` interface nor a given connector's query
+logic changes between the two.
+
+Each connector subpackage mirrors one `HorizonAI Engine/examples/*_documents_example.py` file and
+reads the same environment variables/schema that example does (`POSTGRES_DSN` + table `articles`,
+`MONGODB_URI` + database `support_kb`/collection `articles`, `REDIS_URL` + key prefix
+`articles:`, ...), so anyone who has already set one up for the Python example can point this at
+the same database. Two deliberate departures from the Python examples, both because this is Go
+serving concurrent requests (the web UI) rather than a one-shot script:
+
+- The Python mongodb/redis/dynamodb examples fall back to an in-process mock (`mongomock`,
+  `fakeredis`, `moto`) when no real endpoint is configured, so they run with zero setup. These Go
+  connectors always require a real endpoint — there's no equivalent pure-Go in-process mock wired
+  up here.
+- `dynamodb` adds an endpoint override (`DYNAMODB_ENDPOINT_URL` / the web form's "Endpoint
+  override" field) the Python example doesn't have, specifically so it can point at DynamoDB
+  Local instead of real AWS. Everything else about it — table shape, scan-then-sort-by-id logic —
+  matches the Python example's real-AWS mode.
+
+## Adding a new backend
+
+1. Add a subpackage under `internal/connectors/<name>/` implementing `connectors.Connector`
+   (`Name`, `FetchDocuments`, `Close`) and a `New(ctx context.Context, opts connectors.Options)
+   (connectors.Connector, error)` factory that calls `connectors.Register("<name>", New)` from
+   `init()`. Read settings via `opts.Get("key", "ENV_VAR", "fallback")` — this checks the
+   caller-supplied value first (e.g. a web form field) and falls back to the environment variable
+   only when that's empty, so the same connector works from both entry points unchanged. Any
+   caller-supplied value used as a SQL table/column name (not a query parameter) must be checked
+   with `connectors.ValidateIdentifier` before being interpolated into a query string — see
+   `postgres`/`sqlite`/`mysql` for the pattern; the query APIs here only parameterize values, not
+   identifiers, and the web form is the untrusted-input path that makes this matter.
+2. Blank-import it in both `cmd/horizon-connect/main.go` and `cmd/horizon-web/main.go`.
+3. `go get` its driver and run `go mod tidy`.
+4. Add its Options keys to `connectorFields` in `internal/webui/webui.go`, and a
+   `<div data-connector-fields="name">...</div>` block to
+   `internal/webui/templates/index.html.tmpl` (see the existing blocks) with one input per key,
+   named `name_key` (e.g. `mysql_host`) — the web form's fields are namespaced per connector so
+   two backends' same-named settings (e.g. both `mysql` and `mongodb` have a "database" field)
+   never collide in the one shared `<form>`.
+
+## Running it
+
+Go (1.27, via Homebrew) and every connector here are verified working: `go build ./...`, `go vet
+./...`, and `gofmt -l .` all pass clean, and all seven connectors have been run end-to-end —
+via both `cmd/horizon-connect` and, screenshotted through an actual browser, `cmd/horizon-web` —
+against real instances of every backend and a real `api/server.py`.
+
+```bash
+cd App
+go mod tidy     # resolves pinned driver versions in go.mod, writes go.sum
+
+# start the Python API first (from the repo root):
+#   pip install -e . && pip install -r api/requirements.txt
+#   python3 api/server.py   # serves http://127.0.0.1:8420
+```
+
+### CLI (`cmd/horizon-connect`)
+
+```bash
+CONNECTOR=sqlite \
+SQLITE_PATH=/path/to/your.db \
+QUESTION="What percent did the Meridian project reduce cost by?" \
+  go run ./cmd/horizon-connect
+```
+
+Env vars `config.Load` reads:
+
+- `CONNECTOR` (required) — registered backend name (`postgres`, `mysql`, `mongodb`, `redis`,
+  `dynamodb`, `elasticsearch`, `sqlite`).
+- `QUESTION` (required) — forwarded as-is to `POST /v1/answers`.
+- `HORIZON_API_BASE_URL` (default `http://127.0.0.1:8420`) — where `api/server.py` is listening.
+- `INCLUDE_SOURCES` (`1` to enable) — requests the full verified claim list, not just the
+  compressed answer.
+- Per-backend (all optional except where noted; see each connector's `New` for full details):
+  - `postgres`: `POSTGRES_DSN` (required), `POSTGRES_TABLE` (default `articles`)
+  - `sqlite`: `SQLITE_PATH` (required), `SQLITE_TABLE` (default `support_articles`)
+  - `mysql`: `MYSQL_HOST` (required), `MYSQL_PORT` (3306), `MYSQL_USER` (root),
+    `MYSQL_PASSWORD`, `MYSQL_DB` (horizon_example), `MYSQL_TABLE` (articles)
+  - `mongodb`: `MONGODB_URI` (required), `MONGODB_DATABASE` (support_kb),
+    `MONGODB_COLLECTION` (articles)
+  - `redis`: `REDIS_URL` (required), `REDIS_KEY_PREFIX` (articles:)
+  - `dynamodb`: `AWS_DEFAULT_REGION` (required), `DYNAMODB_TABLE` (articles),
+    `DYNAMODB_ENDPOINT_URL` (optional, for DynamoDB Local), plus standard
+    `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`
+  - `elasticsearch`: `ELASTICSEARCH_URL` (required), `ELASTICSEARCH_INDEX` (articles)
+
+### Web UI (`cmd/horizon-web`)
+
+```bash
+go run ./cmd/horizon-web
+# open http://127.0.0.1:8080
+```
+
+Pick a database from the dropdown, fill in its connection fields (only the fields relevant to the
+selected backend show, via a small inline script), type a question, submit. Same connectors, same
+`horizonclient`, same HorizonAPI underneath — this is `cmd/horizon-connect`'s form-driven twin, not
+a different pipeline. `HORIZON_API_BASE_URL` (default `http://127.0.0.1:8420`) and `WEB_ADDR`
+(default `127.0.0.1:8080`, bind only to a trusted interface — see "Not done here" below) are its
+only env vars; everything else comes from the form on each request. For `dynamodb`, credentials
+still come from the process environment (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) — not a form
+field, same reasoning as `api/server.py` never taking a polish API key in the request body (see
+`../api/README.md`).
+
+### Testing against real backends locally
+
+`testdata/docker-compose.yml` brings up one throwaway instance of every backend:
+
+```bash
+docker compose -f App/testdata/docker-compose.yml up -d
+App/testdata/seed.sh                                    # postgres, mysql, mongo, redis, elasticsearch
+cd App && AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local go run testdata/seed_dynamodb.go
+```
+
+Then point either entry point at `127.0.0.1` on each service's mapped port (postgres is mapped to
+`5433` to avoid colliding with a real Postgres on the default `5432`). `docker compose -f
+App/testdata/docker-compose.yml down` tears everything back down; nothing here uses a volume, so
+there's no state to clean up beyond that.
+
+## How this was verified
+
+All seven connectors were run against real backends, not mocked: Postgres, MySQL, MongoDB, Redis,
+and Elasticsearch each in its own Docker container (via `testdata/docker-compose.yml`), and
+DynamoDB against `amazon/dynamodb-local`. Each was seeded with the same three-document "Meridian
+project reduced compute cost by exactly 42 percent..." fixture the Python examples use, then
+queried through `cmd/horizon-connect` and confirmed `"state": "resolved"` with the right answer
+text. `cmd/horizon-web` was additionally driven through an actual Chromium instance (a connected
+Maestri browser portal) for all seven backends, each one screenshotted showing the `RESOLVED`
+badge and correct answer rendered in the page — not just a curl response. The test containers were
+torn down afterward (ephemeral, `--rm`); `testdata/` is what's left for reproducing the same setup.
+
+## Security audit (Round 3, Maestri terminals)
+
+The connector code went through the project's established multi-terminal audit workflow
+(Antigravity + OpenCode via Maestri; Antigravity refused the scope on its own safety guardrail,
+same as prior rounds, so OpenCode covered both halves). 17 raw findings came back; verified
+against the actual code (not just the model's stated severities) before acting on any of them.
+Two were confirmed real vulnerabilities and fixed:
+
+- **MySQL DSN parameter injection (was High).** `mysql.go` built the DSN with `fmt.Sprintf`, so a
+  `database` value like `horizon_example?allowAllFiles=true` was parsed by the driver as an extra
+  connection parameter, not a literal db name — confirmed exploitable (verified `AllowAllFiles`
+  flipped to `true` after a round-trip through the old code). Fixed by building a `mysql.Config`
+  struct and calling `.FormatDSN()` instead, which `url.PathEscape`s each field independently
+  (confirmed the same round-trip now leaves `AllowAllFiles: false` and the `?` literally
+  percent-encoded).
+- **Credentials echoed back into the HTML form (was High).** After a failed submission, every
+  field — including `mysql_password` and any DSN/URI/URL — was written back into the page's
+  `value="..."` attributes. A `type="password"` input only masks the rendered widget; the actual
+  value still sits in the page's HTML source, readable via view-source/devtools regardless.
+  Fixed: `webui.go` now keeps raw submitted values only long enough to build that request's
+  connector `Options`, and never copies `password`/`dsn`/`uri`/`url` fields into what the template
+  redisplays (verified: submitting a password now returns zero occurrences of it in the response
+  body, while the connector still connects correctly with it).
+
+Also added, cheap and unconditionally worth it: `Content-Security-Policy` (`default-src 'self'`,
+blocking the page from loading or submitting to any other origin), `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` on every response. And two
+dependencies — `github.com/jackc/pgx/v5` and `golang.org/x/text` — were upgraded after
+`govulncheck ./...` (the actual Go vulnerability database, not the model's self-reported CVE
+numbers, several of which didn't check out) found reachable advisories in both; `govulncheck`
+reports zero reachable vulnerabilities now.
+
+The remaining findings (CSRF, rate limiting, TLS, per-connector host allowlisting, blocklisting
+system-ish index/collection names) are real observations but not new code changes — they're the
+same "no auth, trusted network only" tradeoff `../api/README.md` already made for `api/server.py`,
+just showing up again here because these connectors are, by design, "connect to whatever
+DSN/URI/host the caller gives you." See the entries below for exactly what that means and where
+the line is.
+
+## Not done here (named on purpose)
+
+- **Auth, CSRF, rate limiting, TLS.** `api/server.py` itself has none yet (see
+  `../api/README.md`'s "Deferred" section); neither client adds any on top. `cmd/horizon-web`
+  binds to `127.0.0.1` by default for this reason — don't bind `WEB_ADDR` to a public or shared
+  interface without adding auth (and a CSRF token on `/ask`, and rate limiting) first.
+- **No host allowlist — every connector is an intentional SSRF surface.** Each connector connects
+  to whatever host/DSN/URI the caller provides (`POSTGRES_DSN`, `MYSQL_HOST`, `MONGODB_URI`,
+  `REDIS_URL`, `ELASTICSEARCH_URL`, `SQLITE_PATH`) — that's the entire point of a generic "bring
+  your own database" connector, not an oversight. The consequence: anyone who can reach
+  `cmd/horizon-web`'s `/ask` endpoint can make the server originate a connection to any host it can
+  route to (an internal service, a cloud metadata endpoint, a host the caller controls to harvest
+  whatever the connector sends on connect). This is the same trust boundary as "no auth" above,
+  restated for this specific risk — an `ALLOWED_DB_HOSTS`-style allowlist would close it, but isn't
+  built here; until one is, treat reachability to `cmd/horizon-web` as equivalent to reachability
+  to every database it's configured to reach.
+- **DynamoDB credentials come from the ambient AWS SDK chain, not a form field.** `dynamodb.go`
+  calls `config.LoadDefaultConfig`, which picks up whatever the host machine has configured —
+  env vars, `~/.aws/credentials`, or (the sharper edge) an EC2/ECS/Lambda IAM role the operator
+  didn't have to type in anywhere. If `cmd/horizon-web` runs on a host with a real IAM role
+  attached and gets exposed beyond a trusted network, any visitor to the form can make it scan
+  whatever DynamoDB tables that role can reach — with no credential ever having touched the
+  request. Deliberately not "fixed" by requiring explicit per-request credentials: that would mean
+  the connector behaves differently under the CLI vs. the web server, breaking the one-`Connector`
+  abstraction both entry points share. Mitigation is operational: don't attach a broad IAM role to
+  a host running `cmd/horizon-web` outside a trusted network.
+- **Streaming/paging large corpora.** Every `FetchDocuments` loads the whole result set into
+  memory, same as the Python examples. `POST /v1/answers` also caps documents at `MAX_DOCUMENTS`
+  and each body at 1 MiB — a real large-corpus deployment needs chunking on both sides, not built
+  here.
+- **In-process mocks for mongodb/redis/dynamodb.** The Python examples can run with zero setup
+  via `mongomock`/`fakeredis`/`moto`; these Go connectors always need a real endpoint (DynamoDB
+  Local counts as "real" here, since it speaks the actual wire protocol).
