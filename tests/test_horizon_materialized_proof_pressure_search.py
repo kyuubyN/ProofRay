@@ -7,6 +7,7 @@ from horizon_memory.materialized_proof_pressure_search import (
 from horizon_memory.raw_causal_channels import (
     RawCausalDocument, RawCausalSyndromeIndex,
 )
+import pytest
 
 
 DOCS = (
@@ -24,6 +25,31 @@ def test_materialized_components_and_rank_are_exactly_legacy_equivalent():
         assert left == right
         weights = (1.0, .25, .5, .2, .25, 1.0)
         assert legacy.rank(left, weights) == materialized.rank(right, weights)
+
+
+def test_real_indexes_support_decoupled_bm25_plus_and_remain_equivalent():
+    legacy = RawCausalSyndromeIndex(
+        DOCS, lexical_bm25_delta=1.0, sublexical_bm25_delta=0.0)
+    materialized = MaterializedRawCausalSyndromeIndex(
+        DOCS, lexical_bm25_delta=1.0, sublexical_bm25_delta=0.0)
+    question = "What reduces beta inflammation?"
+    left, right = legacy.components(question), materialized.components(question)
+    assert left == right
+    weights = (1.0, .25, .5, .2, .25, 1.0)
+    assert legacy.rank(left, weights) == materialized.rank(right, weights)
+
+
+def test_bm25_plus_zero_is_exact_default_and_negative_delta_is_rejected():
+    default = RawCausalSyndromeIndex(DOCS)
+    explicit_zero = RawCausalSyndromeIndex(
+        DOCS, lexical_bm25_delta=0.0, sublexical_bm25_delta=0.0)
+    question = "What reduces beta inflammation?"
+    assert explicit_zero.components(question) == default.components(question)
+
+    with pytest.raises(ValueError, match="non-negative"):
+        RawCausalSyndromeIndex(DOCS, lexical_bm25_delta=-0.1)
+    with pytest.raises(ValueError, match="non-negative"):
+        MaterializedRawCausalSyndromeIndex(DOCS, sublexical_bm25_delta=-0.1)
 
 
 def test_independent_engine_never_invents_adjacency_witnesses():

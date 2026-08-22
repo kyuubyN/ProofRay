@@ -78,6 +78,57 @@ is intentional and will not be hidden behind a broader marketing claim.
 - `horizon_memory.adapters`: integration boundary, dual-licensed for adoption.
 - `horizon_memory.research`: experimental retrieval engines; not stable API.
 
+For controlled structured inputs, the opt-in [authorized typed sidecar](docs/TYPED_SIDECAR.md)
+binds schema/rule identity, source microcitations, capabilities, lifecycle and completeness
+proofs to each deterministic fact. It is the recommended zero-LLM path for databases, tools,
+event streams and application state; it is not marketed as unrestricted text understanding.
+
+`OpenTextHorizonMemory` extends the authority boundary to arbitrary text without pretending to
+understand it at ingestion: documents become exact `surface_document` spans and then enter the
+multilingual deterministic route/verify/compose path. On the pinned 120-case MemGym port it reproduced
+the judged output byte-for-byte and therefore inherits its 0.950 score. See
+[Benchmarks](BENCHMARKS.md#memgym-open-text-sidecar-port) for the boundary.
+
+The first deterministic language pack promoted from the H-PLT program is an opt-in **English atomic
+relation reader**. It recognizes a finite one-hole query grammar, preserves exact answer spans and
+clause force, and uses a 38 KB checksummed WordNet morphology table. No model, embedding, network or
+external parser runs:
+
+```python
+from horizon_memory import EnglishAtomicRelationCompiler, compact_english_atomic_relation
+
+compiler = EnglishAtomicRelationCompiler()
+result = compiler.read("You can buy me dinner.", "What did You buy?")
+assert result.answer == "dinner" and result.proof_closed
+blob = compact_english_atomic_relation(result)  # 140-byte re-openable proof envelope
+```
+
+On the frozen cross-treebank UD English-GUM test gate it reached 77/82 = **93.90% positive
+accuracy**, 77/79 = **97.47% selective precision**, and 82/82 negative abstention. This promotes only
+the bounded EN atomic family—not unrestricted English or universal text understanding. Its public
+open-text entry point requires an explicitly selected attested FactId:
+`OpenTextHorizonMemory.answer_atomic_relation_en(question, fact_id=...)`.
+
+The same method reproduces compact HPPS evidence exactly on 1,002 Simplified-Chinese CMRC trial
+questions (90.02% gold containment) and 3,524 Traditional-Chinese DRCD holdout questions (98.35%).
+These are memory-delivery results, not short-answer F1; Horizon reports the two separately.
+
+On 7,653 physically valid extractive rows from Portuguese SQuAD, HPPS reaches 93.86% containment at
+K=3 and 96.85% at K=5. The equal-K real BM25 control reaches 96.60%; the +0.248 pp Horizon delta is
+small but significant by paired McNemar (p=0.01445). The dataset is automatically translated, so a
+native-Portuguese confirmation remains pending.
+
+Native PT-BR confirmation is now available on FaQuAD: HPPS reaches 98.41% at K=3 and 100% at K=5
+with source validity 100%. The split has only 63 questions and BM25 also reaches 100% at K=5, so this
+supports language transfer but not a superiority claim.
+
+The public open-text facade also transports the frozen LongMemEval-S deterministic composer without
+drift: 120/120 answer texts are byte-identical, so its existing judge score 0.767 transfers without a
+new API call. Separately, the opt-in HSSD operator lattice preserves at least one bounded interpretation
+for 99.0% of all 500 public questions. Those are integration and candidate-reachability results — not
+90% end-to-end answer accuracy. The active gap is proof-backed execution of surviving programs and
+short semantic readout.
+
 The repository intentionally excludes private theory notebooks, private
 datasets, unpublished papers, benchmark answer keys and development logs.
 
@@ -142,6 +193,7 @@ chat client) and licensing notes:
 
 - [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Authorized typed sidecar](docs/TYPED_SIDECAR.md)
 - [HorizonAI Engine — tutorial, examples, MCP/REST/polish](HorizonAI%20Engine/README.md)
 - [Benchmarks and claim boundaries](BENCHMARKS.md)
 - [Research module](RESEARCH.md)

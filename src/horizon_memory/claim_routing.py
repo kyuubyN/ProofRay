@@ -87,10 +87,21 @@ class ClaimGenerator(CandidateGenerator):
     channel = "claim"
 
     def __init__(self, weights: tuple[float, float, float, float, float, float] = DEFAULT_WEIGHTS,
-                 *, specificity_bonus: float | None = None):
+                 *, specificity_bonus: float | None = None,
+                 bm25_k1: float = 1.2, bm25_b: float = 0.75,
+                 lexical_bm25_delta: float = 0.0,
+                 sublexical_bm25_delta: float = 0.0):
         if len(weights) != 6 or any(weight < 0 for weight in weights):
             raise ValueError("six non-negative channel weights are required")
         self.weights = weights
+        if bm25_k1 <= 0 or not 0 <= bm25_b <= 1:
+            raise ValueError("invalid BM25 parameters")
+        if lexical_bm25_delta < 0 or sublexical_bm25_delta < 0:
+            raise ValueError("BM25+ deltas must be non-negative")
+        self.bm25_k1 = float(bm25_k1)
+        self.bm25_b = float(bm25_b)
+        self.lexical_bm25_delta = float(lexical_bm25_delta)
+        self.sublexical_bm25_delta = float(sublexical_bm25_delta)
         # `specificity_bonus` (2026-08-18, opt-in, `None` preserves prior behavior): threads
         # through to `MaterializedRawCausalSyndromeIndex.rank()`'s own new parameter -- see its
         # docstring for what it computes. Not yet validated at this specific call site (candidate
@@ -113,7 +124,10 @@ class ClaimGenerator(CandidateGenerator):
         raw_documents = tuple(
             RawCausalDocument(position, surface, 0, 0)
             for position, (_fact_id, _span, surface) in enumerate(claims))
-        claim_index = MaterializedRawCausalSyndromeIndex(raw_documents)
+        claim_index = MaterializedRawCausalSyndromeIndex(
+            raw_documents, bm25_k1=self.bm25_k1, bm25_b=self.bm25_b,
+            lexical_bm25_delta=self.lexical_bm25_delta,
+            sublexical_bm25_delta=self.sublexical_bm25_delta)
         ranked = claim_index.rank(claim_index.components(query.text), self.weights,
                                   specificity_bonus=self.specificity_bonus)
         namespace = "scope_session" if same_session else "scope_fallback"

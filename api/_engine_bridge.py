@@ -79,6 +79,13 @@ def serialize(answer_id: str, created: int, result: AnsweredResult, include_sour
         "created": created,
         "state": result.state.lower(),
         "answer": result.answer_text,
+        "evidence": result.evidence_text,
+        "direct_answer": result.direct_answer.text or None,
+        "direct_answer_state": result.direct_answer.state,
+        "direct_answer_method": result.direct_answer.method,
+        "direct_answer_sources": list(result.direct_answer.source_ids),
+        "direct_answer_proof_closed": result.direct_answer.proof_closed,
+        "direct_answer_residual": list(result.direct_answer.residual),
         "answer_lines": [
             {"text": line.text, "source": line.source_id, "relevance_score": line.relevance_score}
             for line in result.answer_lines],
@@ -88,6 +95,9 @@ def serialize(answer_id: str, created: int, result: AnsweredResult, include_sour
         "sources": None,
         "polished_answer": polished_answer,
         "polish_state": polish_state,
+        "selector": result.selector,
+        "selector_proof_closed": result.selector_proof_closed,
+        "selector_residual": list(result.selector_residual),
     }
     if include_sources:
         payload["sources"] = [

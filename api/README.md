@@ -75,6 +75,13 @@ Response (`201 Created`):
   "created": 1755600000,
   "state": "resolved",
   "answer": "Meridian reduced compute cost by exactly 42 percent...\n...",
+  "evidence": "Meridian reduced compute cost by exactly 42 percent...\n...",
+  "direct_answer": null,
+  "direct_answer_state": "not_attempted",
+  "direct_answer_method": "none",
+  "direct_answer_sources": [],
+  "direct_answer_proof_closed": false,
+  "direct_answer_residual": [],
   "answer_lines": [
     {"text": "Meridian reduced compute cost by exactly 42 percent...",
      "source": "doc:1:0:(0, 120)", "relevance_score": 0.97}
@@ -87,6 +94,12 @@ Response (`201 Created`):
   "polish_state": null
 }
 ```
+
+`answer` is retained as the backwards-compatible name of the verified evidence text;
+`evidence` is its explicit alias. `direct_answer` is a separate minimal-answer channel. It is
+non-null only when a configured readout supplies an extractive candidate or a proof-closed exact
+result. `direct_answer_state="resolved"` always requires `direct_answer_proof_closed=true` and
+verified source IDs. A missing/unsupported direct readout never removes `evidence`.
 
 `state` is `"resolved"` when an answer was composed, or the lowercased name of a router
 abstain state (e.g. `"abstention"`) when the supplied documents did not verify against the

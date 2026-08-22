@@ -10,7 +10,8 @@ from __future__ import annotations
 from .api import HorizonMemory
 from .config import HorizonConfig, VALUE_MAX, VALUE_MIN
 from .engine_profile import DEFAULT_PROFILE, EngineProfile
-from .answer_engine import AnsweredClaim, AnsweredResult, HorizonAnswerEngine
+from .answer_engine import (AnswerContextIntent, AnsweredClaim, AnsweredResult, DirectAnswer,
+                            DirectAnswerProposal, DirectAnswerReader, HorizonAnswerEngine)
 from .partition import (
     CausalPartitioner, PartitionContext, PartitionIndex, PartitionResult, PartitionStrategy,
 )
@@ -41,12 +42,35 @@ from .json_causal_adapter import (
 )
 from .causal_adapter_protocol import CausalAdapterBatch, CausalIngestAdapter
 from .standalone_causal_memory import CausalIngestReceipt, StandaloneCausalMemory
+from .typed_sidecar import (
+    AttestedCompletenessClaim, AttestedSidecarFact, AuthorizedSidecarMemory,
+    CompletenessCertificate, SidecarAuthority, SidecarCompilation, SidecarIngestAdapter,
+    AuthorizedAdapterBridge, DeclarativeSidecarAdapter, SidecarCompletenessDeclaration,
+    SidecarFactDeclaration,
+    SidecarLifecycle,
+    SidecarIngestReceipt,
+    SidecarLimits,
+)
 from .durable_causal_memory import CausalDeleteReceipt, DurableCausalMemory
 from .concurrent_durable_memory import ConcurrentDurableCausalMemory
+from .durable_typed_sidecar import DurableAuthorizedSidecarMemory
+from .open_text_memory import (
+    MEMGYM_REFERENCE_PROFILE, OpenTextAtomicRelationResult, OpenTextAtomicRelationResultPT,
+    OpenTextEvidenceResult, OpenTextHorizonMemory,
+)
+from .english_atomic_relations import (
+    BinaryQueryDemand, BinarySpanReading, EnglishAtomicRelationCompiler,
+    EnglishAtomicRelationProof, EnglishAtomicRelationResult, VERB_EXCEPTIONS_SHA256,
+    compact_english_atomic_relation, open_compact_english_atomic_relation,
+)
+from .portuguese_atomic_relations import (
+    RoleReadResult, read as read_pt_atomic_relation,
+    resolve_surface_role as resolve_pt_surface_role,
+)
 from .authority_closed_readout import AuthorityClosedOutput, AuthorityClosedReadout
 from .fiber_coherent_search import FiberCoherentSufficientStatisticSearch
 from .authorized_fiber_search import AuthorizedFiberRoute, AuthorizedFiberSearchEngine
-from .hssd_query_compiler import StructuralHSSDQueryCompiler
+from .hssd_query_compiler import HSSDQueryLattice, StructuralHSSDQueryCompiler
 from .standalone_hssd_engine import StandaloneHSSDEngine, StandaloneHSSDResult
 from .sufficient_statistic_search import SufficientStatisticPack
 from .typed_hssd_adapter import TypedCausalHSSDEvidenceAdapter
@@ -58,7 +82,8 @@ from .types import (
 
 __all__ = [
     "HorizonMemory", "HorizonConfig", "VALUE_MAX", "VALUE_MIN",
-    "DEFAULT_PROFILE", "EngineProfile", "AnsweredClaim", "AnsweredResult", "HorizonAnswerEngine",
+    "DEFAULT_PROFILE", "EngineProfile", "AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer",
+    "DirectAnswerProposal", "DirectAnswerReader", "HorizonAnswerEngine",
     "WriteResult", "WriteState", "ReadResult", "ReadState", "ReadViewHandle",
     "QueryResult", "QueryState", "Provenance", "CompactResult", "CompactState",
     "RecoverResult", "RecoverState", "ExportResult", "ExportedFact", "AuditReport",
@@ -81,8 +106,23 @@ __all__ = [
     "JsonLeaf", "JsonSourceMap", "JsonCausalMapping", "JsonPointerCausalAdapter",
     "CausalAdapterBatch", "CausalIngestAdapter", "CausalIngestReceipt",
     "StandaloneCausalMemory", "DurableCausalMemory", "CausalDeleteReceipt",
+    "SidecarAuthority", "AttestedSidecarFact", "SidecarIngestAdapter",
+    "AttestedCompletenessClaim", "SidecarCompilation", "CompletenessCertificate",
+    "SidecarLifecycle",
+    "SidecarFactDeclaration", "SidecarCompletenessDeclaration", "DeclarativeSidecarAdapter",
+    "AuthorizedAdapterBridge",
+    "SidecarIngestReceipt", "AuthorizedSidecarMemory",
+    "SidecarLimits",
     "ConcurrentDurableCausalMemory",
-    "StructuralHSSDQueryCompiler", "TypedCausalHSSDEvidenceAdapter",
+    "DurableAuthorizedSidecarMemory",
+    "MEMGYM_REFERENCE_PROFILE", "OpenTextAtomicRelationResult", "OpenTextAtomicRelationResultPT",
+    "OpenTextEvidenceResult",
+    "OpenTextHorizonMemory", "BinaryQueryDemand", "BinarySpanReading",
+    "EnglishAtomicRelationCompiler", "EnglishAtomicRelationProof",
+    "EnglishAtomicRelationResult", "VERB_EXCEPTIONS_SHA256",
+    "compact_english_atomic_relation", "open_compact_english_atomic_relation",
+    "RoleReadResult", "read_pt_atomic_relation", "resolve_pt_surface_role",
+    "HSSDQueryLattice", "StructuralHSSDQueryCompiler", "TypedCausalHSSDEvidenceAdapter",
     "FiberCoherentSufficientStatisticSearch", "SufficientStatisticPack",
     "AuthorizedFiberRoute", "AuthorizedFiberSearchEngine",
     "StandaloneHSSDEngine", "StandaloneHSSDResult",

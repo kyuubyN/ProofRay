@@ -24,6 +24,11 @@ class DefaultProfileTests(unittest.TestCase):
         self.assertEqual(DEFAULT_PROFILE.claim_limit, 800)
         self.assertEqual(DEFAULT_PROFILE.claim_weights, CLAIM_GENERATOR_DEFAULT_WEIGHTS)
         self.assertEqual(DEFAULT_PROFILE.conformal_weights, LEXICAL_SUBLEXICAL_WEIGHTS)
+        self.assertEqual(DEFAULT_PROFILE.lexical_bm25_delta, 0.0)
+        self.assertEqual(DEFAULT_PROFILE.sublexical_bm25_delta, 0.0)
+        self.assertEqual(DEFAULT_PROFILE.answer_selector, "diversity")
+        self.assertEqual(DEFAULT_PROFILE.hpps_max_results, 3)
+        self.assertEqual(DEFAULT_PROFILE.hpps_exploration_reserve, 0)
 
     def test_default_profile_is_valid(self):
         EngineProfile()  # must not raise
@@ -59,6 +64,8 @@ class ValidationTests(unittest.TestCase):
             EngineProfile(bm25_k1=0.0)
         with self.assertRaises(ValueError):
             EngineProfile(bm25_b=1.5)
+        with self.assertRaises(ValueError):
+            EngineProfile(lexical_bm25_delta=-0.1)
 
     def test_rejects_non_positive_claim_limit(self):
         with self.assertRaises(ValueError):
@@ -97,6 +104,16 @@ class ValidationTests(unittest.TestCase):
     def test_rejects_non_positive_shortlist_size(self):
         with self.assertRaises(ValueError):
             EngineProfile(answer_shortlist_size=0)
+
+    def test_rejects_invalid_answer_selector(self):
+        with self.assertRaises(ValueError):
+            EngineProfile(answer_selector="oracle")
+        with self.assertRaises(ValueError):
+            EngineProfile(hpps_max_results=0)
+        with self.assertRaises(ValueError):
+            EngineProfile(hpps_max_results=3, hpps_exploration_reserve=-1)
+        with self.assertRaises(ValueError):
+            EngineProfile(hpps_max_results=3, hpps_exploration_reserve=4)
 
     def test_rejects_out_of_range_gate_ratio(self):
         with self.assertRaises(ValueError):

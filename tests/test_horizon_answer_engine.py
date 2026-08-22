@@ -6,7 +6,8 @@ from __future__ import annotations
 import unittest
 
 from horizon_memory import (
-    DEFAULT_PROFILE, EngineProfile, HorizonAnswerEngine, RouteDocument,
+    AnswerContextIntent, DEFAULT_PROFILE, DirectAnswer, DirectAnswerProposal, EngineProfile,
+    HorizonAnswerEngine, RouteDocument,
 )
 
 SCOPE = 1
@@ -58,6 +59,17 @@ class ResolvedAnswerTests(unittest.TestCase):
                                     self.documents)
         expected = "\n".join(line.text for line in result.answer_lines)
         self.assertEqual(result.answer_text, expected)
+        self.assertEqual(result.evidence_text, expected)
+        self.assertEqual(result.direct_answer.state, "not_attempted")
+        self.assertEqual(result.direct_answer.text, "")
+
+    def test_direct_answer_contract_rejects_unproven_resolution(self):
+        with self.assertRaises(ValueError):
+            DirectAnswer("resolved", "42", "extractive", ("doc:1",), False)
+        candidate = DirectAnswer("candidate", "42", "extractive", ("doc:1",), False)
+        self.assertEqual(candidate.text, "42")
+        resolved = DirectAnswer("resolved", "42", "exact", ("doc:1",), True)
+        self.assertTrue(resolved.proof_closed)
 
     def test_relevant_claim_outranks_unrelated_claim_in_answer(self):
         result = self.engine.answer("What percent did the Meridian project reduce cost by?",
@@ -155,6 +167,105 @@ class ProfileIsRespectedTests(unittest.TestCase):
         result = engine.answer("What accuracy does the Solstice engine achieve?", documents)
         self.assertEqual(result.state, "RESOLVED")
         self.assertLessEqual(result.answer_bytes, tight.answer_bytes)
+
+    def test_hpps_selector_is_opt_in_and_exposes_incomplete_closure(self):
+        profile = EngineProfile(name="hpps", answer_selector="hpps", hpps_max_results=1)
+        engine = HorizonAnswerEngine(profile=profile, scope_id=SCOPE)
+        documents = (
+            _doc(1, "北京地铁在二零二三年运送了一百二十万名乘客。"),
+            _doc(2, "上海今天气温二十二度，适合户外活动。"),
+        )
+        result = engine.answer("北京地铁运送了多少名乘客？", documents)
+        self.assertTrue(result.resolved)
+        self.assertEqual(result.selector, "hpps")
+        self.assertIn("一百二十万", result.answer_text)
+        self.assertIsNotNone(result.selector_proof_closed)
+        self.assertTrue(all(line.text in {doc.text for doc in documents}
+                            for line in result.answer_lines))
+
+    def test_hpps_exploration_reserve_is_bounded_and_never_fakes_closure(self):
+        profile = EngineProfile(
+            name="hpps-exploration", answer_selector="hpps",
+            hpps_max_results=2, hpps_exploration_reserve=2)
+        engine = HorizonAnswerEngine(profile=profile, scope_id=SCOPE)
+        documents = (
+            _doc(1, "北京地铁在二零二三年运送了一百二十万名乘客。"),
+            _doc(2, "这项统计由城市交通部门在年度报告中发布。"),
+            _doc(3, "上海今天气温二十二度，适合户外活动。"),
+        )
+        result = engine.answer("北京地铁运送了多少名乘客？", documents)
+        self.assertTrue(result.resolved)
+        self.assertEqual(result.selector, "hpps")
+        self.assertLessEqual(len(result.answer_lines), 2)
+        self.assertFalse(result.selector_proof_closed)
+        self.assertTrue(all(line.text in {doc.text for doc in documents}
+                            for line in result.answer_lines))
+
+    def test_full_dossier_render_is_explicit_and_preserves_verified_composition(self):
+        profile = EngineProfile(name="full", answer_render_mode="full_dossier")
+        engine = HorizonAnswerEngine(profile=profile, scope_id=SCOPE)
+        documents = (
+            _doc(1, "The Meridian project reduced compute cost by exactly 42 percent compared "
+                    "with the previous baseline architecture across every workload."),
+            _doc(2, "The reduction followed a cache redesign that removed duplicate work "
+                    "between adjacent processing stages in the complete pipeline."),
+        )
+        result = engine.answer("How did Meridian reduce compute cost?", documents)
+        self.assertTrue(result.resolved)
+        self.assertEqual(result.answer_lines, result.claims)
+
+    def test_turn_intents_are_typed_and_unknown_fact_ids_fail_closed(self):
+        engine = HorizonAnswerEngine(scope_id=SCOPE)
+        documents = (_doc(1, "The first observed turn established that Meridian saved 42 percent."),)
+        intent = AnswerContextIntent("turn:0", "What did Meridian save?", (1,))
+        self.assertTrue(engine.answer("Summarize the result", documents,
+                                      context_intents=(intent,)).resolved)
+        with self.assertRaises(ValueError):
+            engine.answer("Summarize the result", documents, context_intents=(
+                AnswerContextIntent("bad", "Unknown", (99,)),))
+
+
+class DirectAnswerReaderBoundaryTests(unittest.TestCase):
+    class Extract42:
+        def propose(self, question, evidence):
+            line = next(item for item in evidence if "42" in item.text)
+            return DirectAnswerProposal("42", "test_extractive", (line.source_id,))
+
+    class Hallucinate:
+        def propose(self, question, evidence):
+            return DirectAnswerProposal("99", "test_extractive", (evidence[0].source_id,))
+
+    class UnknownSource:
+        def propose(self, question, evidence):
+            return DirectAnswerProposal("42", "test_extractive", ("unknown",))
+
+    def setUp(self):
+        self.documents = (_doc(
+            1, "The Meridian project reduced compute cost by exactly 42 percent across all runs."),)
+
+    def test_source_exact_proposal_is_candidate_and_evidence_is_preserved(self):
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_reader=self.Extract42()).answer(
+                "What percent did Meridian reduce cost by?", self.documents)
+        self.assertEqual(result.direct_answer.state, "candidate")
+        self.assertEqual(result.direct_answer.text, "42")
+        self.assertFalse(result.direct_answer.proof_closed)
+        self.assertIn("42", result.evidence_text)
+
+    def test_invented_span_fails_closed_without_erasing_evidence(self):
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_reader=self.Hallucinate()).answer(
+                "What percent did Meridian reduce cost by?", self.documents)
+        self.assertEqual(result.direct_answer.state, "abstain")
+        self.assertEqual(result.direct_answer.residual, ("text_does_not_reopen",))
+        self.assertIn("42", result.evidence_text)
+
+    def test_unknown_source_fails_closed(self):
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_reader=self.UnknownSource()).answer(
+                "What percent did Meridian reduce cost by?", self.documents)
+        self.assertEqual(result.direct_answer.state, "abstain")
+        self.assertEqual(result.direct_answer.residual, ("unknown_source_id",))
 
 
 if __name__ == "__main__":

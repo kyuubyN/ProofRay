@@ -60,6 +60,22 @@ class HSSDQueryPlan:
 
 
 @dataclass(frozen=True)
+class HSSDQueryLattice:
+    """Finite operator interpretations; never a scored or silently chosen plan.
+
+    ``compile`` remains the conservative single-plan API.  This companion surface is for
+    consumers able to execute every surviving interpretation and accept only a proof-backed
+    invariant answer.  Preserving COUNT/SUM and LOOKUP/SUM ambiguity is safer than guessing
+    from an interrogative alone.
+    """
+
+    state: str
+    plans: tuple[HSSDQueryPlan, ...]
+    address_atoms: HSSDAddressAtoms
+    reason: str
+
+
+@dataclass(frozen=True)
 class HSSDEvidenceObservation:
     fact_id: int
     lexical: tuple[str, ...] = ()
@@ -94,7 +110,10 @@ class StructuralHSSDQueryCompiler:
     """Compile query structure from conserved interrogative and operator syntax."""
 
     _PATTERNS = (
-        ("duration", re.compile(r"\b(?:how\s+long|duration|how\s+much\s+time)\b", re.I)),
+        ("duration", re.compile(
+            r"\b(?:how\s+long|duration|how\s+much\s+time|"
+            r"how\s+many\s+(?:minutes?|hours?|days?|weeks?|months?|years?)\s+"
+            r"(?:ago|had\s+passed|have\s+passed|have\s+i\s+been))\b", re.I)),
         ("interval", re.compile(r"\b(?:time|duration|difference)\s+between\b", re.I)),
         ("count_distinct", re.compile(r"\b(?:how\s+many|number\s+of|count\s+of)\b", re.I)),
         ("sum", re.compile(r"\b(?:total|sum|altogether)\b", re.I)),
@@ -105,6 +124,10 @@ class StructuralHSSDQueryCompiler:
         ("exists", re.compile(r"^\s*(?:did|does|do|is|are|was|were|has|have|had|can|could|will|would)\b", re.I)),
         ("lookup", re.compile(r"\b(?:what|which)\b", re.I)),
     )
+    _LATTICE_LOOKUP = re.compile(
+        r"\b(?:remind\s+me|how\s+often|recommend(?:ation|ations)?|suggest(?:ion|ions)?|"
+        r"any\s+(?:tips|advice|ideas)|helpful\s+tips)\b", re.I)
+    _LATTICE_AMOUNT = re.compile(r"\bhow\s+much\b", re.I)
 
     _TARGET = {
         "duration": "duration",
@@ -148,8 +171,12 @@ class StructuralHSSDQueryCompiler:
                 "abstain", "unsupported", "none", address, (), False,
                 "operator structure is absent or conflicting",
             )
-        operation = matched[0]
-        target = self._TARGET[operation]
+        return self._build_plan(matched[0], address, question)
+
+    @classmethod
+    def _build_plan(cls, operation: str, address: HSSDAddressAtoms,
+                    question: str) -> HSSDQueryPlan:
+        target = cls._TARGET[operation]
         obligations = [
             HSSDObligation("proof:identity", "proof"),
             HSSDObligation("support:selector", "selector"),
@@ -184,6 +211,47 @@ class StructuralHSSDQueryCompiler:
         return HSSDQueryPlan(
             "compiled", operation, target, address, tuple(sorted(obligations)),
             require_complete, "unique structural operator syndrome",
+        )
+
+    def compile_lattice(self, question: str) -> HSSDQueryLattice:
+        """Preserve a bounded set of structurally possible programs.
+
+        The method deliberately does not rank alternatives.  A downstream executor must
+        either eliminate plans with typed proof obligations or show that every complete plan
+        yields the same scalar answer.  The legacy ``compile`` path remains unchanged.
+        """
+        if not isinstance(question, str) or not question.strip() or len(question) > 4096:
+            raise ValueError("question must be a non-empty bounded string")
+        address = self._address(question)
+        matched = [name for name, pattern in self._PATTERNS if pattern.search(question)]
+        if any(name not in ("lookup", "exists") for name in matched):
+            matched = [name for name in matched if name != "lookup"]
+        if "duration" in matched:
+            matched = [name for name in matched if name != "sum"]
+        if "interval" in matched:
+            matched = [name for name in matched if name != "duration"]
+
+        # These are proposal gauges, not decisions.  "How much" may request a stored scalar
+        # or an exhaustive sum; advice/reminder surfaces request retrieval of prior content.
+        if self._LATTICE_LOOKUP.search(question):
+            # Modal "Can you remind/recommend..." is a request to retrieve prior content,
+            # not a yes/no EXISTS query.
+            matched = [name for name in matched if name != "exists"]
+            matched.append("lookup")
+        if self._LATTICE_AMOUNT.search(question) and "duration" not in matched:
+            matched.extend(("lookup", "sum"))
+
+        operations = tuple(sorted(set(matched)))
+        if not operations:
+            return HSSDQueryLattice(
+                "unsupported", (), address, "no bounded operator interpretation")
+        plans = tuple(self._build_plan(operation, address, question)
+                      for operation in operations)
+        state = "compiled" if len(plans) == 1 else "ambiguous"
+        return HSSDQueryLattice(
+            state, plans, address,
+            "unique structural operator syndrome" if len(plans) == 1 else
+            "multiple interpretations preserved until proof convergence",
         )
 
     @staticmethod

@@ -1,12 +1,11 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""A single, model-shaped entry point over the deterministic route -> verify -> compose pipeline:
-`HorizonAnswerEngine.answer(question, documents) -> AnsweredResult`. Internalizes the ephemeral
-store lifecycle, routing, verification, and dual-dossier budget/composition logic already proven
-in this project's own MemGym-DR validation (the published 0.95 judge-score result) -- relocated
-here unchanged from where it was first proven correct (a demo webapp's `run_horizon` function),
-so any caller (an HTTP API, a CLI, another app) gets the same behavior without hand-wiring the
-eight-odd calls that pipeline actually requires.
+"""A model-shaped entry point over deterministic route -> verify -> compose.
+
+The historical default remains a compact clean-evidence facade.  The MemGym reference pipeline
+requires four explicit opt-ins that the old facade did not carry: a calibrated candidate generator,
+turn-scoped intents, priority-aware merge and full-dossier rendering.  These are now first-class
+contracts rather than being inaccurately inherited from a different lab runner.
 
 ## The one thing this relocation also fixes
 
@@ -38,22 +37,25 @@ and running out of genuinely new content) instead of being hardcoded.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 import secrets
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Protocol
 
 from .claim_composer import ClaimSource, ContextIntent
 from .claim_routing import ClaimGenerator
 from .config import HorizonConfig
 from .api import HorizonMemory
 from .engine_profile import DEFAULT_PROFILE, EngineProfile
+from .materialized_proof_pressure_search import MaterializedIndependentHorizonSearchEngine
 from .proof_dossier import ProofDossier, build_proof_dossier
-from .raw_causal_channels import is_cjk
-from .routing import HorizonVerifier, QueryEnvelope, RouteDocument, RouteState, RoutingIndex, \
-    SemanticRouter
+from .raw_causal_channels import RawCausalDocument, is_cjk
+from .routing import CandidateGenerator, HorizonVerifier, QueryEnvelope, RouteDocument, RouteState, \
+    RoutingIndex, SemanticRouter
+from .conformal_routing import document_priority_by_source
 
 _TOKEN = re.compile(r"[^\W_]+")
 
@@ -76,6 +78,71 @@ class AnsweredClaim:
 
 
 @dataclass(frozen=True)
+class AnswerContextIntent:
+    """An observed query/goal attached to exact document FactIds, never inferred from gold."""
+
+    intent_id: str
+    text: str
+    fact_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if (not self.intent_id or not self.text or not self.fact_ids or
+                self.fact_ids != tuple(sorted(set(self.fact_ids))) or
+                any(item < 0 for item in self.fact_ids)):
+            raise ValueError("answer context intent must be non-empty and FactId-canonical")
+
+
+@dataclass(frozen=True)
+class DirectAnswer:
+    """A short answer channel, explicitly separate from verified evidence.
+
+    `candidate` may carry an extractive proposal while obligations remain open. Only
+    `resolved` is a complete direct answer and therefore requires `proof_closed=True` plus at
+    least one verified source ID. Evidence remains available independently in AnsweredResult.
+    """
+    state: str = "not_attempted"
+    text: str = ""
+    method: str = "none"
+    source_ids: tuple[str, ...] = ()
+    proof_closed: bool = False
+    residual: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        allowed = {"not_attempted", "candidate", "resolved", "abstain", "unsupported",
+                   "contested"}
+        if self.state not in allowed:
+            raise ValueError("invalid direct-answer state")
+        if self.source_ids != tuple(dict.fromkeys(self.source_ids)):
+            raise ValueError("direct-answer source IDs must be unique and canonical")
+        if self.state in ("candidate", "resolved") and (not self.text or self.method == "none"):
+            raise ValueError("candidate/resolved direct answer requires text and method")
+        if self.state == "resolved" and (not self.proof_closed or not self.source_ids):
+            raise ValueError("resolved direct answer requires closed proof and verified sources")
+        if self.state not in ("candidate", "resolved") and self.text:
+            raise ValueError("non-answer direct state cannot carry answer text")
+
+
+@dataclass(frozen=True)
+class DirectAnswerProposal:
+    """Untrusted readout proposal. The engine can admit it only as `candidate`."""
+    text: str
+    method: str
+    source_ids: tuple[str, ...]
+    residual: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.text or not self.method or self.method == "none" or not self.source_ids:
+            raise ValueError("direct-answer proposal requires text, method and sources")
+        if self.source_ids != tuple(dict.fromkeys(self.source_ids)):
+            raise ValueError("proposal source IDs must be unique and canonical")
+
+
+class DirectAnswerReader(Protocol):
+    def propose(self, question: str,
+                evidence: tuple[AnsweredClaim, ...]) -> DirectAnswerProposal | None: ...
+
+
+@dataclass(frozen=True)
 class AnsweredResult:
     state: str                                # "RESOLVED" or a RouteState member name (abstain)
     claims: tuple[AnsweredClaim, ...]         # full verified/merged pool
@@ -86,6 +153,10 @@ class AnsweredResult:
     documents_considered: int
     verified_candidates: int
     answer_bytes: int
+    selector: str = "diversity"
+    selector_proof_closed: bool | None = None
+    selector_residual: tuple[str, ...] = ()
+    direct_answer: DirectAnswer = field(default_factory=DirectAnswer)
 
     @property
     def resolved(self) -> bool:
@@ -94,6 +165,11 @@ class AnsweredResult:
     @property
     def answer_text(self) -> str:
         return "\n".join(claim.text for claim in self.answer_lines)
+
+    @property
+    def evidence_text(self) -> str:
+        """Explicit name for the backwards-compatible `answer_text` evidence channel."""
+        return self.answer_text
 
 
 def _abstained(state_name: str, documents_considered: int) -> AnsweredResult:
@@ -104,14 +180,22 @@ class HorizonAnswerEngine:
     """Deterministic, zero-LLM route -> verify -> compose pipeline behind one call."""
 
     def __init__(self, *, profile: EngineProfile = DEFAULT_PROFILE,
-                 scope_id: int = 1, session_id: str = "s1"):
+                 scope_id: int = 1, session_id: str = "s1",
+                 direct_answer_reader: DirectAnswerReader | None = None,
+                 candidate_generator: CandidateGenerator | None = None):
         self.profile = profile
         self.scope_id = scope_id
         self.session_id = session_id
+        self.direct_answer_reader = direct_answer_reader
+        self.candidate_generator = candidate_generator
 
-    def answer(self, question: str, documents: tuple[RouteDocument, ...]) -> AnsweredResult:
+    def answer(self, question: str, documents: tuple[RouteDocument, ...], *,
+               context_intents: tuple[AnswerContextIntent, ...] = ()) -> AnsweredResult:
         profile = self.profile
         index = RoutingIndex(documents)
+        known_fact_ids = {document.fact_id for document in documents}
+        if any(set(intent.fact_ids) - known_fact_ids for intent in context_intents):
+            raise ValueError("answer context intent references an unknown document FactId")
 
         workdir = tempfile.mkdtemp(prefix="horizon-answer-")
         try:
@@ -123,16 +207,30 @@ class HorizonAnswerEngine:
 
                 query = QueryEnvelope("q", question, self.scope_id, self.session_id, 10)
                 verifier = HorizonVerifier(memory, index)
-                claim_generator = ClaimGenerator(
-                    profile.claim_weights, specificity_bonus=profile.claim_specificity_bonus)
+                claim_generator = self.candidate_generator or ClaimGenerator(
+                    profile.claim_weights, specificity_bonus=profile.claim_specificity_bonus,
+                    bm25_k1=profile.bm25_k1, bm25_b=profile.bm25_b,
+                    lexical_bm25_delta=profile.lexical_bm25_delta,
+                    sublexical_bm25_delta=profile.sublexical_bm25_delta)
                 result = SemanticRouter(index, claim_generator, verifier).route(
                     query, profile.claim_limit, allow_scope_fallback=False)
 
                 if result.state != RouteState.EVIDENCE:
                     return _abstained(result.state.name, len(documents))
 
-                items = result.evidence.budgeted_items(max_chars=profile.acquisition_bytes)
-                sources, origin, relevance, seen = [], {}, {}, set()
+                source_priority = None
+                if profile.priority_aware_merge:
+                    document_router = getattr(claim_generator, "document_router", None)
+                    if document_router is None:
+                        return _abstained("ABSTAIN_PRIORITY_AUTHORITY", len(documents))
+                    routed_documents = document_router.generate(
+                        query, index, profile.claim_limit, same_session=True)
+                    source_priority = document_priority_by_source(routed_documents, index)
+                items = result.evidence.budgeted_items(
+                    max_chars=profile.acquisition_bytes,
+                    global_sort_alpha=profile.global_sort_alpha if source_priority else None,
+                    source_priority=source_priority)
+                sources, source_fact_ids, origin, relevance, seen = [], [], {}, {}, set()
                 for item in items:
                     key = (item.source, item.fact_id, item.content_span)
                     if key in seen:
@@ -141,14 +239,29 @@ class HorizonAnswerEngine:
                     content = item.content if item.content is not None else str(item.value)
                     source_id = f"{item.source}:{item.fact_id}:{item.content_span}"
                     sources.append(ClaimSource.seal(source_id, content))
+                    source_fact_ids.append(item.fact_id)
                     origin[source_id] = item.fact_id
                     relevance[source_id] = item.relevance_score or 0.0
                 sources = tuple(sources)
                 if not sources:
                     return _abstained(RouteState.ABSTENTION.name, len(documents))
 
-                intents = (ContextIntent.seal(
-                    "q:intent", question, frozenset(s.source_id for s in sources)),)
+                if context_intents:
+                    source_ids_by_fact: dict[int, list[str]] = {}
+                    for source, fact_id in zip(sources, source_fact_ids):
+                        source_ids_by_fact.setdefault(fact_id, []).append(source.source_id)
+                    intents = tuple(ContextIntent.seal(
+                        intent.intent_id, intent.text,
+                        frozenset(source_id for fact_id in intent.fact_ids
+                                  for source_id in source_ids_by_fact.get(fact_id, ())))
+                                    for intent in context_intents
+                                    if any(fact_id in source_ids_by_fact
+                                           for fact_id in intent.fact_ids))
+                    if not intents:
+                        return _abstained("ABSTAIN_NO_CONTEXT_INTENT", len(documents))
+                else:
+                    intents = (ContextIntent.seal(
+                        "q:intent", question, frozenset(s.source_id for s in sources)),)
 
                 # `build_proof_dossier` raises `ValueError` when verified evidence exists but no
                 # source text survives its own claim-extraction/selection (e.g. every candidate
@@ -195,12 +308,25 @@ class HorizonAnswerEngine:
                         claim.surface, origin.get(claim.source_id, -1), claim.source_id,
                         relevance.get(claim.source_id, 0.0)))
 
-                answer_lines = _pick_clean_answer(chosen, relevance, origin, question, profile)
+                selector_proof_closed: bool | None = None
+                selector_residual: tuple[str, ...] = ()
+                if profile.answer_render_mode == "full_dossier":
+                    answer_lines = tuple(AnsweredClaim(
+                        claim.surface, origin.get(claim.source_id, -1), claim.source_id,
+                        relevance.get(claim.source_id, 0.0)) for claim in chosen)
+                elif profile.answer_selector == "hpps":
+                    answer_lines, selector_proof_closed, selector_residual = _pick_hpps_answer(
+                        chosen, relevance, origin, question, profile)
+                else:
+                    answer_lines = _pick_clean_answer(chosen, relevance, origin, question, profile)
                 answer_bytes = sum(len(line.text.encode("utf-8")) for line in answer_lines)
+                direct_answer = _read_direct_answer(
+                    self.direct_answer_reader, question, answer_lines)
 
                 return AnsweredResult(
                     "RESOLVED", tuple(claims), answer_lines, sources, core, ranked,
-                    len(documents), len(sources), answer_bytes)
+                    len(documents), len(sources), answer_bytes, profile.answer_selector,
+                    selector_proof_closed, selector_residual, direct_answer)
             finally:
                 memory.close()
         finally:
@@ -291,4 +417,55 @@ def _pick_clean_answer(chosen, relevance: dict, origin: dict, question: str,
     return ()
 
 
-__all__ = ["AnsweredClaim", "AnsweredResult", "HorizonAnswerEngine"]
+def _pick_hpps_answer(chosen, relevance: dict, origin: dict, question: str,
+                      profile: EngineProfile) \
+        -> tuple[tuple[AnsweredClaim, ...], bool, tuple[str, ...]]:
+    """Rank already-verified claims with HPPS; never upgrades selection to factual proof.
+
+    D150 showed a large CJK evidence-selection gain, but its Chinese questions retained open
+    obligations. The returned closure/residual telemetry is therefore explicit: source reopening
+    remains the authority, while `proof_closed=False` prevents callers from confusing a useful
+    evidence shortlist with a complete typed answer proof.
+    """
+    if not chosen:
+        return (), False, ()
+    documents = tuple(RawCausalDocument(
+        index, claim.surface, 0, index) for index, claim in enumerate(chosen, 1))
+    engine = MaterializedIndependentHorizonSearchEngine(documents)
+    result = engine.search(question, max_results=profile.hpps_max_results,
+                           exploration_reserve=profile.hpps_exploration_reserve,
+                           core_width=1)
+    by_id = {index: claim for index, claim in enumerate(chosen, 1)}
+    lines = tuple(AnsweredClaim(
+        by_id[fact_id].surface.strip(),
+        origin.get(by_id[fact_id].source_id, -1),
+        by_id[fact_id].source_id,
+        relevance.get(by_id[fact_id].source_id, 0.0)) for fact_id in result.fact_ids)
+    return lines, result.proof_closed, result.residual
+
+
+def _read_direct_answer(reader: DirectAnswerReader | None, question: str,
+                        evidence: tuple[AnsweredClaim, ...]) -> DirectAnswer:
+    if reader is None:
+        return DirectAnswer()
+    try:
+        proposal = reader.propose(question, evidence)
+    except Exception as exc:  # readout is optional/untrusted; evidence must survive its failure
+        return DirectAnswer("abstain", method="reader_error",
+                            residual=(type(exc).__name__,))
+    if proposal is None:
+        return DirectAnswer("abstain", method="reader_abstained")
+    by_source = {item.source_id: item.text for item in evidence}
+    if any(source_id not in by_source for source_id in proposal.source_ids):
+        return DirectAnswer("abstain", method="invalid_source",
+                            residual=("unknown_source_id",))
+    if not any(proposal.text in by_source[source_id] for source_id in proposal.source_ids):
+        return DirectAnswer("abstain", method="invalid_span",
+                            residual=("text_does_not_reopen",))
+    # Source containment proves an extractive candidate, not that it answers the question.
+    return DirectAnswer("candidate", proposal.text, proposal.method, proposal.source_ids,
+                        False, proposal.residual)
+
+
+__all__ = ["AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer", "DirectAnswerProposal",
+           "DirectAnswerReader", "HorizonAnswerEngine"]
