@@ -6,237 +6,294 @@
 <title>Horizon Connect</title>
 <style>
   :root {
-    color-scheme: light dark;
-    --bg: #f6f7f9; --panel: #ffffff; --border: #dfe3e8; --text: #1c2128;
-    --muted: #5c6570; --accent: #2f6fed; --resolved: #1c7d43; --abstain: #b3541e;
-    --error-bg: #fdeceb; --error-border: #f1b4ad; --error-text: #8c2d24;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14171c; --panel: #1b1f26; --border: #2c313a; --text: #e6e9ed;
-      --muted: #9aa4b2; --accent: #6fa1ff; --resolved: #4ade80; --abstain: #f0a860;
-      --error-bg: #3a1f1c; --error-border: #6b332c; --error-text: #f4a89f;
-    }
+    --bg: #08090A;
+    --surface: #0F1112;
+    --line: #232729;
+    --line-soft: #16191B;
+    --text: #F2F4F5;
+    --muted: #7E8689;
+    --dim: #4E5457;
+    --error: #B3564B;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", monospace;
+    --serif: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 2rem 1rem 4rem; background: var(--bg); color: var(--text);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 15px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
   }
-  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem; }
-  h1 { font-size: 1.4rem; margin: 0; }
-  .subtitle { color: var(--muted); margin-top: 0.25rem; font-size: 0.92rem; }
-  .panel {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 1.25rem 1.4rem;
+  .wrap { max-width: 820px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+
+  /* ---------- test nav ---------- */
+  .testnav { display: flex; justify-content: center; gap: .5rem; margin-bottom: 2.25rem; }
+  .testnav-btn {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .05em; text-transform: uppercase;
+    padding: .5rem 1.1rem; border: 1px solid var(--line); border-radius: 2px; color: var(--muted);
+    text-decoration: none;
   }
-  label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; }
-  .field { margin-bottom: 1rem; }
+  a.testnav-btn:hover { border-color: var(--muted); color: var(--text); }
+  .testnav-btn.active { border-color: var(--text); color: var(--text); cursor: default; }
+
+  /* ---------- hero ---------- */
+  .hero { text-align: center; margin-bottom: .6rem; }
+  .hero h1 {
+    font-family: var(--serif); font-size: 2.05rem; font-weight: 400;
+    margin: 0 0 .4rem; letter-spacing: .01em;
+  }
+  .hero p {
+    font-family: var(--serif); font-style: italic; color: var(--muted);
+    margin: 0; font-size: 1.02rem;
+  }
+  .corpus {
+    text-align: center; font-family: var(--mono); font-size: .71rem; color: var(--dim);
+    margin-bottom: 2.5rem;
+  }
+
+  /* ---------- panels ---------- */
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; }
+  .panel-body { padding: 1.4rem 1.5rem; }
+
+  label {
+    display: block; font-family: var(--mono); font-size: .68rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: .45rem;
+  }
+  .field { margin-bottom: 1.1rem; }
   .field:last-child { margin-bottom: 0; }
   input[type=text], input[type=password], textarea, select {
-    width: 100%; padding: 0.5rem 0.6rem; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--bg); color: var(--text); font: inherit;
+    width: 100%; padding: .7rem .8rem; border-radius: 2px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-family: var(--sans); font-size: .92rem;
   }
+  input::placeholder, textarea::placeholder { color: var(--dim); }
   textarea { resize: vertical; min-height: 4.5rem; }
   .row { display: flex; gap: 1rem; }
   .row > .field { flex: 1; }
-  .checkbox-field { display: flex; align-items: center; gap: 0.5rem; }
+  .checkbox-field { display: flex; align-items: center; gap: .5rem; }
   .checkbox-field label { margin: 0; }
-  .hint { color: var(--muted); font-size: 0.8rem; margin-top: 0.3rem; }
+  .hint { color: var(--dim); font-size: .78rem; margin-top: .4rem; }
+
   button {
-    background: var(--accent); color: white; border: none; border-radius: 6px;
-    padding: 0.6rem 1.2rem; font: inherit; font-weight: 600; cursor: pointer;
+    background: var(--text); color: var(--bg); border: none; border-radius: 2px;
+    font-family: var(--mono); font-size: .78rem; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; padding: .8rem 1.5rem; cursor: pointer;
   }
-  button:hover { filter: brightness(1.05); }
-  fieldset { border: none; margin: 0; padding: 0; }
+  button:hover { background: #fff; }
+
   [data-connector-fields] { display: none; }
   [data-connector-fields].active { display: block; }
+
+  /* ---------- result ---------- */
   .badge {
-    display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.78rem;
-    font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+    display: inline-block; padding: .2rem .55rem; border: 1px solid var(--line); border-radius: 2px;
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
   }
-  .badge.resolved { background: color-mix(in srgb, var(--resolved) 18%, transparent); color: var(--resolved); }
-  .badge.abstain { background: color-mix(in srgb, var(--abstain) 18%, transparent); color: var(--abstain); }
-  .answer { font-size: 1.05rem; white-space: pre-wrap; margin: 0.75rem 0; }
-  .stats { color: var(--muted); font-size: 0.85rem; display: flex; gap: 1.2rem; flex-wrap: wrap; }
-  table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; font-size: 0.88rem; }
-  th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; }
+  .badge.resolved { border-color: var(--text); color: var(--text); }
+  .badge.abstain { border-color: var(--dim); color: var(--muted); }
+  .answer { font-size: .98rem; white-space: pre-wrap; margin: 1rem 0 0; line-height: 1.6; }
+  .stats {
+    display: flex; gap: 1.25rem; flex-wrap: wrap; font-family: var(--mono); font-size: .71rem;
+    color: var(--dim); margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid var(--line-soft);
+  }
+  .stats b { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 1.1rem; font-size: .85rem; }
+  th, td { text-align: left; padding: .55rem .3rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--dim); font-weight: 600;
+  }
+  td { color: var(--muted); }
+  td:first-child { color: var(--text); }
+
   .error-panel {
-    background: var(--error-bg); border: 1px solid var(--error-border); color: var(--error-text);
-    border-radius: 10px; padding: 1rem 1.2rem; font-size: 0.92rem; white-space: pre-wrap;
+    background: var(--surface); border: 1px solid var(--line); border-left: 2px solid var(--error);
+    border-radius: 3px; padding: 1.1rem 1.3rem; font-size: .88rem; color: var(--text);
+    white-space: pre-wrap; font-family: var(--mono);
   }
 </style>
 </head>
 <body>
-<main>
-  <div>
+<div class="wrap">
+  <nav class="testnav">
+    <a class="testnav-btn" href="{{.BenchmarkURL}}">Benchmark Demo</a>
+    <span class="testnav-btn active">Database Connector</span>
+  </nav>
+
+  <div class="hero">
     <h1>Horizon Connect</h1>
-    <div class="subtitle">Pick a database, ask a question against whatever it holds right now. Every answer comes straight from HorizonAPI at {{.APIBaseURL}} -- documents are fetched fresh on each request, nothing is cached here.</div>
+    <p>Pick a database, ask a question against whatever it holds right now.</p>
+  </div>
+  <div class="corpus">HorizonAPI at {{.APIBaseURL}} &middot; documents fetched fresh on each request, nothing cached here</div>
+
+  <div class="panel">
+    <div class="panel-body">
+      <form method="post" action="/ask">
+        <div class="row">
+          <div class="field">
+            <label for="connector">Database</label>
+            <select id="connector" name="connector" onchange="showConnectorFields(this.value)">
+              {{range .Connectors}}
+              <option value="{{.}}" {{if eq . $.Selected}}selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+          </div>
+          <div class="field checkbox-field" style="align-self: end; margin-bottom: 1.1rem;">
+            <input type="checkbox" id="include_sources" name="include_sources" value="1" {{if .IncludeSources}}checked{{end}}>
+            <label for="include_sources">Include full source list</label>
+          </div>
+        </div>
+
+        <div data-connector-fields="postgres">
+          <div class="field">
+            <label for="postgres_dsn">POSTGRES_DSN</label>
+            <input type="text" id="postgres_dsn" name="postgres_dsn" value="{{.Field "postgres" "dsn"}}" placeholder="postgresql://user:pass@localhost:5432/yourdb">
+          </div>
+          <div class="field">
+            <label for="postgres_table">Table (optional)</label>
+            <input type="text" id="postgres_table" name="postgres_table" value="{{.Field "postgres" "table"}}" placeholder="articles">
+          </div>
+        </div>
+
+        <div data-connector-fields="sqlite">
+          <div class="field">
+            <label for="sqlite_path">SQLITE_PATH</label>
+            <input type="text" id="sqlite_path" name="sqlite_path" value="{{.Field "sqlite" "path"}}" placeholder="/path/to/your.db">
+          </div>
+          <div class="field">
+            <label for="sqlite_table">Table (optional)</label>
+            <input type="text" id="sqlite_table" name="sqlite_table" value="{{.Field "sqlite" "table"}}" placeholder="support_articles">
+          </div>
+        </div>
+
+        <div data-connector-fields="mysql">
+          <div class="row">
+            <div class="field">
+              <label for="mysql_host">MYSQL_HOST</label>
+              <input type="text" id="mysql_host" name="mysql_host" value="{{.Field "mysql" "host"}}" placeholder="localhost">
+            </div>
+            <div class="field">
+              <label for="mysql_port">Port (optional)</label>
+              <input type="text" id="mysql_port" name="mysql_port" value="{{.Field "mysql" "port"}}" placeholder="3306">
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="mysql_user">User (optional)</label>
+              <input type="text" id="mysql_user" name="mysql_user" value="{{.Field "mysql" "user"}}" placeholder="root">
+            </div>
+            <div class="field">
+              <label for="mysql_password">Password</label>
+              <input type="password" id="mysql_password" name="mysql_password" value="{{.Field "mysql" "password"}}">
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="mysql_database">Database (optional)</label>
+              <input type="text" id="mysql_database" name="mysql_database" value="{{.Field "mysql" "database"}}" placeholder="horizon_example">
+            </div>
+            <div class="field">
+              <label for="mysql_table">Table (optional)</label>
+              <input type="text" id="mysql_table" name="mysql_table" value="{{.Field "mysql" "table"}}" placeholder="articles">
+            </div>
+          </div>
+        </div>
+
+        <div data-connector-fields="mongodb">
+          <div class="field">
+            <label for="mongodb_uri">MONGODB_URI</label>
+            <input type="text" id="mongodb_uri" name="mongodb_uri" value="{{.Field "mongodb" "uri"}}" placeholder="mongodb://localhost:27017">
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="mongodb_database">Database (optional)</label>
+              <input type="text" id="mongodb_database" name="mongodb_database" value="{{.Field "mongodb" "database"}}" placeholder="support_kb">
+            </div>
+            <div class="field">
+              <label for="mongodb_collection">Collection (optional)</label>
+              <input type="text" id="mongodb_collection" name="mongodb_collection" value="{{.Field "mongodb" "collection"}}" placeholder="articles">
+            </div>
+          </div>
+        </div>
+
+        <div data-connector-fields="redis">
+          <div class="field">
+            <label for="redis_url">REDIS_URL</label>
+            <input type="text" id="redis_url" name="redis_url" value="{{.Field "redis" "url"}}" placeholder="redis://localhost:6379/0">
+          </div>
+          <div class="field">
+            <label for="redis_prefix">Key prefix (optional)</label>
+            <input type="text" id="redis_prefix" name="redis_prefix" value="{{.Field "redis" "prefix"}}" placeholder="articles:">
+          </div>
+        </div>
+
+        <div data-connector-fields="dynamodb">
+          <div class="row">
+            <div class="field">
+              <label for="dynamodb_table">Table (optional)</label>
+              <input type="text" id="dynamodb_table" name="dynamodb_table" value="{{.Field "dynamodb" "table"}}" placeholder="articles">
+            </div>
+            <div class="field">
+              <label for="dynamodb_region">AWS_DEFAULT_REGION</label>
+              <input type="text" id="dynamodb_region" name="dynamodb_region" value="{{.Field "dynamodb" "region"}}" placeholder="us-east-1">
+            </div>
+          </div>
+          <div class="field">
+            <label for="dynamodb_endpoint">Endpoint override (optional -- DynamoDB Local, etc.)</label>
+            <input type="text" id="dynamodb_endpoint" name="dynamodb_endpoint" value="{{.Field "dynamodb" "endpoint"}}" placeholder="http://localhost:8000">
+          </div>
+          <div class="hint">Credentials come from the standard AWS SDK chain (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars, etc.) on the machine running horizon-web -- not entered here.</div>
+        </div>
+
+        <div data-connector-fields="elasticsearch">
+          <div class="field">
+            <label for="elasticsearch_url">ELASTICSEARCH_URL</label>
+            <input type="text" id="elasticsearch_url" name="elasticsearch_url" value="{{.Field "elasticsearch" "url"}}" placeholder="http://localhost:9200">
+          </div>
+          <div class="field">
+            <label for="elasticsearch_index">Index (optional)</label>
+            <input type="text" id="elasticsearch_index" name="elasticsearch_index" value="{{.Field "elasticsearch" "index"}}" placeholder="articles">
+          </div>
+        </div>
+
+        <div class="field" style="margin-top: 1.1rem;">
+          <label for="question">Question</label>
+          <textarea id="question" name="question" placeholder="What percent did the Meridian project reduce cost by?">{{.Question}}</textarea>
+        </div>
+
+        <button type="submit">Ask</button>
+      </form>
+    </div>
   </div>
 
-  <form class="panel" method="post" action="/ask">
-    <div class="row">
-      <div class="field">
-        <label for="connector">Database</label>
-        <select id="connector" name="connector" onchange="showConnectorFields(this.value)">
-          {{range .Connectors}}
-          <option value="{{.}}" {{if eq . $.Selected}}selected{{end}}>{{.}}</option>
-          {{end}}
-        </select>
-      </div>
-      <div class="field checkbox-field" style="align-self: end; margin-bottom: 1rem;">
-        <input type="checkbox" id="include_sources" name="include_sources" value="1" {{if .IncludeSources}}checked{{end}}>
-        <label for="include_sources">Include full source list</label>
-      </div>
-    </div>
-
-    <div data-connector-fields="postgres">
-      <div class="field">
-        <label for="postgres_dsn">POSTGRES_DSN</label>
-        <input type="text" id="postgres_dsn" name="postgres_dsn" value="{{.Field "postgres" "dsn"}}" placeholder="postgresql://user:pass@localhost:5432/yourdb">
-      </div>
-      <div class="field">
-        <label for="postgres_table">Table (optional)</label>
-        <input type="text" id="postgres_table" name="postgres_table" value="{{.Field "postgres" "table"}}" placeholder="articles">
-      </div>
-    </div>
-
-    <div data-connector-fields="sqlite">
-      <div class="field">
-        <label for="sqlite_path">SQLITE_PATH</label>
-        <input type="text" id="sqlite_path" name="sqlite_path" value="{{.Field "sqlite" "path"}}" placeholder="/path/to/your.db">
-      </div>
-      <div class="field">
-        <label for="sqlite_table">Table (optional)</label>
-        <input type="text" id="sqlite_table" name="sqlite_table" value="{{.Field "sqlite" "table"}}" placeholder="support_articles">
-      </div>
-    </div>
-
-    <div data-connector-fields="mysql">
-      <div class="row">
-        <div class="field">
-          <label for="mysql_host">MYSQL_HOST</label>
-          <input type="text" id="mysql_host" name="mysql_host" value="{{.Field "mysql" "host"}}" placeholder="localhost">
-        </div>
-        <div class="field">
-          <label for="mysql_port">Port (optional)</label>
-          <input type="text" id="mysql_port" name="mysql_port" value="{{.Field "mysql" "port"}}" placeholder="3306">
-        </div>
-      </div>
-      <div class="row">
-        <div class="field">
-          <label for="mysql_user">User (optional)</label>
-          <input type="text" id="mysql_user" name="mysql_user" value="{{.Field "mysql" "user"}}" placeholder="root">
-        </div>
-        <div class="field">
-          <label for="mysql_password">Password</label>
-          <input type="password" id="mysql_password" name="mysql_password" value="{{.Field "mysql" "password"}}">
-        </div>
-      </div>
-      <div class="row">
-        <div class="field">
-          <label for="mysql_database">Database (optional)</label>
-          <input type="text" id="mysql_database" name="mysql_database" value="{{.Field "mysql" "database"}}" placeholder="horizon_example">
-        </div>
-        <div class="field">
-          <label for="mysql_table">Table (optional)</label>
-          <input type="text" id="mysql_table" name="mysql_table" value="{{.Field "mysql" "table"}}" placeholder="articles">
-        </div>
-      </div>
-    </div>
-
-    <div data-connector-fields="mongodb">
-      <div class="field">
-        <label for="mongodb_uri">MONGODB_URI</label>
-        <input type="text" id="mongodb_uri" name="mongodb_uri" value="{{.Field "mongodb" "uri"}}" placeholder="mongodb://localhost:27017">
-      </div>
-      <div class="row">
-        <div class="field">
-          <label for="mongodb_database">Database (optional)</label>
-          <input type="text" id="mongodb_database" name="mongodb_database" value="{{.Field "mongodb" "database"}}" placeholder="support_kb">
-        </div>
-        <div class="field">
-          <label for="mongodb_collection">Collection (optional)</label>
-          <input type="text" id="mongodb_collection" name="mongodb_collection" value="{{.Field "mongodb" "collection"}}" placeholder="articles">
-        </div>
-      </div>
-    </div>
-
-    <div data-connector-fields="redis">
-      <div class="field">
-        <label for="redis_url">REDIS_URL</label>
-        <input type="text" id="redis_url" name="redis_url" value="{{.Field "redis" "url"}}" placeholder="redis://localhost:6379/0">
-      </div>
-      <div class="field">
-        <label for="redis_prefix">Key prefix (optional)</label>
-        <input type="text" id="redis_prefix" name="redis_prefix" value="{{.Field "redis" "prefix"}}" placeholder="articles:">
-      </div>
-    </div>
-
-    <div data-connector-fields="dynamodb">
-      <div class="row">
-        <div class="field">
-          <label for="dynamodb_table">Table (optional)</label>
-          <input type="text" id="dynamodb_table" name="dynamodb_table" value="{{.Field "dynamodb" "table"}}" placeholder="articles">
-        </div>
-        <div class="field">
-          <label for="dynamodb_region">AWS_DEFAULT_REGION</label>
-          <input type="text" id="dynamodb_region" name="dynamodb_region" value="{{.Field "dynamodb" "region"}}" placeholder="us-east-1">
-        </div>
-      </div>
-      <div class="field">
-        <label for="dynamodb_endpoint">Endpoint override (optional -- DynamoDB Local, etc.)</label>
-        <input type="text" id="dynamodb_endpoint" name="dynamodb_endpoint" value="{{.Field "dynamodb" "endpoint"}}" placeholder="http://localhost:8000">
-      </div>
-      <div class="hint">Credentials come from the standard AWS SDK chain (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars, etc.) on the machine running horizon-web -- not entered here.</div>
-    </div>
-
-    <div data-connector-fields="elasticsearch">
-      <div class="field">
-        <label for="elasticsearch_url">ELASTICSEARCH_URL</label>
-        <input type="text" id="elasticsearch_url" name="elasticsearch_url" value="{{.Field "elasticsearch" "url"}}" placeholder="http://localhost:9200">
-      </div>
-      <div class="field">
-        <label for="elasticsearch_index">Index (optional)</label>
-        <input type="text" id="elasticsearch_index" name="elasticsearch_index" value="{{.Field "elasticsearch" "index"}}" placeholder="articles">
-      </div>
-    </div>
-
-    <div class="field" style="margin-top: 1rem;">
-      <label for="question">Question</label>
-      <textarea id="question" name="question" placeholder="What percent did the Meridian project reduce cost by?">{{.Question}}</textarea>
-    </div>
-
-    <button type="submit">Ask</button>
-  </form>
-
   {{if .ErrorMessage}}
-  <div class="error-panel">{{.ErrorMessage}}</div>
+  <div class="error-panel" style="margin-top: 1.25rem;">{{.ErrorMessage}}</div>
   {{end}}
 
   {{if .Result}}
-  <div class="panel">
-    <span class="badge {{if eq .Result.State "resolved"}}resolved{{else}}abstain{{end}}">{{.Result.State}}</span>
-    <div class="answer">{{if .Result.Answer}}{{.Result.Answer}}{{else}}(no answer -- the engine abstained on this corpus/question pair){{end}}</div>
-    <div class="stats">
-      <span>documents considered: {{.Result.DocumentsConsidered}}</span>
-      <span>verified candidates: {{.Result.VerifiedCandidates}}</span>
-      <span>answer bytes: {{.Result.AnswerBytes}}</span>
+  <div class="panel" style="margin-top: 1.25rem;">
+    <div class="panel-body">
+      <span class="badge {{if eq .Result.State "resolved"}}resolved{{else}}abstain{{end}}">{{.Result.State}}</span>
+      <div class="answer">{{if .Result.Answer}}{{.Result.Answer}}{{else}}(no answer -- the engine abstained on this corpus/question pair){{end}}</div>
+      <div class="stats">
+        <span><b>{{.Result.DocumentsConsidered}}</b> documents considered</span>
+        <span><b>{{.Result.VerifiedCandidates}}</b> verified candidates</span>
+        <span><b>{{.Result.AnswerBytes}}</b> answer bytes</span>
+      </div>
+      {{if .Result.Sources}}
+      <table>
+        <thead><tr><th>Text</th><th>Source</th><th>Relevance</th></tr></thead>
+        <tbody>
+          {{range .Result.Sources}}
+          <tr><td>{{.Text}}</td><td>{{.Source}}</td><td>{{printf "%.2f" .RelevanceScore}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{end}}
     </div>
-    {{if .Result.Sources}}
-    <table>
-      <thead><tr><th>Text</th><th>Source</th><th>Relevance</th></tr></thead>
-      <tbody>
-        {{range .Result.Sources}}
-        <tr><td>{{.Text}}</td><td>{{.Source}}</td><td>{{printf "%.2f" .RelevanceScore}}</td></tr>
-        {{end}}
-      </tbody>
-    </table>
-    {{end}}
   </div>
   {{end}}
-</main>
+</div>
 <script>
   function showConnectorFields(name) {
     document.querySelectorAll('[data-connector-fields]').forEach(function (el) {

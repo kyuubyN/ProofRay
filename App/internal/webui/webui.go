@@ -50,6 +50,7 @@ var connectorFields = map[string][]string{
 
 type viewData struct {
 	APIBaseURL     string
+	BenchmarkURL   string
 	Connectors     []string
 	Selected       string
 	Question       string
@@ -78,14 +79,17 @@ type viewResult struct {
 
 // Server renders the form and handles submissions against one HorizonAPI instance.
 type Server struct {
-	client     *horizonclient.Client
-	apiBaseURL string
+	client       *horizonclient.Client
+	apiBaseURL   string
+	benchmarkURL string
 }
 
 // New builds a Server. apiBaseURL is shown in the page footer and is otherwise only used by
-// client, which must already point at it.
-func New(client *horizonclient.Client, apiBaseURL string) *Server {
-	return &Server{client: client, apiBaseURL: apiBaseURL}
+// client, which must already point at it. benchmarkURL is where the "Benchmark Demo" nav button
+// links -- the website/ Flask demo -- so the two standalone HorizonMemory front ends can jump
+// between each other without being merged into one process.
+func New(client *horizonclient.Client, apiBaseURL, benchmarkURL string) *Server {
+	return &Server{client: client, apiBaseURL: apiBaseURL, benchmarkURL: benchmarkURL}
 }
 
 // Routes returns the handler to pass to http.ListenAndServe.
@@ -99,10 +103,11 @@ func (s *Server) Routes() http.Handler {
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	names := registeredConnectorNames()
 	s.render(w, viewData{
-		APIBaseURL: s.apiBaseURL,
-		Connectors: names,
-		Selected:   preferredDefault(names, "sqlite"),
-		Fields:     map[string]string{},
+		APIBaseURL:   s.apiBaseURL,
+		BenchmarkURL: s.benchmarkURL,
+		Connectors:   names,
+		Selected:     preferredDefault(names, "sqlite"),
+		Fields:       map[string]string{},
 	})
 }
 
@@ -122,6 +127,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	data := viewData{
 		APIBaseURL:     s.apiBaseURL,
+		BenchmarkURL:   s.benchmarkURL,
 		Connectors:     registeredConnectorNames(),
 		Selected:       r.FormValue("connector"),
 		Question:       r.FormValue("question"),

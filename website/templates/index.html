@@ -160,10 +160,25 @@
 
   footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--line-soft);
            font-family: var(--mono); font-size: .68rem; color: var(--dim); line-height: 1.9; }
+
+  /* ---------- test nav ---------- */
+  .testnav { display: flex; justify-content: center; gap: .5rem; margin-bottom: 1.75rem; }
+  .testnav-btn {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .05em; text-transform: uppercase;
+    padding: .5rem 1.1rem; border: 1px solid var(--line); border-radius: 2px; color: var(--muted);
+    text-decoration: none;
+  }
+  a.testnav-btn:hover { border-color: var(--muted); color: var(--text); }
+  .testnav-btn.active { border-color: var(--text); color: var(--text); cursor: default; }
 </style>
 </head>
 <body>
 <div class="wrap">
+
+  <nav class="testnav">
+    <span class="testnav-btn active">Benchmark Demo</span>
+    <a class="testnav-btn" href="{{ connector_url }}">Database Connector</a>
+  </nav>
 
   <div class="hero">
     <img src="/assets/ProofRay.jpeg" alt="ProofRay — a ray crossing an event horizon">

@@ -29,6 +29,11 @@ app = Flask(__name__)
 SCOPE = 7
 DATASET = "demo_dataset.jsonl"
 
+# Where the "Database Connector" nav button links -- App/cmd/horizon-web's Go web UI, a separate
+# process/port. The two front ends stay independent (different language, different runtime);
+# this is just a cross-link so a visitor can jump between them.
+CONNECTOR_URL = os.environ.get("HORIZON_CONNECTOR_URL", "http://127.0.0.1:8080")
+
 # The exact budgets the published 0.95 result was measured at -- read off DEFAULT_PROFILE
 # (the same profile ENGINE runs with below) rather than duplicated as separate constants, so
 # these two can never quietly drift apart the way this file's own answer-selection logic once
@@ -231,7 +236,7 @@ def _warm_cache():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", connector_url=CONNECTOR_URL)
 
 
 @app.route("/api/status", methods=["GET"])

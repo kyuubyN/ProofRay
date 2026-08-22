@@ -141,6 +141,19 @@ still come from the process environment (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_
 field, same reasoning as `api/server.py` never taking a polish API key in the request body (see
 `../api/README.md`).
 
+The page's top nav has two buttons, "Benchmark Demo" and "Database Connector" (the current page,
+shown active) — the same pair appears on `../website/`'s demo page with the active side flipped.
+They're cross-links, not a merge: `../website/web_app.py` (Flask, MemGym-DR benchmark demo) and
+`cmd/horizon-web` (this Go server) stay two independent processes on two different ports; each
+just knows the other's URL so a visitor can jump between them. `HORIZON_BENCHMARK_URL` (default
+`http://127.0.0.1:5050`, matching `website/web_app.py`'s own default port) points this page's
+button at wherever that Flask demo is actually running; `website/web_app.py` has the mirror env
+var, `HORIZON_CONNECTOR_URL` (default `http://127.0.0.1:8080`), for its own "Database Connector"
+button. This page's whole look (dark palette, serif heading, monospace labels/buttons, sharp
+1-2px corners) is deliberately copied from `website/templates/index.html`'s CSS variables and
+type scale, not just the nav bar, so the two feel like one product wearing two different forms
+rather than two unrelated tools bolted together.
+
 ### Testing against real backends locally
 
 `testdata/docker-compose.yml` brings up one throwaway instance of every backend:
