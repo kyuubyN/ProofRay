@@ -73,3 +73,31 @@ def test_unsupported_or_conflicting_operator_abstains():
     compiler = StructuralHSSDQueryCompiler()
     assert compiler.compile("Describe it.").state == "abstain"
     assert compiler.compile("Who and where was it?").state == "abstain"
+
+
+def test_operator_lattice_preserves_count_sum_ambiguity_without_changing_legacy_api():
+    compiler = StructuralHSSDQueryCompiler()
+    question = "How many hours in total did I spend driving?"
+    assert compiler.compile(question).state == "abstain"
+    lattice = compiler.compile_lattice(question)
+    assert lattice.state == "ambiguous"
+    assert tuple(plan.operation for plan in lattice.plans) == ("count_distinct", "sum")
+    assert all(plan.state == "compiled" for plan in lattice.plans)
+
+
+@pytest.mark.parametrize("question", (
+    "Can you remind me of the website you recommended?",
+    "How often do I attend yoga classes?",
+    "Any tips for keeping my kitchen clean?",
+))
+def test_operator_lattice_retains_prior_content_lookup_gauges(question):
+    lattice = StructuralHSSDQueryCompiler().compile_lattice(question)
+    assert lattice.state == "compiled"
+    assert tuple(plan.operation for plan in lattice.plans) == ("lookup",)
+
+
+def test_how_much_lattice_does_not_guess_between_stored_scalar_and_sum():
+    lattice = StructuralHSSDQueryCompiler().compile_lattice(
+        "How much did I spend on the workshops?")
+    assert lattice.state == "ambiguous"
+    assert tuple(plan.operation for plan in lattice.plans) == ("lookup", "sum")

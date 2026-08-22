@@ -27,6 +27,10 @@ from ..supersession_collapse import (
 )
 from ..pragmatic_negation import PragmaticNegationResult, detect_pragmatic_negation
 from ..phonetic_pt import phi_pt
+from ..portuguese_atomic_relations import (
+    RoleReadResult, read as read_pt_atomic_relation,
+    resolve_surface_role as resolve_pt_surface_role,
+)
 
 __all__ = [
     "HorizonSearchEngine",
@@ -44,4 +48,7 @@ __all__ = [
     "detect_pragmatic_negation",
     "PragmaticNegationResult",
     "phi_pt",
+    "RoleReadResult",
+    "read_pt_atomic_relation",
+    "resolve_pt_surface_role",
 ]

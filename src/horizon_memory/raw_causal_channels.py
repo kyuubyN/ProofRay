@@ -366,12 +366,27 @@ class SignedChannelScore:
 
 
 class RawCausalSyndromeIndex:
-    """One materialized signed field over lexical and conserved raw-text observables."""
+    """One materialized signed field over lexical and conserved raw-text observables.
 
-    def __init__(self, documents: tuple[RawCausalDocument, ...]):
+    BM25+ deltas are experimental, opt-in and independently configurable for lexical and
+    sublexical channels. Zero preserves standard BM25 and remains the production default.
+    """
+
+    def __init__(self, documents: tuple[RawCausalDocument, ...], *,
+                 bm25_k1: float = 1.2, bm25_b: float = 0.75,
+                 lexical_bm25_delta: float = 0.0,
+                 sublexical_bm25_delta: float = 0.0):
         if not documents or len({item.fact_id for item in documents}) != len(documents):
             raise ValueError("raw causal documents require unique FactIds")
+        if bm25_k1 <= 0 or not 0 <= bm25_b <= 1:
+            raise ValueError("invalid BM25 parameters")
+        if lexical_bm25_delta < 0 or sublexical_bm25_delta < 0:
+            raise ValueError("BM25+ deltas must be non-negative")
         self.documents = documents
+        self.bm25_k1 = float(bm25_k1)
+        self.bm25_b = float(bm25_b)
+        self.lexical_bm25_delta = float(lexical_bm25_delta)
+        self.sublexical_bm25_delta = float(sublexical_bm25_delta)
         self.channels = {item.fact_id: observe_raw_text(item.text) for item in documents}
         self.n = len(documents)
         self.avgdl = sum(len(self.channels[item.fact_id].lexical) for item in documents) / self.n
@@ -387,7 +402,7 @@ class RawCausalSyndromeIndex:
             row[name] /= maximum
 
     def _bm25(self, query: tuple[str, ...], document: tuple[str, ...], df: Counter,
-              average_length: float) -> float:
+              average_length: float, *, delta: float = 0.0) -> float:
         tf = Counter(document)
         score = 0.0
         for token in set(query):
@@ -395,8 +410,11 @@ class RawCausalSyndromeIndex:
             if not frequency:
                 continue
             idf = math.log(1.0 + (self.n - df[token] + 0.5) / (df[token] + 0.5))
-            score += idf * frequency * 2.2 / (
-                frequency + 1.2 * (0.25 + 0.75 * len(document) / max(average_length, 1e-9)))
+            normalized_tf = frequency * (self.bm25_k1 + 1.0) / (
+                frequency + self.bm25_k1 * (
+                    1.0 - self.bm25_b
+                    + self.bm25_b * len(document) / max(average_length, 1e-9)))
+            score += idf * (normalized_tf + delta)
         return score
 
     def components(self, query_text: str) -> tuple[SignedChannelScore, ...]:
@@ -426,9 +444,11 @@ class RawCausalSyndromeIndex:
                 contradiction += 0.25
             rows.append({
                 "fact_id": document.fact_id,
-                "lexical": self._bm25(query.lexical, value.lexical, self.df, self.avgdl),
+                "lexical": self._bm25(query.lexical, value.lexical, self.df, self.avgdl,
+                                        delta=self.lexical_bm25_delta),
                 "sublexical": self._bm25(query.sublexical, value.sublexical,
-                                          self.sub_df, average_sub),
+                                          self.sub_df, average_sub,
+                                          delta=self.sublexical_bm25_delta),
                 "entity": float(entity_overlap), "relation": float(relation_overlap),
                 "observable": observable, "contradiction": contradiction,
             })

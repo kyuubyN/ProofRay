@@ -35,6 +35,9 @@ Issues = "https://github.com/kyuubyN/HorizonMemory/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+horizon_memory = ["resources/wordnet-3.0/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"

@@ -47,6 +47,8 @@ class EngineProfile:
     conformal_weights: tuple[float, ...] = LEXICAL_SUBLEXICAL_WEIGHTS
     bm25_k1: float = 1.2
     bm25_b: float = 0.75
+    lexical_bm25_delta: float = 0.0
+    sublexical_bm25_delta: float = 0.0
 
     # Candidate-routing budget.
     claim_limit: int = 800
@@ -75,6 +77,15 @@ class EngineProfile:
     # does not need to pre-decide which single fact matters most.
     answer_shortlist_size: int = 50
     answer_relevance_gate_ratio: float = 0.3
+    answer_selector: str = "diversity"
+    # `clean` is the historical API surface. `full_dossier` returns the complete verified
+    # composed packet under `answer_bytes`, which is the surface the D144 MemGym result judged.
+    answer_render_mode: str = "clean"
+    priority_aware_merge: bool = False
+    hpps_max_results: int = 3
+    # Explicit breadth after HPPS's proof-directed core. Zero preserves the historical selector;
+    # exploration can widen evidence but is never allowed to masquerade as proof closure.
+    hpps_exploration_reserve: int = 0
     answer_min_length_tiers: tuple[tuple[int, bool], ...] = field(
         default_factory=lambda: _DEFAULT_LENGTH_TIERS)
 
@@ -91,6 +102,8 @@ class EngineProfile:
             raise ValueError("claim_specificity_bonus must be non-negative")
         if self.bm25_k1 <= 0 or not 0 <= self.bm25_b <= 1:
             raise ValueError("invalid BM25 parameters")
+        if self.lexical_bm25_delta < 0 or self.sublexical_bm25_delta < 0:
+            raise ValueError("BM25+ deltas must be non-negative")
         if self.claim_limit < 1:
             raise ValueError("claim_limit must be positive")
         if self.acquisition_bytes < 256 or self.answer_bytes < 256:
@@ -109,6 +122,15 @@ class EngineProfile:
             raise ValueError("answer_shortlist_size must be positive")
         if not 0.0 <= self.answer_relevance_gate_ratio <= 1.0:
             raise ValueError("answer_relevance_gate_ratio must be in [0,1]")
+        if self.answer_selector not in ("diversity", "hpps"):
+            raise ValueError("answer_selector must be 'diversity' or 'hpps'")
+        if self.answer_render_mode not in ("clean", "full_dossier"):
+            raise ValueError("answer_render_mode must be 'clean' or 'full_dossier'")
+        if self.hpps_max_results < 1:
+            raise ValueError("hpps_max_results must be positive")
+        if not 0 <= self.hpps_exploration_reserve <= self.hpps_max_results:
+            raise ValueError(
+                "hpps_exploration_reserve must be in [0, hpps_max_results]")
         if not self.answer_min_length_tiers:
             raise ValueError("answer_min_length_tiers must not be empty")
         for min_length, _require_sentence in self.answer_min_length_tiers:
@@ -122,6 +144,8 @@ class EngineProfile:
             "claim_specificity_bonus": self.claim_specificity_bonus,
             "conformal_weights": list(self.conformal_weights),
             "bm25_k1": self.bm25_k1, "bm25_b": self.bm25_b,
+            "lexical_bm25_delta": self.lexical_bm25_delta,
+            "sublexical_bm25_delta": self.sublexical_bm25_delta,
             "claim_limit": self.claim_limit,
             "acquisition_bytes": self.acquisition_bytes, "answer_bytes": self.answer_bytes,
             "per_fiber": self.per_fiber, "global_sort_alpha": self.global_sort_alpha,
@@ -129,6 +153,11 @@ class EngineProfile:
             "dedup_threshold": self.dedup_threshold,
             "answer_shortlist_size": self.answer_shortlist_size,
             "answer_relevance_gate_ratio": self.answer_relevance_gate_ratio,
+            "answer_selector": self.answer_selector,
+            "answer_render_mode": self.answer_render_mode,
+            "priority_aware_merge": self.priority_aware_merge,
+            "hpps_max_results": self.hpps_max_results,
+            "hpps_exploration_reserve": self.hpps_exploration_reserve,
             "answer_min_length_tiers": [list(tier) for tier in self.answer_min_length_tiers],
         }
 

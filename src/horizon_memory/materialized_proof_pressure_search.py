@@ -20,10 +20,26 @@ from .raw_causal_channels import (
 
 
 class MaterializedRawCausalSyndromeIndex:
-    def __init__(self, documents: tuple[RawCausalDocument, ...]):
+    """Ingest-time equivalent of the raw index with opt-in BM25+ channel floors.
+
+    Both deltas default to zero. D148 found no universal nonzero production setting, so
+    callers must opt in explicitly and validate their own corpus.
+    """
+    def __init__(self, documents: tuple[RawCausalDocument, ...], *,
+                 bm25_k1: float = 1.2, bm25_b: float = 0.75,
+                 lexical_bm25_delta: float = 0.0,
+                 sublexical_bm25_delta: float = 0.0):
         if not documents or len({item.fact_id for item in documents}) != len(documents):
             raise ValueError("materialized raw documents require unique FactIds")
+        if bm25_k1 <= 0 or not 0 <= bm25_b <= 1:
+            raise ValueError("invalid BM25 parameters")
+        if lexical_bm25_delta < 0 or sublexical_bm25_delta < 0:
+            raise ValueError("BM25+ deltas must be non-negative")
         self.documents = documents
+        self.bm25_k1 = float(bm25_k1)
+        self.bm25_b = float(bm25_b)
+        self.lexical_bm25_delta = float(lexical_bm25_delta)
+        self.sublexical_bm25_delta = float(sublexical_bm25_delta)
         self.channels = {item.fact_id: observe_raw_text(item.text) for item in documents}
         self.n = len(documents)
         self.lexical_tf = {key: Counter(value.lexical) for key, value in self.channels.items()}
@@ -60,15 +76,18 @@ class MaterializedRawCausalSyndromeIndex:
             self.specificity_scores[key] /= max_specificity
 
     def _bm25(self, query: tuple[str, ...], tf: Counter, length: int,
-              df: Counter, average_length: float) -> float:
+              df: Counter, average_length: float, *, delta: float = 0.0) -> float:
         score = 0.0
         for token in set(query):
             frequency = tf[token]
             if not frequency:
                 continue
             inverse = math.log(1.0 + (self.n - df[token] + .5) / (df[token] + .5))
-            score += inverse * frequency * 2.2 / (
-                frequency + 1.2 * (.25 + .75 * length / max(average_length, 1e-9)))
+            normalized_tf = frequency * (self.bm25_k1 + 1.0) / (
+                frequency + self.bm25_k1 * (
+                    1.0 - self.bm25_b
+                    + self.bm25_b * length / max(average_length, 1e-9)))
+            score += inverse * (normalized_tf + delta)
         return score
 
     @staticmethod
@@ -125,9 +144,11 @@ class MaterializedRawCausalSyndromeIndex:
             rows.append({
                 "fact_id": fact_id,
                 "lexical": self._bm25(query.lexical, self.lexical_tf[fact_id],
-                                        len(value.lexical), self.lexical_df, self.avgdl),
+                                        len(value.lexical), self.lexical_df, self.avgdl,
+                                        delta=self.lexical_bm25_delta),
                 "sublexical": self._bm25(query.sublexical, self.sublexical_tf[fact_id],
-                                           len(value.sublexical), self.sublexical_df, self.avg_subdl),
+                                           len(value.sublexical), self.sublexical_df,
+                                           self.avg_subdl, delta=self.sublexical_bm25_delta),
                 "entity": float(len(set(query.entities).intersection(self.entity_sets[fact_id]))),
                 "relation": float(len(set(query.relations).intersection(self.relation_sets[fact_id]))),
                 "observable": observable, "contradiction": contradiction,

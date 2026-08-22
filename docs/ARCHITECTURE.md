@@ -130,6 +130,53 @@ These engines may combine lexical candidates with causal observables, hard
 exclusions and evidence budgets. They must continue to report paired BM25
 baselines and may not convert retrieval hit rate into an answer-accuracy claim.
 
+The public answer facade can opt into HPPS for final verified-evidence selection
+through `EngineProfile(answer_selector="hpps")`. HPPS ranks only claims that have
+already crossed the source/provenance boundary. Its `selector_proof_closed` and
+`selector_residual` telemetry must be inspected separately: a useful shortlist is
+not automatically a complete typed answer proof.
+
+The consumer boundary exposes two non-interchangeable outputs. `evidence` is the verified,
+provenance-bearing claim selection (the legacy `answer`/`answer_text` name remains as a
+backwards-compatible alias). `direct_answer` is an optional minimal result with its own state,
+method, sources, closure flag and residual obligations. Failure to derive a direct answer never
+erases or weakens the evidence channel.
+
+### Promoted deterministic EN atomic relation pack
+
+`english_atomic_relations.py` is a bounded source reader, not a new truth authority. The query is
+compiled into one missing `ARG1` or `ARG2`; exact source spans form finite readings; productive and
+WordNet-exception morphology connects surface predicates; disagreement contests and absence abstains.
+The result records source/question/resource hashes, answer/predicate/known spans, the construction
+rule and clause force. Interrogative, conditional, modal and negated readings must never be silently
+written as positive facts.
+
+The pack is opt-in and source-scoped. `OpenTextHorizonMemory.answer_atomic_relation_en` requires one
+attested FactId, preventing a failed scan over unrelated documents from masquerading as closed-world
+completeness. The old `answer()` and retrieval defaults are unchanged. A proof-closed result can be
+serialized into a 140-byte envelope and reopened only by rerunning the same checksummed morphology
+pack against the same source and question.
+
+Promotion evidence is cross-treebank, not the development split: EWT dev/train exceeded 90%, then
+the untouched GUM test reached 93.90% positive accuracy and 97.47% selective precision. The mechanism
+covers only atomic one-token `nsubj+obj` probes under its finite grammar; PT/ZH and phrase/multihop
+generalization remain research work.
+
+## Research graduation
+
+`lab/` is an experimental boundary, not a permanent second implementation of
+Horizon. A mechanism that passes its frozen gate, survives an independent or
+disjoint evaluation, and improves the real pipeline should be promoted into
+`src/horizon_memory/` with tests at its actual call site. The core port must use
+opt-in, backwards-compatible defaults until its production configuration is
+validated.
+
+A lab result is not eligible for promotion when it depends on benchmark-specific
+fixtures, reimplements a production class, wins only against a cloned baseline,
+fails a non-compensable subgroup/coverage gate, or has not been reproduced through
+the real public/core path. Failed and partial mechanisms remain in `lab/` as
+evidence; they are not silently deleted or presented as shipped capabilities.
+
 The namespace also exposes `collapse_evidence_items`: an opt-in mechanism that
 excludes superseded restatements of a value (a revised date, a reversed
 decision) from an already-verified evidence pool, so a downstream reader
