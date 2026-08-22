@@ -150,6 +150,49 @@ def test_known_gap_noun_noun_and_bare_adjective_compounds_stop_on_the_first_word
     assert (numeral_then_adjective.state, numeral_then_adjective.answer) == ("resolved", "separate")
 
 
+@pytest.mark.parametrize(("source", "question", "expected_rule", "expected"), (
+    # ARG2 (patient): the surface subject of a passive clause sits left of the auxiliary, in
+    # exactly the slot an active-voice subject would occupy -- the same rule, anchored at the
+    # auxiliary instead of the predicate.
+    ("Window was broken by John.", "What did John break?",
+     "passive_surface_subject_patient", "window"),
+    # ARG1 (agent): only reachable through an explicit "by"-phrase; there is no other source of
+    # the semantic agent in a passive clause.
+    ("Window was broken by John.", "Who broke window?", "passive_by_phrase_agent", "john"),
+    # Passive progressive ("was being V-ed") -- a two-token auxiliary run, not just one "be" form.
+    ("Window was being broken by John.", "Who broke window?",
+     "passive_by_phrase_agent", "john"),
+))
+def test_passive_voice_swaps_search_direction_correctly(source, question, expected_rule, expected):
+    compiler = EnglishAtomicRelationCompiler()
+    result = compiler.read(source, question)
+    assert result.state == "resolved"
+    assert result.answer == expected
+    assert source[slice(*result.answer_span)].casefold() == expected
+    assert any(witness.rule == expected_rule
+              for proof in result.proofs for witness in proof.witnesses)
+    assert result.proofs[0].reopen(source, question, compiler)
+
+
+def test_passive_voice_with_no_expressed_agent_abstains_rather_than_guessing():
+    # "Window was broken." has no by-phrase -- there is no expressed agent to report. The
+    # passive-specific rule must not fall back to the active-voice left-of-predicate search
+    # (which would incorrectly answer with whatever token happens to precede the auxiliary).
+    compiler = EnglishAtomicRelationCompiler()
+    result = compiler.read("Window was broken.", "Who broke window?")
+    assert result.state == "abstain"
+    assert result.answer is None
+
+
+def test_active_perfect_is_not_mistaken_for_passive_voice():
+    # "has broken" is active perfect (have + participle), not passive (be + participle) -- "has"/
+    # "have"/"had" are deliberately excluded from the passive-auxiliary set, so this must resolve
+    # via the ordinary active-voice rule, unaffected by the new branch.
+    compiler = EnglishAtomicRelationCompiler()
+    result = compiler.read("John has broken window.", "Who broke window?")
+    assert (result.state, result.answer) == ("resolved", "john")
+
+
 def test_wordnet_exception_pack_is_exact_and_small():
     path = (Path(__file__).parents[1] / "src" / "horizon_memory" / "resources" /
             "wordnet-3.0" / "verb.exc")
