@@ -394,11 +394,11 @@ def _validate_rotation(prev, cand) -> TransitionResult:
     if (new_sealed.ordinal != old_active.ordinal or new_sealed.segment_id != old_active.segment_id
             or new_sealed.first_seq != old_active.first_seq
             or new_sealed.record_count != old_active.record_count
-            or new_sealed.prev_segment_digest != old_active.prev_segment_digest
+            or not hmac.compare_digest(new_sealed.prev_segment_digest, old_active.prev_segment_digest)
             or new_sealed.key_id != old_active.key_id):
         return TransitionResult(TransitionState.INVALID, "SEALED não conserva a identidade do ACTIVE")
     if (new_sealed.sealed_object_length != new_sealed.durable_prefix_length
-            or new_sealed.sealed_object_sha256 != new_sealed.durable_prefix_sha256
+            or not hmac.compare_digest(new_sealed.sealed_object_sha256, new_sealed.durable_prefix_sha256)
             or new_sealed.sealed_object_sha256 == _ZERO32):
         return TransitionResult(TransitionState.INVALID, "SEALED não canônico (durable != sealed)")
     if new_sealed.durable_prefix_length != old_active.durable_prefix_length + SEAL_FOOTER_BYTES:
@@ -415,7 +415,7 @@ def _validate_rotation(prev, cand) -> TransitionResult:
         return TransitionResult(TransitionState.INVALID, "novo ACTIVE não está vazio/canônico")
     if na.durable_prefix_length <= 0:
         return TransitionResult(TransitionState.INVALID, "novo ACTIVE sem header durável")
-    if na.prev_segment_digest != new_sealed.sealed_object_sha256[:16]:
+    if not hmac.compare_digest(na.prev_segment_digest, new_sealed.sealed_object_sha256[:16]):
         return TransitionResult(TransitionState.INVALID, "cadeia do novo ACTIVE quebrada")
     if na.key_id != old_active.key_id:
         return TransitionResult(TransitionState.INVALID, "key_id do novo ACTIVE mudou")
@@ -687,13 +687,13 @@ def _publish_impl(store, object_store, wal_store, keyring, candidate_manifest_bl
                 return PublishResult(PublishState.ABSTAIN, None, "PublicationRecord do CURRENT ilegível")
             if cur_ptr.key_id != cur_rec.key_id:         # a chave do ponteiro tem que assinar o record
                 return PublishResult(PublishState.ABSTAIN, None, "CURRENT.key_id != record.key_id")
-            if (cur_rec.previous_publication_sha256 == expected_current_digest
-                    and cur_rec.manifest_sha256 == manifest_sha256
+            if (hmac.compare_digest(cur_rec.previous_publication_sha256, expected_current_digest)
+                    and hmac.compare_digest(cur_rec.manifest_sha256, manifest_sha256)
                     and cur_rec.read_seq == man.read_seq and cur_rec.scope_id == man.scope_id
                     and cur_rec.generation_id == man.generation_id):
                 return PublishResult(PublishState.ALREADY_PUBLISHED,   # não muta → sem autoridade
                                      _proof_from(cur_rec, cur_pub_sha, active), "idempotente")
-            if cur_pub_sha != expected_current_digest:  # outro publisher já avançou o CURRENT
+            if not hmac.compare_digest(cur_pub_sha, expected_current_digest):  # outro publisher já avançou
                 return PublishResult(PublishState.STALE_CURRENT, None, "CURRENT != expected")
             revision, previous = cur_rec.revision + 1, cur_pub_sha
             prev_record = cur_rec
@@ -777,13 +777,15 @@ def bind_rotation_prepared(prepared, current_publication_digest, current_publica
     if not is_sealed_prepared(prepared):
         return (False, None, "RotationPrepared não selado")
     # 1) o record TEM que ser exatamente o apontado pelo digest do CURRENT
-    if hashlib.sha256(current_publication_record_blob).digest() != current_publication_digest:
+    if not hmac.compare_digest(hashlib.sha256(current_publication_record_blob).digest(),
+                               current_publication_digest):
         return (False, None, "record_blob não corresponde ao current_publication_digest")
     rstate, record, _ = parse_publication_record(current_publication_record_blob, keyring)
     if rstate != PublicationState.VALID:
         return (False, None, "PublicationRecord ilegível")
     # 2) o manifesto tem que ser o do record
-    if record.manifest_sha256 != hashlib.sha256(current_manifest_blob).digest():
+    if not hmac.compare_digest(record.manifest_sha256,
+                               hashlib.sha256(current_manifest_blob).digest()):
         return (False, None, "manifest_sha256 do record != manifesto fornecido")
     mstate, man, _ = parse_manifest(current_manifest_blob, keyring)
     if mstate != OpenGenerationState.VALID:
@@ -802,10 +804,10 @@ def bind_rotation_prepared(prepared, current_publication_digest, current_publica
     # 4) o SEALED substituto ocupa o MESMO ordinal/segment_id/first_seq/cadeia do ACTIVE vigente
     if (old.ordinal != cur_active.ordinal or old.segment_id != cur_active.segment_id
             or old.first_seq != cur_active.first_seq
-            or old.prev_segment_digest != cur_active.prev_segment_digest):
+            or not hmac.compare_digest(old.prev_segment_digest, cur_active.prev_segment_digest)):
         return (False, None, "old_sealed não substitui o ACTIVE do CURRENT")
     # 5) novo ACTIVE encadeia o SEALED recém-selado e começa em R+1
-    if (nxt.prev_segment_digest != old.sealed_object_sha256[:16]
+    if (not hmac.compare_digest(nxt.prev_segment_digest, old.sealed_object_sha256[:16])
             or nxt.first_seq != prepared.read_seq + 1 or nxt.ordinal != old.ordinal + 1):
         return (False, None, "cadeia/R descontínuos")
     # os SEALED anteriores permanecem byte-idênticos (mesma tupla de descriptors)
@@ -877,8 +879,8 @@ def open_published_cursor(store, object_store, keyring, *, limits=None) -> tuple
     rr = object_store.get_limited(record.manifest_sha256.hex(), lim.artifact.max_blob_bytes)
     if not rr.ok:
         return (CursorState.CORRUPT, None, f"manifesto: {rr.reason}")
-    if hashlib.sha256(rr.blob).digest() != record.manifest_sha256:   # defesa extra (store já é CA)
-        return (CursorState.CORRUPT, None, "manifesto não casa manifest_sha256")
+    if not hmac.compare_digest(hashlib.sha256(rr.blob).digest(), record.manifest_sha256):
+        return (CursorState.CORRUPT, None, "manifesto não casa manifest_sha256")   # defesa extra (store já é CA)
     mstate, man, mwhy = parse_manifest(rr.blob, keyring)
     if mstate != OpenGenerationState.VALID:
         return (CursorState.CORRUPT, None, f"manifesto ilegível: {mwhy}")
@@ -928,7 +930,8 @@ def publish_rotation(store, object_store, wal_store, keyring, cursor, prepared,
     old, nxt, ca = prepared.old_sealed_descriptor, prepared.next_active_descriptor, cursor.active_descriptor
     if (prepared.read_seq != cursor.read_seq or old.ordinal != ca.ordinal
             or old.segment_id != ca.segment_id or old.first_seq != ca.first_seq
-            or old.prev_segment_digest != ca.prev_segment_digest or old.key_id != ca.key_id):
+            or not hmac.compare_digest(old.prev_segment_digest, ca.prev_segment_digest)
+            or old.key_id != ca.key_id):
         return PublishResult(PublishState.INVALID_TRANSITION, None, "prepared não casa o cursor/ACTIVE")
     mstate, cand, _ = parse_manifest(candidate_manifest_blob, keyring)
     if mstate != OpenGenerationState.VALID:
@@ -1056,20 +1059,22 @@ def publish_batch(store, object_store, wal_store, keyring, cursor, intent, durab
     if not ok_auth:
         return (PublishState.INVALID_AUTHORITY, None, why)
     # intent ↔ cursor (mesma publicação/revisão/R/ACTIVE e PREFIXO de origem)
-    if (intent.source_publication_sha256 != cursor.proof.publication_sha256
+    if (not hmac.compare_digest(intent.source_publication_sha256, cursor.proof.publication_sha256)
             or intent.source_revision != cursor.revision or intent.source_read_seq != cursor.read_seq
             or intent.scope_id != cursor.manifest.scope_id
             or intent.segment_id != cursor.active_descriptor.segment_id
             or intent.first_seq != cursor.active_descriptor.first_seq
             or intent.source_byte_length != cursor.active_descriptor.durable_prefix_length
-            or intent.source_prefix_sha256 != cursor.active_descriptor.durable_prefix_sha256):
+            or not hmac.compare_digest(intent.source_prefix_sha256,
+                                       cursor.active_descriptor.durable_prefix_sha256)):
         return (PublishState.INVALID_INTENT, None, "intent não casa o cursor")
     if intent.candidate_read_seq != intent.source_read_seq + intent.applied_count:
         return (PublishState.INVALID_INTENT, None, "intervalo [R+1, candidate_R] incoerente")
     # prova durável ↔ intent (comprimento físico, SHA do prefixo, intervalo, DIGEST CANÔNICO do intent)
-    if (durable_proof.intent_digest != intent_canonical_digest(intent)   # C4.2.1: digest íntegro
+    if (not hmac.compare_digest(durable_proof.intent_digest,
+                                intent_canonical_digest(intent))   # C4.2.1: digest íntegro
             or durable_proof.byte_length != intent.candidate_byte_length
-            or durable_proof.prefix_sha256 != intent.candidate_prefix_sha256
+            or not hmac.compare_digest(durable_proof.prefix_sha256, intent.candidate_prefix_sha256)
             or durable_proof.candidate_read_seq != intent.candidate_read_seq
             or durable_proof.interval_lo != intent.source_read_seq + 1
             or durable_proof.scope_id != intent.scope_id
@@ -1120,10 +1125,11 @@ def publish_maintenance(store, object_store, wal_store, keyring, cursor, prepare
     if not is_sealed_compaction(prepared):
         return PublishResult(PublishState.INVALID_TRANSITION, None, "CompactionPrepared não selado")
     # candidato EXATAMENTE igual ao pacote (integridade do blob vs. digest selado)
-    if prepared.candidate_manifest_sha256 != hashlib.sha256(prepared.candidate_manifest_blob).digest():
+    if not hmac.compare_digest(prepared.candidate_manifest_sha256,
+                               hashlib.sha256(prepared.candidate_manifest_blob).digest()):
         return PublishResult(PublishState.INVALID_CANDIDATE, None, "candidate_manifest_sha256 != blob")
     # binding cursor↔prepared: mesma publicação/R de origem
-    if (prepared.source_publication_sha256 != cursor.proof.publication_sha256
+    if (not hmac.compare_digest(prepared.source_publication_sha256, cursor.proof.publication_sha256)
             or prepared.read_seq != cursor.read_seq):
         return PublishResult(PublishState.INVALID_TRANSITION, None, "prepared não casa o cursor de origem")
     mstate, cand, _ = parse_manifest(prepared.candidate_manifest_blob, keyring)
@@ -1137,7 +1143,7 @@ def publish_maintenance(store, object_store, wal_store, keyring, cursor, prepare
     if not cand.segments or prepared.next_active_descriptor != cand.segments[-1]:
         return PublishResult(PublishState.INVALID_CANDIDATE, None, "next_active_descriptor != pacote")
     # o PAI do candidato tem que ser EXATAMENTE o manifesto de origem apontado pelo CURRENT
-    if cand.parent_manifest_digest != cursor.proof.manifest_sha256:
+    if not hmac.compare_digest(cand.parent_manifest_digest, cursor.proof.manifest_sha256):
         return PublishResult(PublishState.INVALID_TRANSITION, None, "parent != manifesto do cursor de origem")
     if cand.generation_id != cursor.manifest.generation_id + 1:
         return PublishResult(PublishState.INVALID_TRANSITION, None, "generation_id != cursor+1")
@@ -1149,7 +1155,8 @@ def publish_maintenance(store, object_store, wal_store, keyring, cursor, prepare
     # FH-00.1: a prova publicada tem que apontar para EXATAMENTE o manifesto do pacote
     if (res.state in (PublishState.PUBLISHED, PublishState.ALREADY_PUBLISHED)
             and res.proof is not None
-            and res.proof.manifest_sha256 != prepared.candidate_manifest_sha256):
+            and not hmac.compare_digest(res.proof.manifest_sha256,
+                                        prepared.candidate_manifest_sha256)):
         return PublishResult(PublishState.INVALID_CANDIDATE, None,
                              "proof.manifest_sha256 != candidate_manifest_sha256")
     if res.state in (PublishState.PUBLISHED, PublishState.ALREADY_PUBLISHED):

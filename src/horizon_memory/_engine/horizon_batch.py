@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import hmac
 import os
 import struct
 import threading
@@ -341,7 +342,7 @@ def commit_prepared_durable(fd: int, plan: BatchPlan, intent, failpoint=lambda s
     failpoint("after_wal_fsync")
     st = os.fstat(fd)
     if (st.st_size != intent.candidate_byte_length
-            or head.prefix_digest != intent.candidate_prefix_sha256
+            or not hmac.compare_digest(head.prefix_digest, intent.candidate_prefix_sha256)
             or head.scope_id != intent.scope_id or head.segment_id != intent.segment_id):
         return (None, write_end, fsync_end)          # divergência física → sem prova
     proof = DurableBatchProof(st.st_dev, st.st_ino, head.scope_id, head.segment_id,
@@ -557,7 +558,8 @@ class GroupCommitStore:
         if expected_key_id is not None and h.key_id != expected_key_id:
             raise WalError("key_id do header diverge do esperado")
         if (expected_previous_segment_digest is not None
-                and h.previous_segment_digest != expected_previous_segment_digest):
+                and not hmac.compare_digest(h.previous_segment_digest,
+                                            expected_previous_segment_digest)):
             raise WalError("previous_segment_digest do header diverge do esperado")
         first_seq = h.first_seq                           # do header autenticado, nunca default
         # `initial_seq = first_seq-1`: um segmento header-only (0 frames) retoma em `first_seq`, não em
@@ -875,7 +877,8 @@ class GroupCommitStore:
                 or proof.next_active_segment_id != nxt.segment_id
                 or proof.next_active_first_seq != nxt.first_seq
                 or proof.next_active_prefix_length != nxt.durable_prefix_length
-                or proof.next_active_prefix_sha256 != nxt.durable_prefix_sha256):
+                or not hmac.compare_digest(proof.next_active_prefix_sha256,
+                                           nxt.durable_prefix_sha256)):
             return ActivationResult(ActivationState.INVALID_PROOF, None, "proof↔prepared incoerentes")
 
         ws_shards = wal_shards if wal_shards is not None else shards
@@ -917,7 +920,8 @@ class GroupCommitStore:
             fcntl.flock(pub_fd, fcntl.LOCK_EX)
             # 3) CURRENT ainda tem que apontar para a prova
             cst, cur_ptr, _ = read_current(directory, keyring)
-            if cst != PublicationState.VALID or cur_ptr.publication_sha256 != proof.publication_sha256:
+            if cst != PublicationState.VALID or not hmac.compare_digest(
+                    cur_ptr.publication_sha256, proof.publication_sha256):
                 return _abort(ActivationState.STALE_PROOF, "CURRENT mudou após a prova")
             fp("after_current_check")
             # C4.0: reconstrói o cursor publicado DESTE CURRENT (autoridade única do writer). Tem que
@@ -925,7 +929,7 @@ class GroupCommitStore:
             cur_state, cursor, cur_why = open_published_cursor(publication_store, object_store, keyring)
             if cur_state != CursorState.VALID:
                 return _abort(ActivationState.STALE_PROOF, f"cursor publicado: {cur_why}")
-            if (cursor.proof.publication_sha256 != proof.publication_sha256
+            if (not hmac.compare_digest(cursor.proof.publication_sha256, proof.publication_sha256)
                     or cursor.active_descriptor.segment_id != nxt.segment_id
                     or cursor.active_descriptor.first_seq != nxt.first_seq):
                 return _abort(ActivationState.STALE_PROOF, "cursor não casa a prova/ACTIVE")
@@ -1013,7 +1017,8 @@ class GroupCommitStore:
                 or proof.next_active_segment_id != nxt.segment_id
                 or proof.next_active_first_seq != nxt.first_seq
                 or proof.next_active_prefix_length != nxt.durable_prefix_length
-                or proof.next_active_prefix_sha256 != nxt.durable_prefix_sha256):
+                or not hmac.compare_digest(proof.next_active_prefix_sha256,
+                                           nxt.durable_prefix_sha256)):
             return ActivationResult(ActivationState.INVALID_PROOF, None, "proof↔prepared incoerentes")
 
         ws_shards = wal_shards if wal_shards is not None else shards
@@ -1048,14 +1053,15 @@ class GroupCommitStore:
             fcntl.flock(pub_fd, fcntl.LOCK_EX)
             # 3) CURRENT ainda tem que apontar para a prova (a publicação da compaction)
             cst, cur_ptr, _ = read_current(directory, keyring)
-            if cst != PublicationState.VALID or cur_ptr.publication_sha256 != proof.publication_sha256:
+            if cst != PublicationState.VALID or not hmac.compare_digest(
+                    cur_ptr.publication_sha256, proof.publication_sha256):
                 return _abort(ActivationState.STALE_PROOF, "CURRENT mudou após a prova")
             fp("after_current_check")
             # reconstrói o cursor da NOVA geração DESTE CURRENT (autoridade única do writer)
             cur_state, cursor, cur_why = open_published_cursor(publication_store, object_store, keyring)
             if cur_state != CursorState.VALID:
                 return _abort(ActivationState.STALE_PROOF, f"cursor publicado: {cur_why}")
-            if (cursor.proof.publication_sha256 != proof.publication_sha256
+            if (not hmac.compare_digest(cursor.proof.publication_sha256, proof.publication_sha256)
                     or cursor.manifest.generation_id != prepared.generation_id
                     or cursor.active_descriptor.segment_id != nxt.segment_id
                     or cursor.active_descriptor.first_seq != nxt.first_seq):
@@ -1232,7 +1238,7 @@ class GroupCommitStore:
             return (False, "snapshot.visible_through != cursor.read_seq")
         if (head.segment_id != act.segment_id or head.first_seq != act.first_seq
                 or head.byte_length != act.durable_prefix_length
-                or head.prefix_digest != act.durable_prefix_sha256):
+                or not hmac.compare_digest(head.prefix_digest, act.durable_prefix_sha256)):
             return (False, "snapshot.wal_head não casa o ACTIVE do cursor")
         if plan.expected_first_seq != cursor.read_seq + 1:
             return (False, "plan.expected_first_seq != cursor.read_seq + 1")

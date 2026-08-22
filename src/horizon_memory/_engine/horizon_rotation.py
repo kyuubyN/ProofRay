@@ -169,7 +169,8 @@ def prepare_rotation(store, wal_store, current_active_descriptor=None, *,
     else:
         return _fail(RotationState.FAILED, "sem cursor publicado nem descriptor ACTIVE externo")
     if (cur.status != STATE_ACTIVE or cur.segment_id != seg or cur.first_seq != first_seq
-            or cur.key_id != store.key_id or cur.prev_segment_digest != store.previous_segment_digest):
+            or cur.key_id != store.key_id
+            or not hmac.compare_digest(cur.prev_segment_digest, store.previous_segment_digest)):
         return _fail(RotationState.FAILED, "descriptor ACTIVE não casa o WalHead")
 
     # FH-03.2: selagem/publicação do SEALED + criação do próximo ACTIVE + registro prepared ficam sob

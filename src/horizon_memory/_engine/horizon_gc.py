@@ -172,7 +172,7 @@ def _reach_from_publication(pub_digest, object_store, wal_store, keyring, reacha
     mr = object_store.get_limited(man_hex, max_obj)
     if not mr.ok:
         raise _Abort(GcState.ABORTED_MISSING, f"manifesto {man_hex[:12]} ausente")
-    if hashlib.sha256(mr.blob).digest() != record.manifest_sha256:
+    if not hmac.compare_digest(hashlib.sha256(mr.blob).digest(), record.manifest_sha256):
         raise _Abort(GcState.ABORTED_CORRUPT, "manifesto não casa manifest_sha256")
     mstate, man, mwhy = parse_manifest(mr.blob, keyring)
     if mstate != OpenGenerationState.VALID:

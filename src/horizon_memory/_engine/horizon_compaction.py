@@ -295,7 +295,8 @@ def _validate_post_drain_state(snapshot, cursor):
         return (False, "snapshot de outro scope")
     if head.segment_id != act.segment_id or head.first_seq != act.first_seq:
         return (False, "snapshot ↔ ACTIVE do cursor divergem (segmento/first_seq)")
-    if head.byte_length != act.durable_prefix_length or head.prefix_digest != act.durable_prefix_sha256:
+    if (head.byte_length != act.durable_prefix_length
+            or not hmac.compare_digest(head.prefix_digest, act.durable_prefix_sha256)):
         return (False, "prefixo durável do snapshot != ACTIVE do cursor")
     return (True, "ok")
 

@@ -195,10 +195,17 @@ class TypedCausalExecutor:
             -> tuple[TypedCausalFact, ...] | None:
         fiber = self.fibers.get((selector.subject, selector.predicate), ())
         examined.update(fact.fact_id for fact in fiber)
-        matching = tuple(fact for fact in fiber
-                         if (at_time is None or fact.observed_at <= at_time) and
-                         self._matches(fact, selector))
-        return self._latest_orbits(matching)
+        # Select the latest fact per orbit *before* filtering by selector value, not after: an
+        # entity that changed state (e.g. role "user" -> "admin") has an orbit whose true-latest
+        # version may not match this selector's value. Filtering by value first would drop that
+        # latest version and let an older, matching version pass `_latest_orbits` as "the latest
+        # of its group" -- silently asserting a stale state as current (found via code review,
+        # 2026-08-2x).
+        timely = tuple(fact for fact in fiber if at_time is None or fact.observed_at <= at_time)
+        latest = self._latest_orbits(timely)
+        if latest is None:
+            return None
+        return tuple(fact for fact in latest if self._matches(fact, selector))
 
     def execute(self, program: TypedCausalProgram) -> TypedCausalResult:
         examined: set[int] = set()

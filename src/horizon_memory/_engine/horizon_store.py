@@ -455,7 +455,7 @@ class TxIdIndex:
         e = self._m.get(operation_id)
         if e is None:
             return "new"
-        return "dedup_replay" if e[0] == digest else "txid_conflict"
+        return "dedup_replay" if hmac.compare_digest(e[0], digest) else "txid_conflict"
 
     def record(self, operation_id: bytes, digest: bytes, seq: int) -> None:
         self._m[operation_id] = (digest, seq)

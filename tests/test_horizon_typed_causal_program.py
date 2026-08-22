@@ -105,6 +105,27 @@ def test_unknown_cause_and_uncertain_evidence_fail_closed():
     assert (result.state, result.reason) == ("abstain", "uncertain_fact")
 
 
+def test_value_selector_does_not_resurrect_a_superseded_matching_value():
+    """`_selected` used to filter by selector value *before* picking the latest version per
+    orbit: an entity that moved on to a new state (whose latest version no longer matches the
+    query's value) let an older, matching version pass through as if it were "the latest of
+    its group" -- silently attesting a stale state as current (2026-08-2x, found via code
+    review)."""
+    facts = (_fact(1, "role", "user", 1, event_id="account", version=1),
+             _fact(2, "role", "admin", 2, event_id="account", version=2))
+    result = TypedCausalExecutor(facts, "scope").execute(
+        TypedCausalProgram("LOOKUP", CausalSelector("Ada", "role", "user")))
+    assert (result.state, result.reason) == ("abstain", "no_matching_fact")
+
+
+def test_value_selector_still_resolves_when_the_latest_version_matches():
+    facts = (_fact(1, "role", "user", 1, event_id="account", version=1),
+             _fact(2, "role", "admin", 2, event_id="account", version=2))
+    result = TypedCausalExecutor(facts, "scope").execute(
+        TypedCausalProgram("LOOKUP", CausalSelector("Ada", "role", "admin")))
+    assert (result.state, result.value, result.fact_ids) == ("resolved", "admin", (2,))
+
+
 def test_lookup_budget_is_independent_of_unrelated_history_and_old_versions():
     facts = []
     for index in range(2_000):
