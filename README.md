@@ -6,33 +6,31 @@
 
 <p align="center"><em>Memory that can show why it remembers.</em></p>
 
-Horizon Memory is a standalone, model-agnostic memory architecture for AI
-systems. It stores durable state, retrieves evidence under explicit budgets,
-preserves provenance, verifies proof-carrying results, and abstains when its
-conditions are not satisfied. The core requires no LLM, hosted API, or network.
+## What is Horizon Memory?
 
-See [AUTHORS.md](AUTHORS.md) for the full authorship record.
+Most AI memory tools work like a confident friend: they answer fast, but you can never fully
+trust what they say, because you can't see where the answer came from.
 
-> Status: alpha version. Interfaces and research claims are being audited
-> before the first public release, and there is still a lot to improve —
-> expect rough edges, incomplete coverage, and active, ongoing work.
+Horizon works the other way around. Give it your documents and a question, and it hands back an
+answer built only from things it can actually point to and verify. Every sentence in the answer
+comes with a receipt: which document it came from, and proof that document hasn't been tampered
+with. If it can't find a real answer, it tells you honestly instead of making one up.
 
-Horizon originated inside the private **Q-HDRE research program**. Its
-physics-inspired hypotheses were not treated as claims about nature: they were
-translated into computational mechanisms, exposed to falsifiable tests, and
-retained only when their useful invariants survived. Read the sanitized public
-history in [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md).
+It runs entirely on your own machine. No AI model is required to get an answer, and no data ever
+leaves your computer unless you choose to connect one yourself.
 
-## Install
+> **Status:** this is an early, actively-developed version. Things may still be rough around the
+> edges. Read on to see how it works today.
 
-The public PyPI distribution will be named `horizon-memory` because `horizon`
-is already used by OpenStack:
+Horizon grew out of a multi-year research project that tried many different approaches to AI
+memory and kept only the ones that survived real testing. If you're curious about that history,
+it's written up in [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md).
+
+## Try it in two minutes
 
 ```bash
 pip install horizon-memory
 ```
-
-The Python import and command remain concise:
 
 ```python
 import secrets
@@ -55,181 +53,77 @@ memory.close()
 horizon --doctor
 ```
 
-Values in the durable substrate are currently unsigned bytes (`0..255`). Rich
-application content is referenced by fact identity, source and span. This limit
-is intentional and will not be hidden behind a broader marketing claim.
-
-## Surfaces
-
-- `horizon_memory`: stable storage, evidence, typed causal execution and HSSD.
-- `horizon_memory.adapters`: integration boundary, dual-licensed for adoption.
-- `horizon_memory.research`: experimental retrieval engines; not stable API.
-
-`HorizonAnswerEngine` takes an `EngineProfile` that shapes how much evidence competes for the
-final answer. `DEFAULT_PROFILE` is tuned for a large corpus; `TEAM_MEMORY_PROFILE` and
-`PERSONAL_MEMORY_PROFILE` are named, pre-tuned alternatives for a medium or small one (a personal
-chat history, a small team's docs), where the default's own anti-dilution caution can drop the
-one sentence carrying the concrete answer. **`PERSONAL_MEMORY_PROFILE` is the recommended default
-for a personal-memory or small-corpus deployment** — it is the only preset validated to a clean
-sweep (zero missed details, zero wrong answers) across five independent real MongoDB-backed
-corpora and 136 hand-verified questions, including under genuine multi-hop cross-conversation
-composition. See
-[Memory presets](HorizonAI%20Engine/README.md#memory-presets-pick-the-profile-for-your-corpus-size)
-for which one fits your deployment and the real numbers behind each.
-
-For controlled structured inputs, the opt-in [authorized typed sidecar](docs/TYPED_SIDECAR.md)
-binds schema/rule identity, source microcitations, capabilities, lifecycle and completeness
-proofs to each deterministic fact. It is the recommended zero-LLM path for databases, tools,
-event streams and application state; it is not marketed as unrestricted text understanding.
-
-`OpenTextHorizonMemory` extends the authority boundary to arbitrary text without pretending to
-understand it at ingestion: documents become exact `surface_document` spans and then enter the
-multilingual deterministic route/verify/compose path. On the pinned 120-case MemGym port it reproduced
-the judged output byte-for-byte and therefore inherits its 0.950 score. See
-[Benchmarks](BENCHMARKS.md#memgym-open-text-sidecar-port) for the boundary.
-
-The first deterministic language pack promoted from the H-PLT program is an opt-in **English atomic
-relation reader**. It recognizes a finite one-hole query grammar, preserves exact answer spans and
-clause force, and uses a 38 KB checksummed WordNet morphology table. No model, embedding, network or
-external parser runs:
+That's the low-level storage piece. Most people will actually want to ask Horizon a question
+in plain language and get a written answer back:
 
 ```python
-from horizon_memory import EnglishAtomicRelationCompiler, compact_english_atomic_relation
+from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
 
-compiler = EnglishAtomicRelationCompiler()
-result = compiler.read("You can buy me dinner.", "What did You buy?")
-assert result.answer == "dinner" and result.proof_closed
-blob = compact_english_atomic_relation(result)  # 140-byte re-openable proof envelope
+documents = (
+    RouteDocument(1, "The Meridian project reduced compute cost by exactly 42 percent...",
+                  scope_id=1, session_id="s1", version=1, source="doc:1"),
+)
+engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=1, session_id="s1")
+result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
+print(result.answer_text)
 ```
 
-On the frozen cross-treebank UD English-GUM test gate it reached 77/82 = **93.90% positive
-accuracy**, 77/79 = **97.47% selective precision**, and 82/82 negative abstention. This promotes only
-the bounded EN atomic family—not unrestricted English or universal text understanding. Its public
-open-text entry point requires an explicitly selected attested FactId:
-`OpenTextHorizonMemory.answer_atomic_relation_en(question, fact_id=...)`.
+The full walkthrough (connecting your own database, adding a chat assistant, picking the right
+settings for a small personal memory versus a large company knowledge base) lives in
+[HorizonAI Engine](HorizonAI%20Engine/README.md), written as a step-by-step tutorial.
 
-The same method reproduces compact HPPS evidence exactly on 1,002 Simplified-Chinese CMRC trial
-questions (90.02% gold containment) and 3,524 Traditional-Chinese DRCD holdout questions (98.35%).
-These are memory-delivery results, not short-answer F1; Horizon reports the two separately.
+## What can you connect it to?
 
-On 7,653 physically valid extractive rows from Portuguese SQuAD, HPPS reaches 93.86% containment at
-K=3 and 96.85% at K=5. The equal-K real BM25 control reaches 96.60%; the +0.248 pp Horizon delta is
-small but significant by paired McNemar (p=0.01445). The dataset is automatically translated, so a
-native-Portuguese confirmation remains pending.
+Horizon never decides anything on its own behalf. Every connection below is something you turn on
+yourself.
 
-Native PT-BR confirmation is now available on FaQuAD: HPPS reaches 98.41% at K=3 and 100% at K=5
-with source validity 100%. The split has only 63 questions and BM25 also reaches 100% at K=5, so this
-supports language transfer but not a superiority claim.
+- **Your own data.** Point it at anything: a SQLite file, MongoDB, Postgres, Redis, DynamoDB,
+  Elasticsearch, and more. Ready-made examples for each one are in the tutorial.
+- **An AI model, if you want one.** Horizon's own answer is already complete and verified. If
+  you'd like it rewritten in smoother prose, you can optionally pass it through any AI model
+  (local or hosted) purely for style. That model never gets to invent facts, and if the request
+  fails for any reason, you simply get Horizon's original answer back, unaffected.
+- **A chat assistant**, like Claude Desktop or Cursor, through a small connector so it can ask
+  Horizon questions directly.
+- **A simple web request**, if you'd rather call it like any other API from your own app.
 
-The public open-text facade also transports the frozen LongMemEval-S deterministic composer without
-drift: 120/120 answer texts are byte-identical, so its existing judge score 0.767 transfers without a
-new API call. Separately, the opt-in HSSD operator lattice preserves at least one bounded interpretation
-for 99.0% of all 500 public questions. Those are integration and candidate-reachability results — not
-90% end-to-end answer accuracy. The active gap is proof-backed execution of surviving programs and
-short semantic readout.
+## Learn more
 
-The repository intentionally excludes private theory notebooks, private
-datasets, unpublished papers, benchmark answer keys and development logs.
-
-## Performance
-
-Measured directly, not estimated: five fresh (non-cached) questions from the
-MemGym-DR benchmark corpus, one full route → verify → compose pipeline run
-each, single process, no GPU.
-
-| Metric | Value |
-|---|---|
-| Mean CPU time per question | 1.79 s |
-| Mean wall-clock time per question | 1.79 s |
-| Peak resident memory (one process) | ~127 MB |
-| Documents searched per question | 483–567 (mean ≈ 536) |
-| Evidence budget spent | 24–64 KB of verified text (not documents) |
-
-CPU time and wall-clock time came out effectively identical, which means the
-pipeline spent that time actually computing, not waiting on disk or network —
-no GPU, model weights or hosted API are involved anywhere in this path.
-Measured with Python's `resource.getrusage`; see
-[Benchmarks and claim boundaries](BENCHMARKS.md) for accuracy numbers on the
-same corpus, and [HorizonAI Engine](HorizonAI%20Engine/README.md) for the
-live demo this was measured against.
-
-## Connecting Horizon
-
-The core never calls a model, a database driver, or a chat client on its own
-— every connection point below is explicit, optional, and lives at the edge,
-never inside routing, verification or composition.
-
-- **A database**: Horizon takes `documents: list[str]` per call. Query your
-  own database yourself and hand the results in — this bring-your-own-data
-  pattern is the supported way in today; no native DB driver ships yet.
-  Runnable examples exist for SQLite, DuckDB, MongoDB, Redis, DynamoDB,
-  PostgreSQL, MySQL, Elasticsearch/OpenSearch and SpacetimeDB — see
-  [HorizonAI Engine](HorizonAI%20Engine/README.md#connect-a-database-bring-your-own-documents).
-- **An AI model, local or hosted**: the optional `polish` layer hands the
-  already-composed, already-verified answer to any OpenAI-compatible
-  `chat/completions` endpoint purely to smooth prose. It never decides facts,
-  and a failed or rate-limited call always degrades to the original,
-  unmodified verified answer.
-
-  ```python
-  from horizon_memory.adapters import OpenAICompatiblePolishAdapter, PolishConfig
-
-  adapter = OpenAICompatiblePolishAdapter(allow_network=True)
-  config = PolishConfig(model="llama-3.1-8b-instant", api_key_env="GROQ_KEY")
-  result = adapter.polish(question, answer_text, config)
-  ```
-
-- **A chat client** (Claude Desktop, Cursor, and similar): `api/mcp_server.py`
-  exposes the same deterministic answer engine as an MCP tool, `horizon_ask`.
-- **A REST client**: `api/server.py` exposes `POST /v1/answers` over HTTP,
-  with the same optional `polish` option available as a request field.
-
-Full tutorial, runnable examples (quickstart, database, local/hosted model,
-chat client) and licensing notes:
-[HorizonAI Engine](HorizonAI%20Engine/README.md).
-
-## Documentation
-
-- [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Authorized typed sidecar](docs/TYPED_SIDECAR.md)
-- [HorizonAI Engine — tutorial, examples, MCP/REST/polish](HorizonAI%20Engine/README.md)
-- [Benchmarks and claim boundaries](BENCHMARKS.md)
-- [Research module](RESEARCH.md)
-- [Licensing policy](LICENSE_POLICY.md)
-- [Contributor License Agreement](CLA.md)
-- [Governance](GOVERNANCE.md)
-- [Security policy](SECURITY.md)
-- [Responsible use](RESPONSIBLE_USE.md)
+- [HorizonAI Engine](HorizonAI%20Engine/README.md): the full tutorial covering quickstart,
+  connecting a database, adding a model, and chat assistants
+- [Architecture](docs/ARCHITECTURE.md): how it's actually built, for the technically curious
+- [Benchmarks and claim boundaries](BENCHMARKS.md): the tests we ran and what they showed
+- [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md): the research history behind the project
+- [Authorized typed sidecar](docs/TYPED_SIDECAR.md): for connecting structured data sources
+- [Research module](RESEARCH.md): experimental, not-yet-stable ideas being tried
 - [Authors](AUTHORS.md)
 
-## Freedom and attribution
+## The license, in plain terms
 
-The engine is free software under **AGPL-3.0-or-later**. If a modified version
-is offered to users over a network, those users must be offered its complete
-corresponding source as required by the AGPL. This is the Linux-kernel model:
-the core stays free and source-available, and `horizon_memory.adapters` is the
-Apache-2.0-or-AGPL dual-licensed build point where anyone can build a
-distribution, product or closed-source integration on top — the way Ubuntu,
-Fedora or Red Hat build on the Linux kernel rather than fork it. See
-[Licensing policy](LICENSE_POLICY.md) for exactly what the Apache option does
-and does not cover.
+Horizon is free software, licensed under AGPL-3.0-or-later. Think of it like the Linux kernel:
+the core stays free for everyone, forever, and anyone can build a product or business on top of
+it, the way Ubuntu or Fedora build on Linux without needing permission. The one condition is that
+if you offer a modified version of Horizon to other people over a network, you need to share your
+changes to it too.
 
-You may charge for hosting, support or integration. You may not remove license,
-copyright or attribution notices, and the Horizon Memory name may not be used
-to imply that an unofficial derivative is the official project.
+There's also a small, separate part of the codebase (the "adapters") licensed more permissively,
+specifically so it's easy to connect Horizon to other systems, even closed-source ones.
 
-See [LICENSE_POLICY.md](LICENSE_POLICY.md), [TRADEMARKS.md](TRADEMARKS.md),
-[GOVERNANCE.md](GOVERNANCE.md) and [AI_TRAINING_POLICY.md](AI_TRAINING_POLICY.md).
+You're welcome to charge for hosting it, supporting it, or building on it. You just can't remove
+the license and credit notices, or present your own version as if it were the official project.
+The full legal details are in [LICENSE_POLICY.md](LICENSE_POLICY.md),
+[TRADEMARKS.md](TRADEMARKS.md), [GOVERNANCE.md](GOVERNANCE.md) and
+[AI_TRAINING_POLICY.md](AI_TRAINING_POLICY.md).
 
-## Responsibility
+## Who's responsible for what
 
-Horizon Memory is general-purpose infrastructure. Operators are responsible
-for the data they ingest, decisions they automate, legal compliance, security,
-human review and consequences of deployment. See [DISCLAIMER.md](DISCLAIMER.md),
-[SECURITY.md](SECURITY.md) and [RESPONSIBLE_USE.md](RESPONSIBLE_USE.md).
+Horizon is a general-purpose tool. If you deploy it, you're responsible for the data you feed it,
+what you automate with it, and following the rules that apply to your own use case. See
+[DISCLAIMER.md](DISCLAIMER.md), [SECURITY.md](SECURITY.md) and
+[RESPONSIBLE_USE.md](RESPONSIBLE_USE.md).
 
-## Citation
+## Citing Horizon
 
-Until the founding paper receives a persistent identifier, cite the software
-using [CITATION.cff](CITATION.cff) and the immutable release or commit used.
+The founding paper doesn't have a permanent identifier yet. Until it does, please cite the
+software itself using [CITATION.cff](CITATION.cff), along with the specific release or commit you
+used.
