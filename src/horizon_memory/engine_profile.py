@@ -264,13 +264,15 @@ TEAM_MEMORY_PROFILE = EngineProfile(
 # judge-scored choice.
 #
 # `answer_completeness_bonus=0.5` added 2026-08-23 -- same fix and calibration discipline as
-# `TEAM_MEMORY_PROFILE` above. On the two new external HuggingFace corpora (120 questions each,
-# right-document recovery measured by exact FactId attribution in the rendered answer, not a
-# proxy): the PT/legislative-news corpus moved 106/120 -> 110/120 and the EN/fiction corpus moved
-# 5/120 -> 119/120 -- the fiction corpus is exactly the shape (raw text windowed into fixed-length
-# records, so relevant spans are routinely fragments) that exposed the bug in the first place. Zero
-# regression on the five already-validated MongoDB corpora (byte-identical answers). See
-# `docs/BENCHMARKS.md` for the full numbers.
+# `TEAM_MEMORY_PROFILE` above. On the two new external HuggingFace corpora, right-document recovery
+# measured by exact FactId attribution in the rendered answer, not a proxy, and restricted to the
+# subset of questions manually confirmed to actually match their claimed source item (19/120 PT and
+# 23/120 EN questions turned out to be mismatched by an earlier session's own question-authoring
+# step, unrelated to Horizon -- see docs/BENCHMARKS.md): the PT/legislative-news corpus moved
+# 99/101 -> 101/101 and the EN/fiction corpus moved 5/97 -> 96/97 -- the fiction corpus is exactly
+# the shape (raw text windowed into fixed-length records, so relevant spans are routinely
+# fragments) that exposed the bug in the first place. Zero regression on the five already-validated
+# MongoDB corpora (byte-identical answers). See `docs/BENCHMARKS.md` for the full numbers.
 PERSONAL_MEMORY_PROFILE = EngineProfile(
     name="personal-memory-v1", answer_relevance_gate_ratio=0.0,
     answer_shortlist_size=500, answer_bytes=40_000, answer_completeness_bonus=0.5)

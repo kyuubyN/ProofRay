@@ -854,10 +854,9 @@ uses two genuinely different, previously-unseen public corpora sourced directly 
 sampled items from a real legislative/news dataset (Brazilian Chamber of Deputies bulletins, police
 operations, Senate sessions), and 120 hand-written English questions against 120 sampled excerpts
 from a public-domain fiction corpus (19th/20th-century novels via Project Gutenberg). Question *i*
-maps 1:1 to sampled item *i* in both files, confirmed by direct inspection before any measurement.
-Ground truth is exact `FactId` attribution: `AnsweredResult.answer_lines` (what the rendered
-`answer_text` actually draws from) is checked against the one source document each question was
-written from — an automated, non-fuzzy signal, not a proxy metric.
+was intended to map 1:1 to sampled item *i* in both files. Ground truth is exact `FactId`
+attribution: `AnsweredResult.answer_lines` (what the rendered `answer_text` actually draws from) is
+checked against the one source document each question was supposedly written from.
 
 **A real bug was found, not just a low score.** The English fiction corpus turned out to be raw
 book text windowed into fixed 500-byte records by the dataset's own construction — every "document"
@@ -887,41 +886,54 @@ marker-as-hard-gate correction in `supersession_collapse.py`). `DEFAULT_PROFILE`
 completely untouched (`answer_completeness_bonus` stays `None`, preserving the historical tiered
 cascade byte-for-byte) — the field is opt-in everywhere.
 
+**A second, separate bug was then found in the test corpus itself, not in Horizon.** A follow-up
+audit (motivated by trying to fix a supposed "topical routing confusion" the first pass reported
+below) manually re-read every one of the 240 questions against its claimed source item's full text.
+19 of the 120 Portuguese questions and 23 of the 120 English questions turned out not to correspond
+to their assigned item at all (e.g. Portuguese question 5, "what was dismantled in Operation
+No-Man's-Land in Rondônia?", was paired with an item about a civil-service pay-grade bill — a
+completely unrelated topic). This traces to the original question-authoring step (an earlier
+session, working through the sampled items in batches), not to anything Horizon did, and both
+mismatch sets cluster in contiguous index ranges — consistent with a batch-boundary mixup rather
+than scattered noise. Every number below is recomputed using only the 101 (PT) / 97 (EN) questions
+manually confirmed to genuinely match their source item; the earlier 120-question figures in this
+section (now superseded) were diluted by this defect and should not be cited.
+
 **Calibrated, not guessed.** The 120 questions in each corpus were split into a calibration half
 (odd-indexed, 60 questions) and a holdout half (even-indexed, 60 questions, never touched while
-choosing a value). Sweeping 0.3/0.5/1.0 on the calibration half landed on an *identical* result at
-all three values for both profiles and both corpora — a flat plateau, not a hand-tuned point — so
-0.5 was picked (matching `specificity_bonus`'s own value elsewhere in this codebase) and confirmed
-on the untouched holdout half:
+choosing a value) before the mismatch audit above was done. Sweeping 0.3/0.5/1.0 on the calibration
+half landed on an *identical* result at all three values for both profiles and both corpora — a flat
+plateau, not a hand-tuned point — so 0.5 was picked (matching `specificity_bonus`'s own value
+elsewhere in this codebase).
 
-| Profile | Corpus | Calibration (n=60) | Holdout (n=60) |
-|---|---|---:|---:|
-| `DEFAULT_PROFILE` | PT/legislative-news | 45→51 | 52→53 |
-| `DEFAULT_PROFILE` | EN/fiction | 1→45 | 2→45 |
-| `PERSONAL_MEMORY_PROFILE` | PT/legislative-news | 52→55 | 54→55 |
-| `PERSONAL_MEMORY_PROFILE` | EN/fiction | 1→60 | 4→59 |
+**Full-corpus result at the calibrated value, valid questions only** (101/120 PT, 97/120 EN),
+right-source attribution, zero abstentions introduced in any cell:
 
-(`before→after` = right-source attribution out of 60, `answer_completeness_bonus=None`→`=0.5`.)
-
-**Full-corpus (all 120 questions each) result at the calibrated value**, right-source attribution
-out of 120, zero abstentions introduced in any cell:
-
-| Profile | PT/legislative-news | EN/fiction |
+| Profile | PT/legislative-news (n=101) | EN/fiction (n=97) |
 |---|---:|---:|
-| `DEFAULT_PROFILE`, before fix | 97/120 | 3/120 |
-| `DEFAULT_PROFILE`, after fix | **104/120** | **90/120** |
-| `PERSONAL_MEMORY_PROFILE`, before fix | 106/120 | 5/120 |
-| `PERSONAL_MEMORY_PROFILE`, after fix | **110/120** | **119/120** |
+| `DEFAULT_PROFILE`, before fix | 94/101 (93.1%) | 3/97 (3.1%) |
+| `DEFAULT_PROFILE`, after fix | **100/101 (99.0%)** | **88/97 (90.7%)** |
+| `PERSONAL_MEMORY_PROFILE`, before fix | 99/101 (98.0%) | 5/97 (5.2%) |
+| `PERSONAL_MEMORY_PROFILE`, after fix | **101/101 (100%)** | **96/97 (99.0%)** |
 
-The Portuguese legislative/news corpus also surfaced a second, *different*, still-open finding
-worth recording precisely so it is not confused with the bug above: even at the correctly-ranked
-stage, roughly 10-13% of questions route to a topically-similar but factually wrong document (e.g.
-a question about one legislative committee's meeting resolving to a different bill about
-technology parks) — confirmed via direct `ClaimGenerator` inspection that the correct document does
-not even reach the ranking's own top 15 candidates for some of these. This is genuine retrieval
-confusion between bureaucratic-news items sharing heavy generic vocabulary ("câmara", "projeto",
-"comissão", "aprovou"), not the answer-selection bug above, and `answer_completeness_bonus` does not
-target it — it is unaffected by this fix in either direction and remains open.
+**The originally-reported "10-13% topical routing confusion, still open" finding is retracted as
+stated.** Re-checked after the mismatch audit: of the cases that looked like retrieval confusion,
+the large majority were simply mismatched test questions (the corpus has no correct document at all
+for those, so no routing behavior could have satisfied them). Of the small number of genuine misses
+that remained after removing those, every single one — all 10 residual cases across both profiles
+on the PT corpus, and all 9 residual `DEFAULT_PROFILE` cases plus the 1 residual
+`PERSONAL_MEMORY_PROFILE` case on the EN corpus — was confirmed via direct inspection to have the
+correct document already present in the fully verified evidence pool (`AnsweredResult.claims`); it
+was dropped one stage later, inside `build_proof_dossier`'s submodular final-answer-budget selection
+(`answer_engine.py`'s `core`/`ranked`/fill-loop composition), not by `ClaimGenerator`'s ranking.
+This is not a new problem: this exact "correct claim present, dropped only at the tight final-budget
+selection stage" pattern, and two attempted fixes for it (a two-phase density reorder and an exact
+0/1 knapsack), were already investigated at length in this project's own research history, and both
+were found to make results *worse* at full benchmark scale — the lesson from that work, followed
+here, is not to reopen a packing-algorithm fix without a materially different premise. Consistent
+with that: `PERSONAL_MEMORY_PROFILE`'s much larger budget/shortlist already resolves nearly all of
+this residual (10/198 combined cases down to 1/198) — using that preset for a small corpus, exactly
+as already recommended above, is the existing, validated answer, not a new mechanism.
 
 **Zero regression**, verified directly, not assumed: the calibrated fix was re-run against the same
 already-validated real conversational corpora and questions above (the puppy/AirPods multi-hop
