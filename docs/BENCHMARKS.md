@@ -247,14 +247,24 @@ model do more with less — but it is a comparable-scale anchor, not a
 byte-exact reproduction of the published baseline's exact harness, and it is
 still well short of the program's long-term accuracy target (see below).
 
-**What is currently under active test, not yet resolved:** whether the
+**This question has since been resolved.** The open question was whether the
 remaining gap above 0.72 is better explained by evidence still being
 incomplete at this budget, or by the reader's difficulty composing evidence
 it already has into one correct answer. An oracle-style ceiling test (a
 reader handed the literal correct answer directly) scored above 0.97,
-confirming the reading contract itself is not the bottleneck. Distinguishing
-"more of the right evidence would help" from "the reader needs help
-composing what it already has" is the current open experiment.
+confirming the reading contract itself is not the bottleneck — but that
+alone did not distinguish the two remaining explanations. A later causal
+test settled it directly: taking the same reader's evidence packet from its
+real, as-selected coverage up to a gold-directed oracle's coverage, at the
+identical byte budget, did **not** move the judge score in a statistically
+distinguishable way (paired delta +0.0194, 95% CI [-0.0484, +0.1000],
+crosses zero), confirmed by a working negative control that did move the
+score in the expected direction. **Synthesis, not coverage, is the
+bottleneck** — a reader with sufficient evidence still struggles to combine
+multiple facts into one correct answer; retrieving more of the right
+evidence does not, by itself, close the remaining gap. This reframes what
+further work on this pilot should target: the consumer-side reading
+contract or reader capacity, not another retrieval/ranking improvement.
 
 ## Offline composer coverage (zero-LLM proxy, engineering diagnostic)
 
@@ -359,8 +369,13 @@ without prematurely guessing between COUNT/SUM or LOOKUP/SUM.
 
 The existing D145 error ledger contains 28/120 failures: 10 single-session scalar/entity/duration
 readouts and 18 multi-session COUNT/SUM/duration aggregations. With its binary judge, at least 16 of
-those 28 must be repaired without regressions to reach 0.90. The next experiment therefore targets
-typed operands and completeness, not another retrieval reranker.
+those 28 must be repaired without regressions to reach 0.90. This is exactly what the
+proof-convergent execution line at the top of this document targets (typed operands and
+completeness, not another retrieval reranker) — see
+[Proof-convergent execution development audit](#proof-convergent-execution-development-audit)
+for that attempt's own result: a real, measured improvement on the same consumed-development
+episodes, but one that has not yet transferred to an untouched holdout (see the "Untouched
+post-calibration holdout v3" subsection there), so this specific 0.90 gate remains open.
 
 ## Authorized typed-sidecar contract gate
 
@@ -564,10 +579,15 @@ reopen failure. Combined runtime was 6.90 s and peak RSS 88,872 KiB. Frozen arti
 This proves compact query-conditioned **syntactic existence** and one finite binary semantic family, not
 open-language understanding. The direct syntax arm supplied indices; the semantic arm generated them
 mechanically but covers only capitalized single-token participants and active/passive `who` relations.
-Broader audited frames, independent templates, SAT null links and an interruptible solver timeout are
-still absent. Patch and runner:
+Broader audited frames, independent templates, SAT null links and an interruptible solver timeout
+were never added, and this specific gap is no longer being pursued rather than pending: the pack
+that was later actually promoted to core (EN, then PT below) bypasses Link Grammar entirely and
+uses the H-DEM/H-DCA/H-PLT line instead, confirmed to score the same or better without it (see the
+promoted EN pack's own "Link Grammar/SAT ablation contributes no quality on GUM and slightly hurts
+EWT" finding further down). Patch and runner, kept as a historical diagnostic, not a pending task:
 `lab/link_grammar_sat_projection_5_13.patch` and
-`lab/runners/run_sat_projection_differential.py`. Nothing is eligible for core promotion yet.
+`lab/runners/run_sat_projection_differential.py`. Nothing from this specific line is eligible for
+core promotion.
 
 V2 added possession through `have` and a locative `where` goal lowered from certified `MVp+J`
 prepositional structure. The frozen generated result is **1,200/1,200**: 600 positives resolved, 600
@@ -655,7 +675,7 @@ question. Only 41/684 candidate GUM relations (5.99%) enter the <=12-token, sing
 family. This is a real >=90% result and a legitimate opt-in core promotion for that family, but it is
 not natural QA, all English relations, semantic truth assertion or universal language coverage.
 
-### PT atomic relation pack — early raw-token adapter rejected; H-FMRL/H-DEM/H-PLT bridge now in core, opt-in, holdout confirmation still open
+### PT atomic relation pack — early raw-token adapter rejected; H-FMRL/H-DEM/H-PLT bridge now in core, opt-in, holdout confirmation failed narrowly
 
 The same language-neutral surface kernel was first fitted with a development-only Portuguese
 adapter built on a growing raw-token `skip` set. Bosque dev improved from **33/46 = 71.74%** to
@@ -708,8 +728,11 @@ development data, not holdouts); and (b) had exactly one fresh, genuinely untouc
 opened against it — the official `UD_Portuguese-CINTIL` test split — which **failed** the
 promotion bar by a narrow margin: 92.39% positive accuracy (clears >=90%), **94.44% selective
 precision (misses the >=95% bar by 0.56pp)**, 100% negative abstention (clears the bar). Ten of
-the fourteen positive misses on that holdout were resolved-but-wrong, not honest abstentions — see
-this file's own `CLAUDE.md` history for the per-sentence diagnosis. No later development-only fix
+the fourteen positive misses on that holdout were resolved-but-wrong, not honest abstentions — a
+per-sentence diagnosis found the same small family of shapes across most of them, not ten
+unrelated failures: a noun embedded inside a genitive/oblique prepositional phrase, a clitic
+pronoun, or an adjacent determiner/adverb winning the role over the true head. No later
+development-only fix
 may be cited as having closed this specific gap, since CINTIL-test is consumed and cannot be
 retuned or rescored. A new, independent PT holdout clearing >=90% positive accuracy, >=95%
 selective precision, 100% negative abstention and a separately reported eligible denominator
