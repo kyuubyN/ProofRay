@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import re
 import subprocess
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # pragma: no cover -- exercised only on Python 3.10
+    import tomli as tomllib  # pyproject.toml declares requires-python = ">=3.10"
 
 ROOT = Path(__file__).resolve().parents[1]
 
