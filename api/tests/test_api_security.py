@@ -7,16 +7,23 @@ original findings this locks in."""
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+os.environ.setdefault(
+    "HORIZON_API_CREDENTIALS_PATH",
+    str(Path(tempfile.gettempdir()) / "horizon-memory-test-credentials.json"))
+
 import _engine_bridge  # noqa: E402
 from horizon_memory.adapters.openai_compatible import TransportResponse  # noqa: E402
-from server import STORE, app  # noqa: E402
+from rate_limit import RATE_LIMITER  # noqa: E402
+from server import CREDENTIALS, STORE, app  # noqa: E402
 
 DOCUMENTS = [
     "The Meridian project reduced compute cost by exactly 42 percent compared to the "
@@ -50,8 +57,10 @@ class PolishDestinationAndSecretTests(unittest.TestCase):
 
     def setUp(self):
         STORE.clear()
+        RATE_LIMITER.reset()
         app.testing = True
         self.client = app.test_client()
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {CREDENTIALS['token']}"
         self.addCleanup(setattr, _engine_bridge, "POLISH_TRANSPORT_FACTORY", None)
 
     def test_build_polish_config_ignores_caller_destination_and_secret(self):
@@ -92,8 +101,10 @@ class StoreBoundsTests(unittest.TestCase):
 
     def setUp(self):
         STORE.clear()
+        RATE_LIMITER.reset()
         app.testing = True
         self.client = app.test_client()
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {CREDENTIALS['token']}"
         self.addCleanup(setattr, _engine_bridge, "STORE_MAX_ENTRIES", _engine_bridge.STORE_MAX_ENTRIES)
         self.addCleanup(setattr, _engine_bridge, "STORE_TTL_SECONDS", _engine_bridge.STORE_TTL_SECONDS)
 
@@ -121,8 +132,10 @@ class RequestSizeLimitTests(unittest.TestCase):
 
     def setUp(self):
         STORE.clear()
+        RATE_LIMITER.reset()
         app.testing = True
         self.client = app.test_client()
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {CREDENTIALS['token']}"
 
     def test_oversized_body_returns_413(self):
         huge_document = "x" * (2 * 1024 * 1024)  # 2 MiB, over the 1 MiB body cap

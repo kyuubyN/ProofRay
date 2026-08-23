@@ -16,11 +16,52 @@ pip install -r api/requirements.txt # flask, mcp, requests
 python3 api/server.py               # serves on http://127.0.0.1:8420
 ```
 
+The first run prints a bearer token you'll need for every request except `GET /v1/health` (see
+"Authentication and rate limiting" below):
+
+```
+Bearer token (also saved at /home/you/.config/horizon-memory/api_credentials.json): 3f9a2b...
+```
+
+Lost it or need it again later without restarting the server? `python3 api/show_api_token.py`.
+
 An MCP server exposing the same functionality to a chat client (Claude Desktop, Cursor, ...) also
 lives here: `python3 api/mcp_server.py`. See
 [`../HorizonAI Engine/README.md`](../HorizonAI%20Engine/README.md) for the full MCP setup and a
 generalized tutorial covering local models, hosted API models, and bring-your-own-database
 patterns.
+
+## Authentication and rate limiting
+
+This API has no multi-tenant concept -- it's meant to run on your own machine (default bind
+`127.0.0.1`) for your own use, not as a shared public service. The token described above is a
+narrower property than real multi-user auth: it's generated once on first run, persisted locally,
+and additionally bound to a best-effort OS machine identifier (`/etc/machine-id` on Linux, the
+hardware UUID on macOS, `MachineGuid` on Windows) recomputed on every request -- so a copy of the
+credentials file moved to a different machine stops working there. It cannot stop code already
+running on this machine from reading its own token file; that's the same limit any locally-stored
+secret has, not a defect specific to this design. Nothing heavier (OAuth/JWT) is used because
+there's no multi-user/session concept for it to protect yet -- see `machine_auth.py`'s own
+docstring for the full threat model.
+
+Every request except `GET /v1/health` needs the token:
+
+```bash
+curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 3f9a2b..." -d '{
+  "question": "What percent did the Meridian project reduce cost by?",
+  "documents": ["The Meridian project reduced compute cost by exactly 42 percent..."]
+}'
+```
+
+A missing or wrong token returns `401`.
+
+Separately, every request (including `GET /v1/health`) is rate-limited per caller: a token bucket
+that refills continuously rather than resetting on a fixed clock tick, defaulting to 60
+requests/minute. If you legitimately send a high volume of documents per call (not more calls),
+raise the limit rather than working around it: `HORIZON_RATE_LIMIT_PER_MINUTE=600 python3
+api/server.py`. Exceeding it returns `429`; every rejection is logged at `WARNING` on the server
+side so you can tell a real rate-limit hit from a client bug.
 
 ## Endpoints
 
@@ -145,16 +186,16 @@ shape as `POST`. Compressed by default (`sources: null`) regardless of what the 
 specifically. Unknown ids return `404`.
 
 ```bash
-curl http://127.0.0.1:8420/v1/answers/ans_1a2b3c4d5e6f7a8b9c0d1e2f?include_sources=true
+curl -H "Authorization: Bearer 3f9a2b..." \
+  http://127.0.0.1:8420/v1/answers/ans_1a2b3c4d5e6f7a8b9c0d1e2f?include_sources=true
 ```
 
 ## Deferred (named on purpose, not silently dropped)
 
-- **Auth / API keys / rate limiting.** This increment has no request-auth mechanism.
-  Needed before this is exposed outside a private demo; the scheme (API-key header vs.
-  OAuth vs. something else) hasn't been chosen yet. The absence of auth is why the store
-  bound and body-size limits below exist -- they cap how much an anonymous caller can make
-  this process retain or process per request, they are not a substitute for real auth.
+- **Multi-user auth.** The machine-bound bearer token above is real access control for the
+  "one operator, one machine" case this API is built for today, but it is not a multi-tenant
+  scheme -- there's no concept of separate users/sessions/scopes with different permissions.
+  Needed before multiple distinct people are meant to share one deployment.
 - **Persistent answer storage.** The in-memory `{id: answer}` store is lost on restart --
   still true, and still fine for a demo -- but it is now bounded rather than unbounded: at
   most `STORE_MAX_ENTRIES` (1000) entries, each evicted after `STORE_TTL_SECONDS` (3600s) at

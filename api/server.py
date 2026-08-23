@@ -30,8 +30,8 @@ mechanism here; that's exactly what `api/mcp_server.py`'s `horizon_ask` tool alr
 Everything here is the same zero-LLM, zero-neural-net, deterministic pipeline
 `HorizonAnswerEngine` already wraps -- this file only adds HTTP request/response plumbing on top
 of `api/_engine_bridge.py`'s shared helpers (also used by `api/mcp_server.py`). See
-`api/README.md` for the full request/response contract and the explicitly-deferred items (auth,
-persistent storage, corpus reuse).
+`api/README.md` for the full request/response contract, the authentication/rate-limiting model
+(`machine_auth.py` / `rate_limit.py`) and the remaining explicitly-deferred items.
 """
 from __future__ import annotations
 
@@ -42,9 +42,32 @@ from _engine_bridge import (  # STORE is unused here but re-exported for tests (
     json_bool, load_answer, maybe_answer, new_answer_id_and_timestamp, run_polish, serialize,
     store_answer, validate_question_length,
 )
+from machine_auth import ensure_local_credentials, verify_bearer_token
+from rate_limit import RATE_LIMITER
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MiB; Werkzeug returns 413 above this
+
+# Generated once, on first run, and persisted locally (see machine_auth.py's own docstring for
+# the exact threat model this addresses and its honest limits). Every request except the health
+# check must present this token; `python3 server.py` also prints it once at startup so the
+# operator has it to configure their own client.
+CREDENTIALS = ensure_local_credentials()
+
+
+@app.before_request
+def _security_gate():
+    # Rate limit first (cheap, keyed on the real socket peer, never a client-suppliable header)
+    # so a flood of requests is throttled before spending any work on auth or the engine itself.
+    if not RATE_LIMITER.allow(request.remote_addr or "unknown"):
+        return jsonify({"error": {
+            "message": "rate limit exceeded", "type": "rate_limit_error"}}), 429
+    if request.path == "/v1/health":
+        return None  # Liveness check carries no sensitive data; left open for monitoring tools.
+    if not verify_bearer_token(request.headers.get("Authorization"), CREDENTIALS):
+        return jsonify({"error": {
+            "message": "missing or invalid bearer token", "type": "auth_error"}}), 401
+    return None
 
 
 def _include_sources_from_query() -> bool:
@@ -119,4 +142,6 @@ def get_answer(answer_id: str):
 
 
 if __name__ == "__main__":
+    from machine_auth import credentials_path
+    print(f"Bearer token (also saved at {credentials_path()}): {CREDENTIALS['token']}")
     app.run(host="127.0.0.1", port=8420, debug=False, threaded=True)
