@@ -9,15 +9,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+os.environ.setdefault(
+    "HORIZON_API_CREDENTIALS_PATH",
+    str(Path(tempfile.gettempdir()) / "horizon-memory-test-credentials.json"))
+
 import _engine_bridge  # noqa: E402
 from mcp_server import mcp  # noqa: E402
-from server import STORE, app  # noqa: E402
+from rate_limit import RATE_LIMITER  # noqa: E402
+from server import CREDENTIALS, STORE, app  # noqa: E402
 
 DOCUMENTS = [
     "The Meridian project reduced compute cost by exactly 42 percent compared to the "
@@ -31,8 +38,10 @@ QUESTION_WITH_TRIGGER_PT = "Você lembra qual foi a redução de custo do projet
 class _KeywordModeTestCase(unittest.TestCase):
     def setUp(self):
         STORE.clear()
+        RATE_LIMITER.reset()
         app.testing = True
         self.client = app.test_client()
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {CREDENTIALS['token']}"
         self.addCleanup(setattr, _engine_bridge, "ACTIVATION_MODE", _engine_bridge.ACTIVATION_MODE)
         self.addCleanup(
             setattr, _engine_bridge, "ACTIVATION_KEYWORDS", _engine_bridge.ACTIVATION_KEYWORDS)

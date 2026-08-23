@@ -162,10 +162,13 @@ python3 "HorizonAI Engine/examples/api_model_polish_example.py"     # e.g. Groq
 
 The same thing via the HTTP API -- `POST /v1/answers` with `polish: true` (start the server first
 with `HORIZON_POLISH_API_KEY_ENV=GROQ_KEY GROQ_KEY=your-key python3 "HorizonAI Engine/run_api_server.py"`
--- the destination/credential are this process's own env config, never request fields, see below):
+-- the destination/credential are this process's own env config, never request fields, see below).
+The server prints a bearer token on that first run -- every request needs it (see
+[`../api/README.md`](../api/README.md)'s "Authentication and rate limiting"):
 
 ```bash
-curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" -d '{
+curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token from server startup>" -d '{
   "question": "What percent did the Meridian project reduce cost by?",
   "documents": ["The Meridian project reduced compute cost by exactly 42 percent..."],
   "polish": true, "polish_model": "qwen/qwen3.6-27b"
@@ -240,13 +243,15 @@ HORIZON_ACTIVATION_MODE=keyword python3 "HorizonAI Engine/run_api_server.py"
 ```
 
 ```bash
-curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" -d '{
+curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token from server startup>" -d '{
   "question": "What percent did the Meridian project reduce cost by?",
   "documents": ["The Meridian project reduced compute cost by exactly 42 percent..."]
 }'
 # -> {"state": "not_activated", "answer": null, ...} -- no trigger phrase, engine never ran
 
-curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" -d '{
+curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token from server startup>" -d '{
   "question": "Do you remember what percent the Meridian project reduced cost by?",
   "documents": ["The Meridian project reduced compute cost by exactly 42 percent..."]
 }'

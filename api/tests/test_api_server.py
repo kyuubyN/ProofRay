@@ -4,15 +4,25 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# A fixed, shared temp path so every api/tests/ file agrees on the same throwaway credentials
+# file regardless of import order, instead of writing to the real per-user config directory
+# `machine_auth.credentials_path()` would otherwise resolve to.
+os.environ.setdefault(
+    "HORIZON_API_CREDENTIALS_PATH",
+    str(Path(tempfile.gettempdir()) / "horizon-memory-test-credentials.json"))
+
 import _engine_bridge  # noqa: E402
 from horizon_memory.adapters.openai_compatible import TransportResponse  # noqa: E402
-from server import STORE, app  # noqa: E402
+from rate_limit import RATE_LIMITER  # noqa: E402
+from server import CREDENTIALS, STORE, app  # noqa: E402
 
 DOCUMENTS = [
     "The Meridian project reduced compute cost by exactly 42 percent compared to the "
@@ -45,8 +55,10 @@ def _polish_success_response(text="Meridian's compute cost dropped by 42 percent
 class HorizonAPITests(unittest.TestCase):
     def setUp(self):
         STORE.clear()
+        RATE_LIMITER.reset()
         app.testing = True
         self.client = app.test_client()
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {CREDENTIALS['token']}"
         self.addCleanup(setattr, _engine_bridge, "POLISH_TRANSPORT_FACTORY", None)
 
     def test_health(self):
