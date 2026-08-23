@@ -19,6 +19,66 @@ flowchart LR
     X -. "optional polish, or the tool caller itself" .-> M
 ```
 
+## Theoretical foundations
+
+Horizon's design is not an arbitrary collection of engineering choices; it follows from one
+falsifiable hypothesis. **Memory reliability and generative fluency are different problems**, and
+a small, deterministic, composable machine can outperform a generative model specifically at the
+first one, precisely because it never has to imagine, complete, or reinterpret a source. This is
+a modern, empirically-tested revival of classical (GOFAI-style) symbolic reasoning, deliberately
+combined with modern tools GOFAI never had: type systems, information theory, temporal databases,
+versioned ontologies, error-correcting codes and cryptographic provenance. Full origin story in
+[Origin and design lineage](ORIGIN_AND_DESIGN.md); the numbers behind every claim below are in
+[Benchmarks](BENCHMARKS.md), including the negative results that narrowed this list down.
+
+A few named theories carry most of the actual engineering weight:
+
+- **HSSD (Sufficient-Statistic Decoder).** The core reframing behind everything above: a question
+  is compiled into an *operation* (`LOOKUP`, `COUNT_DISTINCT`, `SUM`, `INTERVAL`, `EXPLAIN_CAUSE`,
+  ...) plus its *operands* — and, critically, a set of non-compensable **obligations** (role,
+  clock, unit, cause, identity, completeness) that are checked separately from ordinary topical
+  relevance. A claim can be the most relevant sentence in the corpus and still fail an obligation;
+  when that happens, the operation does not silently execute on a best guess, it abstains. This is
+  the same "obligation vs. relevance" distinction `ClaimGenerator`'s contradiction channel and
+  `proof_dossier`'s anchor/specificity bonuses already apply in practice, described above.
+- **D45 (authorized semantic hypergraph).** Every extracted claim carries its span, provenance,
+  role, polarity, modality and clock as distinct, non-mergeable properties — a claim is never
+  quietly collapsed with a paraphrase or a contradicting restatement just because they're
+  topically close.
+- **Sigma-PBA (binding propagation calculus).** Bindings between typed facts only ever propagate
+  forward from testified, proof-carrying evidence. Two incompatible candidate answers are never
+  resolved by picking whichever scores higher; an environment where they genuinely conflict stays
+  contested rather than being silently averaged away.
+- **HPPS (Proof-Pressure Search).** The retrieval mechanism this project has actually validated
+  most extensively against a real baseline: it protects a lexical core and admits other candidate
+  evidence only under an explicit proof/evidence-budget pressure, not a raw similarity score. See
+  [Benchmarks](BENCHMARKS.md#retrieval-against-bm25) for the paired BM25 comparisons.
+
+**The GOFAI/Transformer reinterpretation, specifically.** A newer, still-experimental line asks
+whether the same discipline can be expressed as a deterministic reinterpretation of a Transformer's
+own query/key/value dataflow, rather than as a separate symbolic pipeline bolted alongside it:
+**Proof Attention** replaces a learned `Q`/`K`/`V` and softmax-weighted averaging with an HSSD
+obligation as `Q`, a D45 typed tuple as `K`, an exact attested span as `V`, and a
+provenance-semiring join in place of floating-point averaging — heads become typed proof
+channels, and only an answer invariant across every complete, surviving interpretation is ever
+returned. This sits on top of two supporting layers: **H-DEM** (Deterministic Epistemic Machine),
+an explicit possible-world engine that computes the provably certain answer over a finite set of
+typed alternatives, and **H-DCA** (Deterministic Context Automaton), a lighter, packed-bitset
+runtime that soundly *under*-approximates H-DEM (it may abstain where H-DEM would resolve, but
+never resolves to a different answer than H-DEM would). The combined candidate architecture is
+called **H-PLT** (Proof-Lattice Transformer).
+
+**Status, stated plainly.** This is real, working code, not a metaphor: `Proof Attention` has been
+checked for exact equivalence against Sigma-PBA on generated, structured data, and an
+H-FMRL/H-DEM/H-PLT bridge (H-FMRL supplies typed per-token morphological alternatives) is already
+the mechanism behind the opt-in Portuguese atomic-relation pack described below. It is **not**
+validated as a general open-language accuracy win, is not a drop-in replacement for a trained
+Transformer, and is not a new core engine — every one of these is either a bounded, per-language
+pack with its own explicit holdout gate, or a candidate architecture still gated on further
+evidence. See [Benchmarks](BENCHMARKS.md#what-is-not-yet-solved) for exactly what has and hasn't
+cleared that bar so far, including refuted intermediate designs this line already tried and
+abandoned along the way.
+
 ## Stable surface
 
 The `horizon_memory` namespace provides:
