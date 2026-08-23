@@ -114,8 +114,10 @@ changes to it too.
 There's also a small, separate part of the codebase (the "adapters") licensed more permissively,
 specifically so it's easy to connect Horizon to other systems, even closed-source ones.
 
-You're welcome to charge for hosting it, supporting it, or building on it. You just can't remove
-the license and credit notices, or present your own version as if it were the official project.
+You're welcome to charge your own customers for hosting Horizon, supporting it, or building a
+product on top of it. If you modify Horizon's core and offer that modified version to others over
+a network, you need to share those changes back, as described above. You just can't remove the
+license and credit notices, or present your own version as if it were the official project.
 The full legal details are in [LICENSE_POLICY.md](docs/LICENSE_POLICY.md),
 [TRADEMARKS.md](docs/TRADEMARKS.md), [GOVERNANCE.md](docs/GOVERNANCE.md) and
 [AI_TRAINING_POLICY.md](docs/AI_TRAINING_POLICY.md).
