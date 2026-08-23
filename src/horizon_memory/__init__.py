@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from .api import HorizonMemory
 from .config import HorizonConfig, VALUE_MAX, VALUE_MIN
-from .engine_profile import DEFAULT_PROFILE, EngineProfile
+from .engine_profile import (
+    DEFAULT_PROFILE, PERSONAL_MEMORY_PROFILE, TEAM_MEMORY_PROFILE, EngineProfile,
+)
 from .answer_engine import (AnswerContextIntent, AnsweredClaim, AnsweredResult, DirectAnswer,
                             DirectAnswerProposal, DirectAnswerReader, HorizonAnswerEngine)
 from .partition import (
@@ -82,7 +84,8 @@ from .types import (
 
 __all__ = [
     "HorizonMemory", "HorizonConfig", "VALUE_MAX", "VALUE_MIN",
-    "DEFAULT_PROFILE", "EngineProfile", "AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer",
+    "DEFAULT_PROFILE", "PERSONAL_MEMORY_PROFILE", "TEAM_MEMORY_PROFILE", "EngineProfile",
+    "AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer",
     "DirectAnswerProposal", "DirectAnswerReader", "HorizonAnswerEngine",
     "WriteResult", "WriteState", "ReadResult", "ReadState", "ReadViewHandle",
     "QueryResult", "QueryState", "Provenance", "CompactResult", "CompactState",

@@ -70,6 +70,19 @@ caller of this unauthenticated API redirect the server's outbound polish call to
 its choosing while naming a real secret to attach as a Bearer token (SSRF + credential
 exfiltration) -- removed for that reason, not replaced.
 
+**Activation mode** is also deploy-time configuration, never a request field, for the same reason.
+By default (`HORIZON_ACTIVATION_MODE` unset or `"direct"`), every request runs the engine
+unconditionally -- today's only behavior. Setting `HORIZON_ACTIVATION_MODE=keyword` gates the
+engine behind a small, closed, server-configured trigger-phrase list: a question matching none of
+`HORIZON_ACTIVATION_KEYWORDS` (comma-separated env var; falls back to a built-in EN+PT default set
+such as "remember"/"recall"/"lembra"/"lembrar" when unset) returns `state: "not_activated"`
+without the engine running at all -- zero pipeline cost, and no document/claim processing of any
+kind happens for that request. This is meant for a deployment with no LLM in the loop deciding
+whether Horizon is relevant; if an orchestrating agent already makes that call itself (e.g. via
+`horizon_ask` over MCP, deciding for itself when to invoke the tool), leave this at the default and
+let the agent's own judgment be the activation decision -- the two modes are alternatives for
+different integration shapes, not something a single deployment needs to combine.
+
 Response (`201 Created`):
 
 ```json
@@ -105,10 +118,13 @@ non-null only when a configured readout supplies an extractive candidate or a pr
 result. `direct_answer_state="resolved"` always requires `direct_answer_proof_closed=true` and
 verified source IDs. A missing/unsupported direct readout never removes `evidence`.
 
-`state` is `"resolved"` when an answer was composed, or the lowercased name of a router
+`state` is `"resolved"` when an answer was composed, the lowercased name of a router
 abstain state (e.g. `"abstention"`) when the supplied documents did not verify against the
-question -- Horizon fails closed rather than guessing. On abstention, `answer`,
-`answer_lines`, and `sources` are all empty/`null`.
+question -- Horizon fails closed rather than guessing -- or `"not_activated"` when the
+server-configured activation gate (above) declined to run the engine at all. On abstention or
+`"not_activated"`, `answer`, `answer_lines`, and `sources` are all empty/`null`;
+`documents_considered`/`verified_candidates`/`answer_bytes` are all `0` for `"not_activated"`
+specifically, since the engine never touched the supplied documents.
 
 `sources` stays `null` unless `include_sources: true` was passed; when populated, each
 entry is `{"text": ..., "source": ..., "relevance_score": ...}`, mirroring `answer_lines`

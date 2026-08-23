@@ -80,6 +80,33 @@ POLISH_BASE_URL = os.environ.get(
     "HORIZON_POLISH_BASE_URL", "https://api.groq.com/openai/v1/chat/completions")
 POLISH_API_KEY_ENV = os.environ.get("HORIZON_POLISH_API_KEY_ENV")
 
+# Deploy-time config for which "activation mode" gates ENGINE.answer() (see maybe_answer()):
+# "direct" (default -- every request runs the pipeline, today's only behavior, unchanged) or
+# "keyword" (only run the pipeline when the question matches one of ACTIVATION_KEYWORDS). Never a
+# per-request caller field -- same reasoning as POLISH_BASE_URL/POLISH_API_KEY_ENV above: a
+# setting that changes whether/how much server-side work a request triggers must come from this
+# process's own environment, not an unauthenticated caller's request body.
+ACTIVATION_MODE = os.environ.get("HORIZON_ACTIVATION_MODE", "direct").strip().lower()
+
+# A small, closed, server-configurable trigger-phrase set -- not a growing dictionary. Overridable
+# via HORIZON_ACTIVATION_KEYWORDS (comma-separated), server-side only, mirroring the same
+# closed-list discipline already used for `_RETRACTION_MARKER`/`_ZH_CORRECTION_MARKER` elsewhere
+# in this project: a fixed, small set of trigger phrases, not an attempt to enumerate every way a
+# caller might ask Horizon to recall something.
+DEFAULT_ACTIVATION_KEYWORDS = frozenset({
+    "remember", "recall", "what did", "when did", "do you remember",
+    "lembra", "lembrar", "lembra-se", "lembras", "você lembra", "se lembra",
+})
+
+
+def _parse_activation_keywords(raw: str | None) -> frozenset[str]:
+    if not raw:
+        return DEFAULT_ACTIVATION_KEYWORDS
+    return frozenset(word.strip().lower() for word in raw.split(",") if word.strip())
+
+
+ACTIVATION_KEYWORDS = _parse_activation_keywords(os.environ.get("HORIZON_ACTIVATION_KEYWORDS"))
+
 # Overridable by tests, matching how tests already reach into STORE directly. None (the default)
 # means "construct a real network-capable RequestsTransport" -- see build_polish_adapter().
 POLISH_TRANSPORT_FACTORY: Callable[[], Transport] | None = None
@@ -126,8 +153,62 @@ def build_documents(raw_documents: list) -> tuple[RouteDocument, ...]:
     return tuple(documents)
 
 
-def serialize(answer_id: str, created: int, result: AnsweredResult, include_sources: bool,
+def keyword_gate_matches(text: str, keywords: frozenset[str]) -> bool:
+    """Case-insensitive substring match against a small, closed trigger-phrase set -- supports
+    multi-word phrases ("what did", "você lembra") without needing tokenization, since these are
+    meant as simple trigger phrases, not a word-class grammar."""
+    lowered = text.casefold()
+    return any(keyword in lowered for keyword in keywords)
+
+
+def maybe_answer(question: str, documents: tuple[RouteDocument, ...]) -> AnsweredResult | None:
+    """The single choke point both transports (`server.py`, `mcp_server.py`) call instead of
+    `ENGINE.answer()` directly.
+
+    In the default "direct" activation mode, this is exactly `ENGINE.answer(question, documents)`
+    -- zero behavior change from before this function existed. In "keyword" mode (see
+    ACTIVATION_MODE above), returns `None` -- the engine never runs, zero pipeline cost -- when
+    `question` matches none of ACTIVATION_KEYWORDS, instead of an `AnsweredResult`. A caller-facing
+    "tool" activation mode needs no logic here at all: an orchestrating agent deciding for itself
+    whether to invoke `horizon_ask` already IS the activation decision, made entirely outside this
+    process, before this function is ever called -- this only implements the one mode ("keyword")
+    that has no external decision-maker of its own.
+    """
+    if ACTIVATION_MODE == "keyword" and not keyword_gate_matches(question, ACTIVATION_KEYWORDS):
+        return None
+    return ENGINE.answer(question, documents)
+
+
+def serialize(answer_id: str, created: int, result: AnsweredResult | None, include_sources: bool,
               polished_answer: str | None = None, polish_state: str | None = None) -> dict:
+    if result is None:
+        # The activation gate declined to run the engine at all (see maybe_answer) -- same
+        # envelope shape as a real answer so callers never need a special-case parser, just a new
+        # `state` value to branch on, exactly like they already branch on "resolved"/"abstention".
+        return {
+            "id": answer_id,
+            "object": "answer",
+            "created": created,
+            "state": "not_activated",
+            "answer": None,
+            "evidence": None,
+            "direct_answer": None,
+            "direct_answer_state": None,
+            "direct_answer_method": None,
+            "direct_answer_sources": [],
+            "direct_answer_proof_closed": None,
+            "direct_answer_residual": [],
+            "answer_lines": [],
+            "documents_considered": 0,
+            "verified_candidates": 0,
+            "answer_bytes": 0,
+            "sources": None,
+            "polished_answer": None,
+            "polish_state": None,
+            "selector": None,
+            "selector_proof_closed": None,
+            "selector_residual": [],
+        }
     payload = {
         "id": answer_id,
         "object": "answer",

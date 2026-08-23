@@ -11,20 +11,7 @@ systems. It stores durable state, retrieves evidence under explicit budgets,
 preserves provenance, verifies proof-carrying results, and abstains when its
 conditions are not satisfied. The core requires no LLM, hosted API, or network.
 
-Created and founded by **Kaue Oliveira Costa**<br>
-[ORCID 0009-0009-8502-3220](https://orcid.org/0009-0009-8502-3220) ·
-[kaue.o.costa@proton.me](mailto:kaue.o.costa@proton.me)
-
-Co-author: **Yuri Yassumura Pecelin**<br>
-[ORCID 0009-0007-9766-9809](https://orcid.org/0009-0007-9766-9809) ·
-[yuripecelin@gmail.com](mailto:yuripecelin@gmail.com)
-
-Co-author: **Matheus Geraldi**<br>
-[ORCID 0009-0009-9059-7827](https://orcid.org/0009-0009-9059-7827) ·
-[Matheus.ge.si@gmail.com](mailto:Matheus.ge.si@gmail.com)
-
-See [AUTHORS.md](AUTHORS.md) for the full authorship record and
-[CONTRIBUTORS.md](CONTRIBUTORS.md) for the broader contributor roster.
+See [AUTHORS.md](AUTHORS.md) for the full authorship record.
 
 > Status: alpha version. Interfaces and research claims are being audited
 > before the first public release, and there is still a lot to improve —
@@ -77,6 +64,18 @@ is intentional and will not be hidden behind a broader marketing claim.
 - `horizon_memory`: stable storage, evidence, typed causal execution and HSSD.
 - `horizon_memory.adapters`: integration boundary, dual-licensed for adoption.
 - `horizon_memory.research`: experimental retrieval engines; not stable API.
+
+`HorizonAnswerEngine` takes an `EngineProfile` that shapes how much evidence competes for the
+final answer. `DEFAULT_PROFILE` is tuned for a large corpus; `TEAM_MEMORY_PROFILE` and
+`PERSONAL_MEMORY_PROFILE` are named, pre-tuned alternatives for a medium or small one (a personal
+chat history, a small team's docs), where the default's own anti-dilution caution can drop the
+one sentence carrying the concrete answer. **`PERSONAL_MEMORY_PROFILE` is the recommended default
+for a personal-memory or small-corpus deployment** — it is the only preset validated to a clean
+sweep (zero missed details, zero wrong answers) across five independent real MongoDB-backed
+corpora and 136 hand-verified questions, including under genuine multi-hop cross-conversation
+composition. See
+[Memory presets](HorizonAI%20Engine/README.md#memory-presets-pick-the-profile-for-your-corpus-size)
+for which one fits your deployment and the real numbers behind each.
 
 For controlled structured inputs, the opt-in [authorized typed sidecar](docs/TYPED_SIDECAR.md)
 binds schema/rule identity, source microcitations, capabilities, lifecycle and completeness
@@ -202,7 +201,6 @@ chat client) and licensing notes:
 - [Security policy](SECURITY.md)
 - [Responsible use](RESPONSIBLE_USE.md)
 - [Authors](AUTHORS.md)
-- [Contributors](CONTRIBUTORS.md)
 
 ## Freedom and attribution
 

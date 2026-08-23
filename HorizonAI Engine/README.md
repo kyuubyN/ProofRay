@@ -39,6 +39,55 @@ print(result.state, result.answer_text)
 Zero LLM, zero neural net, inside this call -- `result.state` is `"RESOLVED"` or an abstain state
 name; a confident wrong answer never happens, Horizon declines instead.
 
+## Memory presets: pick the profile for your corpus size
+
+`DEFAULT_PROFILE` is tuned for a large corpus (hundreds of documents, an enterprise-scale
+knowledge base) -- it is the exact configuration a published 0.95 judge-score result was measured
+at, deliberately conservative about how much evidence competes for the final answer so a huge
+corpus never dilutes a precise one. On a much smaller corpus (a personal chat history, a small
+team's internal docs) that same conservatism can be too tight: Horizon always finds the right
+source, but the one sentence carrying the actual number or name sometimes loses out to a shorter,
+less specific neighbor. Two more presets ship for exactly that case:
+
+```python
+from horizon_memory import DEFAULT_PROFILE, TEAM_MEMORY_PROFILE, PERSONAL_MEMORY_PROFILE
+
+engine = HorizonAnswerEngine(profile=PERSONAL_MEMORY_PROFILE, scope_id=1, session_id="s1")
+```
+
+| Preset | Best for | What changes vs. `DEFAULT_PROFILE` |
+|---|---|---|
+| **`DEFAULT_PROFILE`** ("Scale Memory") | A large document set or RAG-style knowledge base (hundreds of documents and up). The only preset with a published, judge-scored result behind it (MemGym-DR 0.95, LongMemEval 0.767) -- exact reproduction depends on these values. | Nothing -- this is the shipped default. |
+| **`TEAM_MEMORY_PROFILE`** ("Team Memory") | A medium corpus: a small team's internal docs, a few hundred KB. A real, measured middle ground, not independently benchmarked at its own scale -- try it against your own data before relying on it. | `answer_relevance_gate_ratio` 0.3 → 0.15, `answer_shortlist_size` 50 → 150, `answer_bytes` 24,576 → 32,768. |
+| **`PERSONAL_MEMORY_PROFILE`** ("Personal Memory") — **recommended for personal/small-corpus use** | A small, personal-scale corpus: a chat history, personal notes, a handful to a couple hundred messages. Favors completeness over precision-per-byte. | `answer_relevance_gate_ratio` 0.3 → 0.0, `answer_shortlist_size` 50 → 500, `answer_bytes` 24,576 → 40,000. |
+
+**How these were found (2026-08-22/23)**: 136 real, hand-verified questions across five
+independent live MongoDB-backed corpora -- a casual Brazilian-Portuguese-slang conversation
+history, a formal technical Q&A corpus (two rounds of increasingly ambiguous/typo-laden
+questions), an English Gen-Z-slang corpus with cross-lingual (PT-asking-about-EN) queries, and a
+27-conversation "multi-hop" extension of that last corpus requiring facts from 2-3 *different*
+conversations to be fused into one answer. `DEFAULT_PROFILE` always locates the right source(s)
+but drops the specific answer-bearing sentence, or loses part of a multi-hop answer, more often
+than it should on a corpus this small (15/20 on the multi-hop battery, for example).
+`PERSONAL_MEMORY_PROFILE` recovered essentially all of them across every corpus (31/32, 19/20,
+12/12, 12/12, 29/30, and a clean **20/20** on the multi-hop battery), with zero wrong answers or
+wrong-conversation hallucinations introduced anywhere, in any of the 136 questions, at any
+setting -- only previously-dropped detail restored. That clean, repeated sweep across five
+unrelated corpora (including genuine cross-conversation composition, which the engine has no
+dedicated mechanism for) is why it's the recommended starting point for this class of deployment,
+not just one of three equally-plausible options.
+
+**Why this isn't automatic**: corpus size turned out not to reliably separate "safe to loosen"
+from "needs the tight defaults" -- a real technical-QA corpus's own candidate pool measured
+statistically indistinguishable in size from a real large-corpus benchmark episode. There is no
+detector that could pick the right preset for you reliably, so pick the one matching your own
+deployment's actual scale, and switch if your corpus size changes materially. Also worth knowing:
+looser settings were re-tested against the large-corpus benchmark and showed no measured harm on
+a token-overlap coverage metric, but that specific metric is known to reward returning more text
+regardless of whether a downstream reader's answer is actually better -- so `PERSONAL_MEMORY_PROFILE`
+is not recommended for a `DEFAULT_PROFILE`-scale corpus even though nothing in this project's own
+testing has shown it to be actively harmful there.
+
 ## Connect a database (bring your own documents)
 
 Horizon has no database of its own -- `documents` is always a plain list/tuple you build. "Connect
@@ -111,13 +160,15 @@ python3 "HorizonAI Engine/examples/local_model_polish_example.py"   # e.g. Ollam
 python3 "HorizonAI Engine/examples/api_model_polish_example.py"     # e.g. Groq
 ```
 
-The same thing via the HTTP API -- `POST /v1/answers` with `polish: true`:
+The same thing via the HTTP API -- `POST /v1/answers` with `polish: true` (start the server first
+with `HORIZON_POLISH_API_KEY_ENV=GROQ_KEY GROQ_KEY=your-key python3 "HorizonAI Engine/run_api_server.py"`
+-- the destination/credential are this process's own env config, never request fields, see below):
 
 ```bash
 curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" -d '{
   "question": "What percent did the Meridian project reduce cost by?",
   "documents": ["The Meridian project reduced compute cost by exactly 42 percent..."],
-  "polish": true, "polish_model": "qwen/qwen3.6-27b", "polish_api_key_env": "GROQ_KEY"
+  "polish": true, "polish_model": "qwen/qwen3.6-27b"
 }'
 ```
 
@@ -162,8 +213,57 @@ needs (`GROQ_KEY`, etc.) must be listed there explicitly.
 | `include_sources` | bool, default `false` | return the full verified claim list, not just the composed answer |
 | `polish` | bool, default `false` | additionally rewrite the answer via an OpenAI-compatible model |
 | `polish_model` | string | required when `polish` is true |
-| `polish_base_url` | string | defaults to Groq's endpoint |
-| `polish_api_key_env` | string | name of an env var holding the key; never the key itself |
+
+The polish destination/credential (`HORIZON_POLISH_BASE_URL`/`HORIZON_POLISH_API_KEY_ENV`) are
+deploy-time env config, not tool parameters -- an earlier version took `polish_base_url`/
+`polish_api_key_env` directly as caller-suppliable arguments; that let any caller redirect the
+server's outbound polish call and named secret to a host of its own choosing (SSRF + credential
+exfiltration), so both were removed from the tool signature (see `api/README.md`'s own note on
+this same fix -- this table previously still listed them as parameters, which was stale).
+
+## Activation modes: tool judgment vs. a keyword gate
+
+Two ways to decide *when* Horizon should engage, picked at deploy time, never per-request --
+use whichever matches your integration, not both at once for the same deployment.
+
+**Tool mode (recommended, the default -- nothing to configure).** An orchestrating LLM agent
+already decides for itself, from its own read of the conversation, whether calling `horizon_ask`
+is relevant right now. That judgment call already *is* the activation decision -- this mode needs
+no keyword list, no separate mechanism, and is exactly what you get by doing nothing.
+
+**Keyword mode**, for a deployment with no LLM making that call: set `HORIZON_ACTIVATION_MODE=keyword`
+before starting either server. A question matching none of a small, closed, server-configured
+trigger-phrase list returns `state: "not_activated"` -- the engine never runs, zero pipeline cost.
+
+```bash
+HORIZON_ACTIVATION_MODE=keyword python3 "HorizonAI Engine/run_api_server.py"
+```
+
+```bash
+curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" -d '{
+  "question": "What percent did the Meridian project reduce cost by?",
+  "documents": ["The Meridian project reduced compute cost by exactly 42 percent..."]
+}'
+# -> {"state": "not_activated", "answer": null, ...} -- no trigger phrase, engine never ran
+
+curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json" -d '{
+  "question": "Do you remember what percent the Meridian project reduced cost by?",
+  "documents": ["The Meridian project reduced compute cost by exactly 42 percent..."]
+}'
+# -> {"state": "resolved", "answer": "...42 percent...", ...} -- "remember" matched, engine ran
+```
+
+The default trigger set covers common EN+PT phrasings ("remember", "recall", "lembra",
+"lembrar", ...). Override it with `HORIZON_ACTIVATION_KEYWORDS` (comma-separated, server-side env
+only -- never a request field, for the same reason `polish_base_url` isn't one, see above):
+
+```bash
+HORIZON_ACTIVATION_MODE=keyword HORIZON_ACTIVATION_KEYWORDS="what was,qual foi" \
+  python3 "HorizonAI Engine/run_api_server.py"
+```
+
+Applies identically to both transports (`POST /v1/answers` and `horizon_ask` over MCP) -- one
+gate, shared by both, since they already run through the same underlying implementation.
 
 ## Deferred
 

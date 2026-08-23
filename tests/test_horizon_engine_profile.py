@@ -7,7 +7,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from horizon_memory import DEFAULT_PROFILE, EngineProfile
+from horizon_memory import (
+    DEFAULT_PROFILE, PERSONAL_MEMORY_PROFILE, TEAM_MEMORY_PROFILE, EngineProfile,
+)
 from horizon_memory.claim_routing import DEFAULT_WEIGHTS as CLAIM_GENERATOR_DEFAULT_WEIGHTS
 from horizon_memory.conformal_routing import LEXICAL_SUBLEXICAL_WEIGHTS
 
@@ -151,6 +153,49 @@ class SerializationTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
         self.assertIn('"schema"', text)
         self.assertIn('"answer_relevance_gate_ratio"', text)
+
+
+class NamedPresetTests(unittest.TestCase):
+    """`TEAM_MEMORY_PROFILE`/`PERSONAL_MEMORY_PROFILE` -- named deployment presets found
+    2026-08-22 against two real MongoDB-backed corpora. Neither is an automatic detector (corpus
+    size was found NOT to reliably separate "safe to loosen" from "needs the tight defaults" --
+    a real technical-QA corpus's own candidate-pool size overlapped with a real MemGym-DR
+    episode's) -- both are deliberate, named choices a deployment picks for itself."""
+
+    def test_presets_are_valid(self):
+        EngineProfile(**{**TEAM_MEMORY_PROFILE.to_dict()})  # must not raise
+        EngineProfile(**{**PERSONAL_MEMORY_PROFILE.to_dict()})  # must not raise
+
+    def test_team_memory_is_a_real_middle_ground_not_default_or_personal(self):
+        self.assertLess(TEAM_MEMORY_PROFILE.answer_relevance_gate_ratio,
+                        DEFAULT_PROFILE.answer_relevance_gate_ratio)
+        self.assertGreater(TEAM_MEMORY_PROFILE.answer_relevance_gate_ratio,
+                           PERSONAL_MEMORY_PROFILE.answer_relevance_gate_ratio)
+        self.assertGreater(TEAM_MEMORY_PROFILE.answer_shortlist_size,
+                           DEFAULT_PROFILE.answer_shortlist_size)
+        self.assertLess(TEAM_MEMORY_PROFILE.answer_shortlist_size,
+                       PERSONAL_MEMORY_PROFILE.answer_shortlist_size)
+
+    def test_personal_memory_matches_the_validated_mongo_configuration(self):
+        # The exact values 31/32, 19/20 and 12/12 real questions were measured at.
+        self.assertEqual(PERSONAL_MEMORY_PROFILE.answer_relevance_gate_ratio, 0.0)
+        self.assertEqual(PERSONAL_MEMORY_PROFILE.answer_shortlist_size, 500)
+        self.assertEqual(PERSONAL_MEMORY_PROFILE.answer_bytes, 40_000)
+
+    def test_default_profile_is_unaffected_by_the_new_presets(self):
+        # `DEFAULT_PROFILE` must stay exactly what the published D144/LongMemEval byte-identical
+        # reproductions depend on -- introducing named presets must never touch it.
+        self.assertEqual(DEFAULT_PROFILE.answer_shortlist_size, 50)
+        self.assertEqual(DEFAULT_PROFILE.answer_relevance_gate_ratio, 0.3)
+        self.assertEqual(DEFAULT_PROFILE.answer_bytes, 24_576)
+
+    def test_presets_round_trip_through_file(self):
+        for profile in (TEAM_MEMORY_PROFILE, PERSONAL_MEMORY_PROFILE):
+            with tempfile.TemporaryDirectory() as workdir:
+                path = Path(workdir) / "profile.json"
+                profile.save(path)
+                restored = EngineProfile.load(path)
+            self.assertEqual(profile, restored)
 
 
 if __name__ == "__main__":
