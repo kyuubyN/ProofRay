@@ -149,6 +149,15 @@ document can contain one claim that answers a query and several that don't;
 claim-level generation lets those compete independently for budget instead
 of the whole document winning or losing as one unit.
 
+Claim/sentence boundaries and the lexical/sublexical channels above are script-aware, not
+English-only: Chinese text (which has no whitespace word boundaries) is segmented with a small,
+self-built maximum-matching word dictionary rather than character bigrams, after an earlier
+bigram-based version was found to saturate on combinatorial noise in a small candidate pool. This
+is the mechanism behind this project's own Simplified/Traditional Chinese memory-delivery results
+(see [Benchmarks](BENCHMARKS.md)); the dictionary is corpus-scoped by design, not a general-purpose
+NLP model, and a since-tested attempt to widen it with a large general Chinese wordlist was
+reverted after it doubled the false-positive rate on unrelated content for no measured gain.
+
 Routing admission can also be conformally calibrated:
 `ConformalClaimGenerator`/`ConformalDocumentGenerator` wrap a base generator
 with a `ConformalCalibrator` fit on a held-out calibration set, and admit a
@@ -171,6 +180,17 @@ with `anchor_bonus`/`specificity_bonus` biasing selection toward claims
 carrying a number, proper noun or other locally rare token: the kind of
 content most likely to be the one fact a query actually needs, not just a
 topically related sentence.
+
+`dedup_threshold`'s own plain Jaccard-similarity check has a more elaborate history than its size
+suggests, worth naming as an example of how this project promotes a mechanism. An earlier,
+considerably more sophisticated design — a calibrated tournament between competing merge tactics,
+reusing an orphaned reliability-scoring strategist from this project's own earlier research —
+reached the same measured coverage gain as this plain dedup check, exactly, on the same held-out
+episodes. Per this project's own discipline (demote to the honest, simpler mechanism whenever a
+plain control ties a fancier one, rather than keep the more impressive name), the calibrated
+tournament was not the thing promoted: the plain Jaccard check was, since it produces the
+identical result with no per-deployment calibration step required. The more elaborate mechanism
+remains in `lab/` as a validated, but not simpler, alternative.
 
 None of this changes what counts as authoritative. However a candidate is
 scored, ranked or admitted, it only ever proposes; `HorizonVerifier` is
@@ -258,8 +278,18 @@ outbound call and a named secret to a host of its own choosing.
 
 Every request-shaped safety property lives at this layer, not inside the engine itself: request
 body/field size limits, a bounded (TTL + LRU) in-memory answer store so an anonymous caller can't
-grow process memory without bound, and strict JSON body validation. See [`../api/README.md`](../api/README.md)
-for the exact current limits and any request-authentication/rate-limiting scheme layered on top.
+grow process memory without bound, and strict JSON body validation.
+
+The HTTP transport also requires a bearer token (`machine_auth.py`) on every request except the
+health check, and rate-limits every request (`rate_limit.py`) with a token bucket that refills
+continuously rather than resetting on a fixed clock tick. The token is generated once on first run,
+persisted locally, and additionally bound to a best-effort OS machine identifier recomputed on
+every request, so a copied credentials file stops working on a different machine — a real, but
+deliberately narrow, property scoped to "one operator, one machine," not multi-tenant auth. MCP
+(stdio transport, spawned directly by the local client) deliberately carries neither mechanism:
+there is no network hop for a token or rate limit to protect there. See
+[`../api/README.md`](../api/README.md) for the exact current limits and the full authentication
+model.
 
 ## Research retrieval
 
@@ -302,6 +332,52 @@ Promotion evidence is cross-treebank, not the development split: EWT dev/train e
 the untouched GUM test reached 93.90% positive accuracy and 97.47% selective precision. The mechanism
 covers only atomic one-token `nsubj+obj` probes under its finite grammar; PT/ZH and phrase/multihop
 generalization remain research work.
+
+### Promoted deterministic PT atomic relation pack — reachable, tested, not holdout-confirmed
+
+`portuguese_atomic_relations.py` shares the same language-neutral surface kernel as the EN pack
+above, but Portuguese's closed-class morphology (clitics, contractions, prepositional governance)
+is too rich for a raw-token skip list — an earlier version tried exactly that, tuned to 100% on one
+development treebank, and then failed on every fresh test split it was pointed at. Its replacement
+is a genuine typed constraint-satisfaction resolver, reusing the same theoretical stack named
+above: **H-FMRL** supplies typed per-token morphological alternatives, **H-DEM**/**H-DCA** turn
+prepositional-phrase governance and clause-local competition into an explicit constraint problem,
+and **H-PLT** resolves a role only when every complete interpretation world agrees.
+
+`RoleReadResult`, `read_pt_atomic_relation`, `resolve_pt_surface_role` and
+`OpenTextHorizonMemory.answer_atomic_relation_pt` are exported from the stable top-level
+`horizon_memory` namespace, not gated behind `horizon_memory.research` — a deliberate product
+decision, made explicitly before the pack cleared the same bar as its EN counterpart. **This is
+the honest, stated difference from the EN pack above**: the EN pack was wired into the stable
+namespace only after clearing a fresh, never-touched holdout (UD English-GUM, 95.12% positive,
+97.50% selective). The PT pack's own first fresh holdout (`UD_Portuguese-CINTIL` test) **failed
+its promotion bar by a narrow margin** — 92.39% positive accuracy clears the >=90% gate, but
+94.44% selective precision misses the >=95% gate by 0.56pp. Treat the PT pack as reachable and
+useful today, not as evidence it has reached the same standing as the EN pack; see
+[Benchmarks](BENCHMARKS.md#pt-atomic-relation-pack--early-raw-token-adapter-rejected-h-fmrlh-demh-plt-bridge-now-in-core-opt-in-holdout-confirmation-failed-narrowly)
+for the full numbers and per-error diagnosis.
+
+## Open-text and structured-input facades
+
+Two different opt-in facades extend the authority boundary above to input that isn't already a
+`RouteDocument` a caller built by hand, for two different input shapes.
+
+**`OpenTextHorizonMemory`** is for arbitrary, unstructured text. It records each input document
+under the weakest predicate that is universally true of it — a sealed source contains this exact
+`surface_document` span — inventing no entity, relation or meaning at ingestion time. Verified
+documents then enter the same deterministic route/verify/compose path described above; the two
+atomic-relation packs' `answer_atomic_relation_en`/`_pt` entry points, and the CJK/PT-BR memory-
+delivery transfer results in [Benchmarks](BENCHMARKS.md), all run through this facade. It is
+deliberately not sold as text understanding — it makes exactly one claim (this span exists,
+unmodified, in this source) and lets everything downstream stay proof-carrying on top of that.
+
+**The authorized typed sidecar** (`docs/TYPED_SIDECAR.md`) is for the opposite shape: a caller who
+already has structured facts (a database row, a tool result, an event stream) and wants them bound
+to schema/rule identity, source microcitations, capabilities, lifecycle and completeness proofs
+without inventing an extraction step at all. Where the open-text facade's job is turning
+unstructured text into the weakest true claim, the sidecar's job is attaching a strong, explicit
+authority contract to input that is already structured — the two are complementary entry points
+into the same durable/evidence/proof core, not competing designs.
 
 ## Research graduation
 
@@ -395,10 +471,16 @@ This pipeline, at a byte budget matched to what it naturally uses, was
 compared against a strong lexical baseline (BM25) at both a matched budget
 and a substantially larger one, scored by a validated LLM-judge instrument
 (see [Benchmarks](BENCHMARKS.md)). It won at both budgets, and giving the
-baseline more budget did not close the gap. What still limits accuracy beyond
-that point — whether more of the right evidence is being missed, or whether
-a small reader model struggles to compose evidence it already has into a
-correct answer — is an open, actively-tested question, not yet closed.
+baseline more budget did not close the gap. What limits accuracy beyond that
+point has since been settled by a dedicated causal test, not left open:
+raising a reader's actual evidence coverage at the identical byte budget did
+not move the judge score in a statistically distinguishable way, confirmed
+by a working negative control. The remaining gap is explained by the
+reader's own difficulty composing multiple facts it already has into one
+correct answer, not by missing evidence — see
+[Benchmarks](BENCHMARKS.md#reading-comprehension-pilot-program) for the exact
+numbers. This reframes further work on this pipeline toward the consumer-side
+reading contract or reader capacity, not toward more retrieval/ranking work.
 
 ## External readers
 
