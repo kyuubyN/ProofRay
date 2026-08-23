@@ -819,3 +819,29 @@ indistinguishable from a real MemGym-DR episode. Both findings are why three sep
 presets ship (`DEFAULT_PROFILE` / `TEAM_MEMORY_PROFILE` / `PERSONAL_MEMORY_PROFILE`, see
 [Architecture](ARCHITECTURE.md#answer-engine)) rather than one adaptively-tuned default:
 an operator picks the preset matching their own deployment's real scale.
+
+**Single-query latency and memory, measured directly against the live MongoDB corpus.** One
+fresh process, one full route → verify → compose pipeline run, no caching, no GPU, the same
+`resource.getrusage`/`time.perf_counter` methodology already used for the MemGym-DR corpus above:
+the EN Gen-Z multi-hop corpus (254 real messages, 77 conversations, `PERSONAL_MEMORY_PROFILE`)
+answering "What is the name and breed of the puppy that chewed my Apple AirPods Pro case into
+plastic pieces?" (a real multi-hop question from the battery above).
+
+| Metric | Value |
+|---|---|
+| State | `RESOLVED` (correct: contains "Waffles" and "golden retriever") |
+| Documents considered | 254 |
+| Verified candidates (claims) | 475 |
+| Answer size | 34,849 bytes |
+| CPU time | 1.07 s |
+| Wall-clock time | 1.08 s |
+| Peak resident memory | 68.3 MiB |
+
+CPU time and wall-clock time are within 1% of each other, the same signal already noted for the
+MemGym-DR measurement: the process spent that time computing, not waiting on MongoDB or disk.
+`PERSONAL_MEMORY_PROFILE`'s own completeness-over-precision design is visible directly in the
+answer size here: 34,849 of its 40,000-byte ceiling was used, consistent with the multi-hop
+finding above that this preset renders more surviving claims side by side rather than picking one.
+This is a single measurement on one machine and one question, not a statistical study; treat it as
+a concrete data point for what a real personal-memory-scale query costs, not a general latency
+claim.
