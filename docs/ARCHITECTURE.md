@@ -9,9 +9,14 @@ flowchart LR
     A --> D["Durable memory"]
     D --> R["Retrieval and HSSD"]
     R --> P["Evidence and proof verification"]
-    P --> C["Any consumer"]
+    P --> E["Answer engine\n(HorizonAnswerEngine)"]
+    E --> C["Any consumer"]
+    E --> H["HTTP API (api/server.py)"]
+    E --> M["MCP server (api/mcp_server.py)"]
     C -->|"optional feedback with provenance"| A
-    X["LLM or local model"] -. "optional reader" .-> C
+    X["LLM or local model"] -. "optional reader / polish" .-> C
+    X -. "optional polish" .-> H
+    X -. "optional polish, or the tool caller itself" .-> M
 ```
 
 ## Stable surface
@@ -120,6 +125,82 @@ aborts to `RouteState.ABSTAIN_UNSAFE_CONTENT` on an unsafe query or unsafe
 verified evidence rather than silently dropping the offending item. See
 `SECURITY.md` for the full scope and its explicit limits.
 
+## Answer engine
+
+Everything above (routing, verification, evidence budgets, HSSD) is machinery a caller could use
+directly, but most real consumers want one call that takes a question plus a document set and
+returns a verified answer. `HorizonAnswerEngine.answer(question, documents)` is that call: it
+routes, verifies, budgets and renders in one pass, returning an `AnsweredResult` — `state`
+(`"RESOLVED"` or an abstain-state name; a confident wrong answer never happens, the engine
+declines instead), `answer_text`/`evidence_text` (the composed, verified evidence — the same text
+under two names, `answer_text` kept for backwards compatibility), `direct_answer` (the separate,
+optional minimal-answer channel described above), and telemetry (`documents_considered`,
+`verified_candidates`, `answer_bytes`, `chosen_size`) a caller can use to reason about how close a
+corpus is to the engine's own internal budgets.
+
+Every tunable value the engine consumes — claim-routing channel weights, acquisition/answer byte
+budgets, the shortlist size and relevance gate the final answer is picked from, the answer
+selector, HPPS exploration reserve — lives in one frozen `EngineProfile` dataclass, passed in at
+construction (`HorizonAnswerEngine(profile=..., scope_id=..., session_id=...)`), not scattered
+across call sites. A profile is just data: `EngineProfile.save()`/`.load()` round-trip it through
+JSON, so retuning a deployment never means touching code.
+
+Three named presets ship, because the right values genuinely differ by deployment scale, and
+corpus size alone does not reliably indicate which one applies (measured directly: a real,
+small technical-QA corpus's own candidate-pool size was statistically indistinguishable from a
+large benchmark episode's) — so this is a deliberate, named choice an operator makes, not
+something the engine infers automatically:
+
+- **`DEFAULT_PROFILE`** ("Scale Memory") — tuned for a large corpus (hundreds of documents and
+  up); the exact configuration behind this project's own published judge-scored results (see
+  [Benchmarks](../BENCHMARKS.md)), deliberately conservative about how much evidence competes for
+  the final answer so a huge corpus never dilutes a precise one.
+- **`TEAM_MEMORY_PROFILE`** ("Team Memory") — a measured middle ground for a medium corpus (a
+  small team's internal docs).
+- **`PERSONAL_MEMORY_PROFILE`** ("Personal Memory") — favors completeness over precision-per-byte
+  for a small, personal-scale corpus, where the default's own anti-dilution caution can drop the
+  one sentence carrying the concrete answer. Recommended starting point for that class of
+  deployment; see [Benchmarks](../BENCHMARKS.md#real-world-horizonanswerengine-validation-five-live-corpora-136-hand-verified-questions)
+  for the real-corpus validation behind that recommendation.
+
+## Deployment surfaces (`api/`)
+
+`api/` is the packaged, runnable surface that wraps `HorizonAnswerEngine` for an actual
+deployment — HTTP and MCP transports, a shared choke point, and the one place model-facing
+network calls are allowed to originate from. It is a separate concern from the AGPL core: see
+[Licensing policy](../LICENSE_POLICY.md) for why this split exists and what it does and doesn't
+mean for licensing.
+
+Both transports share `api/_engine_bridge.py` rather than each reimplementing request handling:
+`maybe_answer(question, documents)` is the one function both `api/server.py` (`POST
+/v1/answers`) and `api/mcp_server.py` (the `horizon_ask` tool) call, so a behavior added at this
+layer — activation gating, request validation, the optional polish step — never has to be kept in
+sync across two copies.
+
+**Activation mode** decides *when* the engine runs at all, as deploy-time configuration
+(`HORIZON_ACTIVATION_MODE`), never a per-request field: `"direct"` (the default) runs the engine
+unconditionally on every request; `"keyword"` gates it behind a small, closed, server-configured
+trigger-phrase list (`HORIZON_ACTIVATION_KEYWORDS`), returning `state: "not_activated"` with zero
+pipeline cost when a question matches none of them. The two modes serve different integration
+shapes: an orchestrating LLM agent deciding for itself whether to call `horizon_ask` already *is*
+an activation decision (tool mode, the recommended default, needs no keyword list at all);
+keyword mode is for a deployment with no LLM in the loop making that call.
+
+**Polish** (`OpenAICompatiblePolishAdapter`, `horizon_memory.adapters`) is the one place a model
+call can happen, and it is structurally incapable of deciding facts: it receives only Horizon's
+own already-verified `answer_text`, is instructed not to add/remove/invent content, and its output
+is a separate, clearly-labeled `polished_answer` field that never replaces `answer_text` — a
+failed or errored polish call degrades to the unmodified verified answer rather than affecting it.
+The destination endpoint and credential-holding env-var name are read only from this process's own
+environment (`HORIZON_POLISH_BASE_URL`/`HORIZON_POLISH_API_KEY_ENV`), never accepted as request
+fields, after an earlier version that did accept them was found to let any caller redirect the
+outbound call and a named secret to a host of its own choosing.
+
+Every request-shaped safety property lives at this layer, not inside the engine itself: request
+body/field size limits, a bounded (TTL + LRU) in-memory answer store so an anonymous caller can't
+grow process memory without bound, and strict JSON body validation. See [`../api/README.md`](../api/README.md)
+for the exact current limits and any request-authentication/rate-limiting scheme layered on top.
+
 ## Research retrieval
 
 `horizon_memory.research` exposes experimental proof-pressure and feedback
@@ -188,6 +269,16 @@ already validated for query answers, repurposed here as a general
 claim carry an anchor (a number or proper noun) at all. Measured, not
 assumed, with mixed results across language and noise conditions; see
 `RESEARCH.md` for the honest numbers and why it stays opt-in.
+
+`narrative_composition.py` is a second, independent opt-in mechanism in the same namespace: it
+composes multiple already-linked typed facts (from `TypedCausalExecutor`) into one coherent
+rendered narrative — ordering by cause/contrast/sequence relations read directly off each fact's
+own fields, never inventing a relation — instead of answering only one atomic fact at a time. It
+is exported but **never wired into any default routing/ranking/answer path**: a caller must
+already hold correctly-linked typed facts and invoke it explicitly. Entity/fiber linking from raw
+unstructured text (deciding which facts describe the same real-world thing in the first place)
+remains unsolved and is exactly what `collapse_evidence_items` above is the closest existing
+attempt at, not something this module does for you.
 
 ## The validated reading pipeline (partially promoted; full pipeline still a private prototype)
 

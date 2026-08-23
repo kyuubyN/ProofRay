@@ -738,3 +738,61 @@ A related distinction now matters: the authorized typed sidecar has explicit, at
 `supersedes` lineage and rejects incomplete updates, while untyped free-text evidence still needs the
 opt-in research mechanism `horizon_memory.research.collapse_evidence_items`. The sidecar result must
 not be projected onto the untyped evidence path.
+
+## Real-world `HorizonAnswerEngine` validation: five live corpora, 136 hand-verified questions
+
+Distinct from every result above (all measured against public research benchmarks with published
+gold answers), this validates the actual shipped `HorizonAnswerEngine` — the same code path
+`api/server.py` and `api/mcp_server.py` expose — against real conversational data the project
+had never seen before, queried live from a running MongoDB instance. Ground truth for every
+question was verified directly against the literal database text, never against the tester's own
+paraphrase of it, after two early false negatives (a number written differently, a missing accent)
+made that discipline necessary.
+
+**What this found.** `DEFAULT_PROFILE` (tuned and judge-validated for the large-corpus MemGym-DR/
+LongMemEval benchmarks above) reliably located the right source document on a small, personal-
+scale corpus, but frequently dropped the one sentence carrying the concrete answer — a number, a
+name, a specific detail — in favor of a shorter, less specific competing sentence. Root-caused to
+`EngineProfile.answer_shortlist_size=50`: an engineering safety cap with no benchmark evidence
+behind it (unlike `answer_relevance_gate_ratio`, which a 2026-08-19 MemGym-DR sweep had already
+validated), too tight for a corpus with no real dilution risk to guard against.
+
+| Corpus (language, register) | Questions | `DEFAULT_PROFILE` | `TEAM_MEMORY_PROFILE` | `PERSONAL_MEMORY_PROFILE` |
+|---|---:|---:|---:|---:|
+| PT-BR casual chat/slang (52 conversations) | 32 | 17/32 | 23/32 | **31/32** |
+| PT-BR formal technical Q&A, round 1 (typo-laden CS/physics/biology) | 20 | 15/20 | 17/20 | **19/20** |
+| PT-BR formal technical Q&A, round 2 (harder/ambiguous) | 12 | 12/12 | — | 12/12 |
+| PT-BR formal technical Q&A, round 3 (noisier still) | 12 | 12/12 | — | 12/12 |
+| EN Gen-Z slang/memes (50 conversations, incl. cross-lingual PT queries about EN content) | 30 | 20/30 | 24/30 | **29/30** |
+| EN Gen-Z slang, multi-hop/evolving memory (+27 chained conversations, 127 total) | 20 | 15/20 | 18/20 | **20/20** |
+| **Total** | **136** | **91/136** | *(not run on every corpus)* | **123/136** |
+
+Zero false answers and zero wrong-conversation hallucinations were introduced by either loosened
+preset across all 136 questions at every setting tested — every miss at every setting was a
+dropped detail (or, at `DEFAULT_PROFILE` only, one lost cross-conversation competition), never a
+fabricated fact. Full narrative and exact per-question categorization (PASS / partial-hop /
+right-source-missing-detail / wrong-source) live in this project's own session history; the
+summary numbers above are what's citable here.
+
+**Multi-hop composition, not designed for, worked anyway.** The last row above is the first test
+in this validation requiring a single answer to combine facts from two or three *different*
+source conversations (e.g. a puppy's name from one conversation, what it later chewed from
+another). `HorizonAnswerEngine` has no dedicated multi-hop/graph-traversal stage — it builds one
+flat pool of routed, verified claims and renders whichever survive the shortlist/relevance-gate/
+budget side by side. That turned out to be sufficient: two or three claims from different source
+conversations only need to each individually clear routing and verification to end up rendered
+together in the same answer. The only failure mode was the same shortlist/budget competition
+already diagnosed above, not a missing architectural capability — `PERSONAL_MEMORY_PROFILE`
+resolved it to a clean 20/20.
+
+**Why this isn't promoted to a new default, and why no single automatic detector replaces
+picking a preset.** The loosened settings were also re-swept against the full 120-question
+MemGym-DR benchmark and showed no regression on a token-overlap coverage proxy — but that
+specific metric is already documented above (Composer judge-scored pilot) as capable of rewarding
+a larger, less-precise evidence dump, so this is not read as a safety proof at that scale.
+Calibration also found corpus size does not reliably separate "safe to loosen" from "needs the
+tight defaults": a real technical-QA corpus's own candidate-pool size measured statistically
+indistinguishable from a real MemGym-DR episode. Both findings are why three separate named
+presets ship (`DEFAULT_PROFILE` / `TEAM_MEMORY_PROFILE` / `PERSONAL_MEMORY_PROFILE`, see
+[Architecture](docs/ARCHITECTURE.md#answer-engine)) rather than one adaptively-tuned default —
+an operator picks the preset matching their own deployment's real scale.
