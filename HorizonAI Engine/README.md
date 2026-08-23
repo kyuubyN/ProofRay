@@ -136,6 +136,52 @@ documents = tuple(
 result = engine.answer(question, documents)
 ```
 
+## Writing your documents and questions for the best precision
+
+Horizon will always try its best with whatever you give it, but a few real, measured findings
+from testing it against messy, real-world data are worth knowing before you connect your own.
+
+**For your documents:**
+
+- **Keep each document a complete, natural unit of text: one message, one paragraph, one row.**
+  The single most damaging thing you can do is chop text into arbitrary fixed-length slices that
+  cut sentences in half. We tested this directly against a real external dataset that had been
+  split into fixed 500-byte windows by construction, so most "documents" started and ended
+  mid-sentence: the right answer's own text was almost always retrieved correctly, but it kept
+  losing to a shorter, unrelated, grammatically complete-looking sentence when the actual answer
+  was itself a sentence fragment. We fixed the selection logic once we found this, but a corpus of
+  real, complete sentences never runs into the problem in the first place.
+- **Put the context a question needs inside the text itself, not only in a separate field Horizon
+  never reads.** A message like "I went to the doctor yesterday" can only answer "when" if the
+  actual calendar date is written somewhere Horizon can see it; a timestamp sitting in a database
+  column you never pass into the document text is invisible to it. If your source has a natural
+  date, name, or ID attached to a message, write it into the document itself (`"On May 8th, 2023,
+  Caroline said: ..."`), not just in metadata alongside it.
+- **Give each document a specific, descriptive label if it has one, rather than a generic
+  category name.** On a real corpus of hundreds of short news items that all shared heavy
+  bureaucratic vocabulary ("committee", "approved", "project"), a handful of questions occasionally
+  matched a different item that happened to share more of that generic wording, instead of the one
+  actually being asked about. A distinctive title (the specific bill, the specific event) gives the
+  ranking something more precise to grab onto than words every other document in the corpus also
+  uses.
+
+**For the question you ask:**
+
+- **Include the specific word you actually care about, if you know it: a name, a number, a
+  product, an ID.** Horizon ranks by how distinctively a document's own wording matches your
+  question, so a specific term does far more work than a general description of the topic.
+- **Ask one thing at a time when you can.** Horizon can and does answer questions that need facts
+  from more than one place, but a single, focused question is the easiest case for it to get
+  completely right.
+
+**You don't need to write carefully.** Every number above, and every real-corpus result in
+[Benchmarks](../docs/BENCHMARKS.md), was measured against genuinely casual, typo-laden questions,
+not clean, careful ones: "qdo vai acontecer a sessao de julgamneto da CVM em 26 4?", "wht did the
+margravine ask herr heilbrun about things english?", "abt", "insted", "rember". Horizon's matching
+already checks both exact wording and a fuzzy, letter-level channel underneath it, specifically so
+a misspelling, a dropped accent, or an abbreviation does not cost you the right answer. Write your
+question the way you'd actually type it.
+
 ## Polish answers with a local or API model
 
 Horizon's own answer is already deterministic and verified -- polishing is optional, purely
