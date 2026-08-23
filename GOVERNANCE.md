@@ -6,7 +6,8 @@ Horizon Memory is an open technical commons with a clearly preserved origin.
 
 Kaue Oliveira Costa (kyuubyN) is the creator, research lead and founding
 maintainer. The founding role is historical and cannot be reassigned by a vote
-or contribution.
+or contribution. This holds regardless of `CLA.md` — signing it is a license
+grant to the project, never a step toward governance rights.
 
 ## Technical decisions
 

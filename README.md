@@ -198,6 +198,7 @@ chat client) and licensing notes:
 - [Benchmarks and claim boundaries](BENCHMARKS.md)
 - [Research module](RESEARCH.md)
 - [Licensing policy](LICENSE_POLICY.md)
+- [Contributor License Agreement](CLA.md)
 - [Governance](GOVERNANCE.md)
 - [Security policy](SECURITY.md)
 - [Responsible use](RESPONSIBLE_USE.md)
@@ -208,8 +209,13 @@ chat client) and licensing notes:
 
 The engine is free software under **AGPL-3.0-or-later**. If a modified version
 is offered to users over a network, those users must be offered its complete
-corresponding source as required by the AGPL. Integration adapters carry an
-Apache-2.0-or-AGPL dual-license to make connection to independent systems easy.
+corresponding source as required by the AGPL. This is the Linux-kernel model:
+the core stays free and source-available, and `horizon_memory.adapters` is the
+Apache-2.0-or-AGPL dual-licensed build point where anyone can build a
+distribution, product or closed-source integration on top — the way Ubuntu,
+Fedora or Red Hat build on the Linux kernel rather than fork it. See
+[Licensing policy](LICENSE_POLICY.md) for exactly what the Apache option does
+and does not cover.
 
 You may charge for hosting, support or integration. You may not remove license,
 copyright or attribution notices, and the Horizon Memory name may not be used
