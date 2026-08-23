@@ -22,6 +22,10 @@ leaves your computer unless you choose to connect one yourself.
 > **Status:** this is an early, actively-developed version. Things may still be rough around the
 > edges. Read on to see how it works today.
 
+The parts of Horizon that read and understand natural-language questions have so far been
+carefully tested in **English and Portuguese** only. Other languages, starting with Chinese, are
+planned but not validated yet — see [Roadmap](ROADMAP.md).
+
 Horizon grew out of a multi-year research project that tried many different approaches to AI
 memory and kept only the ones that survived real testing. If you're curious about that history,
 it's written up in [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md).
@@ -91,6 +95,7 @@ yourself.
 
 - [HorizonAI Engine](HorizonAI%20Engine/README.md): the full tutorial covering quickstart,
   connecting a database, adding a model, and chat assistants
+- [Roadmap](ROADMAP.md): where the project is headed
 - [Architecture](docs/ARCHITECTURE.md): how it's actually built, for the technically curious
 - [Benchmarks and claim boundaries](docs/BENCHMARKS.md): the tests we ran and what they showed
 - [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md): the research history behind the project
