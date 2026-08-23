@@ -37,6 +37,12 @@ _AUXILIARY_LEMMA = {
     "am": "be", "are": "be", "did": "do", "does": "do", "had": "have",
     "has": "have", "is": "be", "was": "be", "were": "be",
 }
+# The complete, closed set of English "be" forms usable as a passive auxiliary -- a grammatical
+# fact, not a lexicon entry per verb. "have"/"do" forms are deliberately excluded: "has broken" is
+# active perfect (has + participle), not passive, and this set is exactly what tells the two apart.
+_PASSIVE_AUXILIARIES = frozenset({"am", "are", "is", "was", "were", "be", "been", "being"})
+# The single marker introducing a passive agent phrase ("...was broken BY John").
+_PASSIVE_AGENT_MARKERS = frozenset({"by"})
 _PERSON_PRONOUNS = frozenset({
     "he", "her", "hers", "him", "his", "i", "me", "mine", "our", "ours", "she",
     "their", "theirs", "them", "they", "us", "we", "you", "your", "yours",
@@ -105,6 +111,8 @@ _EN_SVO_CONFIG = SurfaceSvoConfig(
     # never added to `_NUMERAL_WORDS` itself, since a bare standalone "one" is also the indefinite
     # pronoun head ("the one that got away"), which must stay reachable as an answer on its own.
     numeral_hyphen_prefixes=frozenset({"one"}),
+    passive_auxiliaries=_PASSIVE_AUXILIARIES,
+    passive_agent_markers=_PASSIVE_AGENT_MARKERS,
 )
 
 

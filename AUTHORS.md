@@ -22,8 +22,7 @@ contribution (see `GOVERNANCE.md`). It is distinct from co-authorship below.
   - Public contact: <Matheus.ge.si@gmail.com>
 
 Co-authors are credited here and in `CITATION.cff`, in the order they joined
-the project. See `CONTRIBUTORS.md` for the fuller roster, including
-non-authorship contributions.
+the project.
 
 Future contributions are recorded by Git history and release notes. A
 contribution does not transfer the project's name, origin, or founding credit.

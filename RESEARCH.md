@@ -35,6 +35,27 @@ ranking path for exactly that reason. These classes are research surfaces:
 signatures may change, negative results remain part of the record, and no
 benchmark result should be generalized beyond its frozen protocol.
 
+`narrative_composition` composes an arbitrary collection of already-typed,
+already-linked facts (e.g. from `TypedCausalExecutor.fibers`) into one
+coherent, non-duplicating multi-sentence narrative -- causal, superseding,
+temporal or plain listing, chosen only from signals the typed data model
+already carries (a real causal edge, a shared fiber with differing content
+and clock, a shared subject with differing event time), never a lexical
+dictionary or a trained parser. Every clause is a literal slice of the
+fact's own attested source span; joining is restricted to symmetric
+concatenation (a closed connector word), never substitution into another
+clause's structure, following Lebanoff et al. (2019)'s measured finding that
+substitution-style joins are markedly less faithful. `current_value_fact`
+identifies which fact in a revision chain states the current value, walking
+from most recent to least recent and skipping a trailing confirmation
+clause that carries no value of its own -- a real gap a 2026-08-22 oracle-
+fiber probe against 48 real long-horizon scenarios found and this fix
+closed for most of the affected cases. It solves entity/fiber linking for
+nobody: a caller must already know which facts describe the same thing,
+which remains an open, unsolved problem for raw unstructured text in this
+project. It stays research-namespace-only for that reason -- no frozen
+holdout has been opened for it yet.
+
 The public package contains executable implementations and mechanical tests.
 It intentionally does not contain private theory notebooks, unpublished
 derivations, benchmark datasets, answer keys, development logs or papers.

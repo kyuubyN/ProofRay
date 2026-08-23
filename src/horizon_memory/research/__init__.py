@@ -31,6 +31,12 @@ from ..portuguese_atomic_relations import (
     RoleReadResult, read as read_pt_atomic_relation,
     resolve_surface_role as resolve_pt_surface_role,
 )
+from ..narrative_composition import (
+    AggregatedNarrative, ClassifiedPair, DiscourseFact, DiscourseRelation, NarrativeComponent,
+    NarrativePlan, RealizedFact, RenderedNarrative, aggregate_same_subject_facts,
+    build_discourse_facts, classify_relation, connector_style, current_value_fact,
+    plan_narrative, realize_fact, render_narrative, render_pair,
+)
 
 __all__ = [
     "HorizonSearchEngine",
@@ -51,4 +57,21 @@ __all__ = [
     "RoleReadResult",
     "read_pt_atomic_relation",
     "resolve_pt_surface_role",
+    "RealizedFact",
+    "AggregatedNarrative",
+    "aggregate_same_subject_facts",
+    "realize_fact",
+    "DiscourseFact",
+    "DiscourseRelation",
+    "ClassifiedPair",
+    "classify_relation",
+    "connector_style",
+    "render_pair",
+    "build_discourse_facts",
+    "NarrativeComponent",
+    "NarrativePlan",
+    "plan_narrative",
+    "current_value_fact",
+    "RenderedNarrative",
+    "render_narrative",
 ]
