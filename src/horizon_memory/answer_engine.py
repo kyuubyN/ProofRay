@@ -157,6 +157,12 @@ class AnsweredResult:
     selector_proof_closed: bool | None = None
     selector_residual: tuple[str, ...] = ()
     direct_answer: DirectAnswer = field(default_factory=DirectAnswer)
+    # Size of the candidate pool `_pick_clean_answer`'s shortlist/gate operate on -- lets a caller
+    # see how close a corpus is to `answer_shortlist_size` before picking a named `EngineProfile`
+    # preset (see `PERSONAL_MEMORY_PROFILE`/`TEAM_MEMORY_PROFILE` in `engine_profile.py`). Cheap
+    # telemetry, mirrors the existing `documents_considered`/`verified_candidates` pattern; never
+    # affects rendered answer bytes.
+    chosen_size: int = 0
 
     @property
     def resolved(self) -> bool:
@@ -326,7 +332,8 @@ class HorizonAnswerEngine:
                 return AnsweredResult(
                     "RESOLVED", tuple(claims), answer_lines, sources, core, ranked,
                     len(documents), len(sources), answer_bytes, profile.answer_selector,
-                    selector_proof_closed, selector_residual, direct_answer)
+                    selector_proof_closed, selector_residual, direct_answer,
+                    chosen_size=len(chosen))
             finally:
                 memory.close()
         finally:

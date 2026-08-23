@@ -18,6 +18,15 @@ Two endpoints, one specific GET mode, one optional cosmetic step:
   full claim list attached only when asked.
 - `GET /v1/health` is a trivial liveness/version check.
 
+**Activation mode** (deploy-time config, never a per-request field -- see
+`_engine_bridge.ACTIVATION_MODE`): by default every `POST /v1/answers` runs the engine
+unconditionally (today's only behavior, unchanged). Setting `HORIZON_ACTIVATION_MODE=keyword`
+gates the engine behind a small, closed, server-configured trigger-phrase list
+(`HORIZON_ACTIVATION_KEYWORDS`) -- a question matching none of them returns `state:
+"not_activated"` without running the pipeline at all. The alternative activation mode -- an
+orchestrating LLM agent deciding for itself when Horizon is relevant -- needs no server-side
+mechanism here; that's exactly what `api/mcp_server.py`'s `horizon_ask` tool already is.
+
 Everything here is the same zero-LLM, zero-neural-net, deterministic pipeline
 `HorizonAnswerEngine` already wraps -- this file only adds HTTP request/response plumbing on top
 of `api/_engine_bridge.py`'s shared helpers (also used by `api/mcp_server.py`). See
@@ -30,8 +39,8 @@ from flask import Flask, jsonify, request
 
 from _engine_bridge import (  # STORE is unused here but re-exported for tests (`from server import STORE`)
     DEFAULT_PROFILE, ENGINE, MAX_DOCUMENTS, STORE, build_documents, build_polish_config,  # noqa: F401
-    json_bool, load_answer, new_answer_id_and_timestamp, run_polish, serialize, store_answer,
-    validate_question_length,
+    json_bool, load_answer, maybe_answer, new_answer_id_and_timestamp, run_polish, serialize,
+    store_answer, validate_question_length,
 )
 
 app = Flask(__name__)
@@ -82,10 +91,10 @@ def create_answer():
     except ValueError as exc:
         return _bad_request(str(exc))
 
-    result = ENGINE.answer(question, documents)
+    result = maybe_answer(question, documents)
 
     polished_answer, polish_state = None, None
-    if polish_config is not None:
+    if result is not None and polish_config is not None:
         if result.state == "RESOLVED":
             polished_answer, polish_state = run_polish(question, result, polish_config)
         else:

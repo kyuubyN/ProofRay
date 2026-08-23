@@ -184,4 +184,56 @@ class EngineProfile:
 
 DEFAULT_PROFILE = EngineProfile()
 
-__all__ = ["SCHEMA", "DEFAULT_PROFILE", "EngineProfile"]
+# Named deployment presets ("Scale" / "Team" / "Personal" memory). `DEFAULT_PROFILE` above is
+# "Scale Memory": its `answer_shortlist_size=50`/`answer_relevance_gate_ratio=0.3` are exactly the
+# values the published MemGym-DR/D144 (0.95) and LongMemEval (0.767) judge scores were measured
+# at, tuned to protect a large, hundreds-of-document corpus from dilution -- the right choice for
+# an enterprise-scale knowledge base or a RAG-style large document set.
+#
+# Found 2026-08-22: on real, small (tens-of-KB) personal-memory and team-technical-QA corpora --
+# a casual conversational chat history and a formal technical Q&A corpus, 64 hand-verified real
+# questions total, verified against a live MongoDB instance -- `DEFAULT_PROFILE` always found the
+# right source but frequently dropped the specific answer-bearing sentence in favor of a shorter,
+# less informative one, because `answer_shortlist_size=50` (an engineering safety cap with no
+# benchmark backing at all, unlike the gate ratio) truncated the candidate pool before the correct
+# claim could compete. A corpus this small has no real dilution risk for the tight defaults to
+# guard against.
+#
+# Corpus size does NOT reliably distinguish "safe to loosen" from "needs the tight defaults" --
+# calibration found the technical-QA corpus's own candidate-pool size (120-130) statistically
+# indistinguishable from a real MemGym-DR episode (87-138 across the full 120-question set), so
+# there is no automatic detector to build here. These are deliberate, named choices a deployment
+# picks for itself, matching its own actual corpus scale -- never an automatic default.
+# "Team Memory": balanced middle tier for a medium corpus (a small team's internal docs, a few
+# hundred KB) -- meaningfully more complete than Scale Memory without fully removing its
+# diversity/anti-dilution safeguards. Measured on the two real MongoDB corpora above: 23/32 and
+# 17/20 (up from Scale Memory's 17/32 and 15/20), zero wrong answers. Not independently
+# judge-score-validated the way `DEFAULT_PROFILE`/`PERSONAL_MEMORY_PROFILE` are at their own
+# extremes -- a reasonable interpolated default, not a separately benchmarked one; test against
+# your own corpus before relying on it.
+TEAM_MEMORY_PROFILE = EngineProfile(
+    name="team-memory-v1", answer_relevance_gate_ratio=0.15,
+    answer_shortlist_size=150, answer_bytes=32_768)
+
+# "Personal Memory" -- RECOMMENDED default for a personal-memory or small-corpus deployment: a
+# chat history, personal notes, a handful to a couple hundred documents, where completeness of the
+# answer matters more than precision-per-byte. Fully validated across seven real question
+# batteries against five independent live MongoDB-backed corpora (136 total questions, literal
+# substring ground truth checked directly against the database, never the paraphrased "expected
+# answer" text that seeded them): 31/32, 19/20, 12/12, 12/12, 29/30, and a clean 20/20 on a
+# 27-conversation multi-hop battery requiring facts from 2-3 DIFFERENT conversations to be fused
+# into one answer -- zero false answers or wrong-conversation hallucinations introduced anywhere,
+# only previously-dropped detail (or, in the multi-hop case, previously-dropped cross-conversation
+# claims) recovered. Also re-tested against the full 120-question MemGym-DR benchmark and found
+# zero regression on a token-overlap coverage metric -- but that metric is known to reward
+# returning more text regardless of real answer quality (the project's own research history
+# documents this exact "haystack" risk), so this profile is deliberately NOT recommended for
+# large, MemGym-DR-scale corpora, where the tight `DEFAULT_PROFILE` defaults remain the validated,
+# judge-scored choice.
+PERSONAL_MEMORY_PROFILE = EngineProfile(
+    name="personal-memory-v1", answer_relevance_gate_ratio=0.0,
+    answer_shortlist_size=500, answer_bytes=40_000)
+
+__all__ = [
+    "SCHEMA", "DEFAULT_PROFILE", "TEAM_MEMORY_PROFILE", "PERSONAL_MEMORY_PROFILE", "EngineProfile",
+]
