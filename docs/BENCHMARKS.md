@@ -252,7 +252,7 @@ remaining gap above 0.72 is better explained by evidence still being
 incomplete at this budget, or by the reader's difficulty composing evidence
 it already has into one correct answer. An oracle-style ceiling test (a
 reader handed the literal correct answer directly) scored above 0.97,
-confirming the reading contract itself is not the bottleneck — but that
+confirming the reading contract itself is not the bottleneck, but that
 alone did not distinguish the two remaining explanations. A later causal
 test settled it directly: taking the same reader's evidence packet from its
 real, as-selected coverage up to a gold-directed oracle's coverage, at the
@@ -260,7 +260,7 @@ identical byte budget, did **not** move the judge score in a statistically
 distinguishable way (paired delta +0.0194, 95% CI [-0.0484, +0.1000],
 crosses zero), confirmed by a working negative control that did move the
 score in the expected direction. **Synthesis, not coverage, is the
-bottleneck** — a reader with sufficient evidence still struggles to combine
+bottleneck**: a reader with sufficient evidence still struggles to combine
 multiple facts into one correct answer; retrieving more of the right
 evidence does not, by itself, close the remaining gap. This reframes what
 further work on this pilot should target: the consumer-side reading
@@ -371,7 +371,7 @@ The existing D145 error ledger contains 28/120 failures: 10 single-session scala
 readouts and 18 multi-session COUNT/SUM/duration aggregations. With its binary judge, at least 16 of
 those 28 must be repaired without regressions to reach 0.90. This is exactly what the
 proof-convergent execution line at the top of this document targets (typed operands and
-completeness, not another retrieval reranker) — see
+completeness, not another retrieval reranker); see
 [Proof-convergent execution development audit](#proof-convergent-execution-development-audit)
 for that attempt's own result: a real, measured improvement on the same consumed-development
 episodes, but one that has not yet transferred to an untouched holdout (see the "Untouched
@@ -728,7 +728,7 @@ development data, not holdouts); and (b) had exactly one fresh, genuinely untouc
 opened against it — the official `UD_Portuguese-CINTIL` test split — which **failed** the
 promotion bar by a narrow margin: 92.39% positive accuracy (clears >=90%), **94.44% selective
 precision (misses the >=95% bar by 0.56pp)**, 100% negative abstention (clears the bar). Ten of
-the fourteen positive misses on that holdout were resolved-but-wrong, not honest abstentions — a
+the fourteen positive misses on that holdout were resolved-but-wrong, not honest abstentions: a
 per-sentence diagnosis found the same small family of shapes across most of them, not ten
 unrelated failures: a noun embedded inside a genitive/oblique prepositional phrase, a clitic
 pronoun, or an adjacent determiner/adverb winning the role over the true head. No later
@@ -765,8 +765,8 @@ not be projected onto the untyped evidence path.
 ## Real-world `HorizonAnswerEngine` validation: five live corpora, 136 hand-verified questions
 
 Distinct from every result above (all measured against public research benchmarks with published
-gold answers), this validates the actual shipped `HorizonAnswerEngine` — the same code path
-`api/server.py` and `api/mcp_server.py` expose — against real conversational data the project
+gold answers), this validates the actual shipped `HorizonAnswerEngine` (the same code path
+`api/server.py` and `api/mcp_server.py` expose) against real conversational data the project
 had never seen before, queried live from a running MongoDB instance. Ground truth for every
 question was verified directly against the literal database text, never against the tester's own
 paraphrase of it, after two early false negatives (a number written differently, a missing accent)
@@ -774,8 +774,8 @@ made that discipline necessary.
 
 **What this found.** `DEFAULT_PROFILE` (tuned and judge-validated for the large-corpus MemGym-DR/
 LongMemEval benchmarks above) reliably located the right source document on a small, personal-
-scale corpus, but frequently dropped the one sentence carrying the concrete answer — a number, a
-name, a specific detail — in favor of a shorter, less specific competing sentence. Root-caused to
+scale corpus, but frequently dropped the one sentence carrying the concrete answer (a number, a
+name, a specific detail) in favor of a shorter, less specific competing sentence. Root-caused to
 `EngineProfile.answer_shortlist_size=50`: an engineering safety cap with no benchmark evidence
 behind it (unlike `answer_relevance_gate_ratio`, which a 2026-08-19 MemGym-DR sweep had already
 validated), too tight for a corpus with no real dilution risk to guard against.
@@ -784,8 +784,8 @@ validated), too tight for a corpus with no real dilution risk to guard against.
 |---|---:|---:|---:|---:|
 | PT-BR casual chat/slang (52 conversations) | 32 | 17/32 | 23/32 | **31/32** |
 | PT-BR formal technical Q&A, round 1 (typo-laden CS/physics/biology) | 20 | 15/20 | 17/20 | **19/20** |
-| PT-BR formal technical Q&A, round 2 (harder/ambiguous) | 12 | 12/12 | — | 12/12 |
-| PT-BR formal technical Q&A, round 3 (noisier still) | 12 | 12/12 | — | 12/12 |
+| PT-BR formal technical Q&A, round 2 (harder/ambiguous) | 12 | 12/12 | n/a | 12/12 |
+| PT-BR formal technical Q&A, round 3 (noisier still) | 12 | 12/12 | n/a | 12/12 |
 | EN Gen-Z slang/memes (50 conversations, incl. cross-lingual PT queries about EN content) | 30 | 20/30 | 24/30 | **29/30** |
 | EN Gen-Z slang, multi-hop/evolving memory (+27 chained conversations, 127 total) | 20 | 15/20 | 18/20 | **20/20** |
 | **Total** | **136** | **91/136** | *(not run on every corpus)* | **123/136** |
@@ -805,17 +805,17 @@ flat pool of routed, verified claims and renders whichever survive the shortlist
 budget side by side. That turned out to be sufficient: two or three claims from different source
 conversations only need to each individually clear routing and verification to end up rendered
 together in the same answer. The only failure mode was the same shortlist/budget competition
-already diagnosed above, not a missing architectural capability — `PERSONAL_MEMORY_PROFILE`
+already diagnosed above, not a missing architectural capability: `PERSONAL_MEMORY_PROFILE`
 resolved it to a clean 20/20.
 
 **Why this isn't promoted to a new default, and why no single automatic detector replaces
 picking a preset.** The loosened settings were also re-swept against the full 120-question
-MemGym-DR benchmark and showed no regression on a token-overlap coverage proxy — but that
+MemGym-DR benchmark and showed no regression on a token-overlap coverage proxy, but that
 specific metric is already documented above (Composer judge-scored pilot) as capable of rewarding
 a larger, less-precise evidence dump, so this is not read as a safety proof at that scale.
 Calibration also found corpus size does not reliably separate "safe to loosen" from "needs the
 tight defaults": a real technical-QA corpus's own candidate-pool size measured statistically
 indistinguishable from a real MemGym-DR episode. Both findings are why three separate named
 presets ship (`DEFAULT_PROFILE` / `TEAM_MEMORY_PROFILE` / `PERSONAL_MEMORY_PROFILE`, see
-[Architecture](ARCHITECTURE.md#answer-engine)) rather than one adaptively-tuned default —
+[Architecture](ARCHITECTURE.md#answer-engine)) rather than one adaptively-tuned default:
 an operator picks the preset matching their own deployment's real scale.

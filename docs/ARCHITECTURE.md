@@ -35,14 +35,14 @@ A few named theories carry most of the actual engineering weight:
 
 - **HSSD (Sufficient-Statistic Decoder).** The core reframing behind everything above: a question
   is compiled into an *operation* (`LOOKUP`, `COUNT_DISTINCT`, `SUM`, `INTERVAL`, `EXPLAIN_CAUSE`,
-  ...) plus its *operands* — and, critically, a set of non-compensable **obligations** (role,
+  ...) plus its *operands*, and, critically, a set of non-compensable **obligations** (role,
   clock, unit, cause, identity, completeness) that are checked separately from ordinary topical
   relevance. A claim can be the most relevant sentence in the corpus and still fail an obligation;
   when that happens, the operation does not silently execute on a best guess, it abstains. This is
   the same "obligation vs. relevance" distinction `ClaimGenerator`'s contradiction channel and
   `proof_dossier`'s anchor/specificity bonuses already apply in practice, described above.
 - **D45 (authorized semantic hypergraph).** Every extracted claim carries its span, provenance,
-  role, polarity, modality and clock as distinct, non-mergeable properties — a claim is never
+  role, polarity, modality and clock as distinct, non-mergeable properties. A claim is never
   quietly collapsed with a paraphrase or a contradicting restatement just because they're
   topically close.
 - **Sigma-PBA (binding propagation calculus).** Bindings between typed facts only ever propagate
@@ -59,7 +59,7 @@ whether the same discipline can be expressed as a deterministic reinterpretation
 own query/key/value dataflow, rather than as a separate symbolic pipeline bolted alongside it:
 **Proof Attention** replaces a learned `Q`/`K`/`V` and softmax-weighted averaging with an HSSD
 obligation as `Q`, a D45 typed tuple as `K`, an exact attested span as `V`, and a
-provenance-semiring join in place of floating-point averaging — heads become typed proof
+provenance-semiring join in place of floating-point averaging. Heads become typed proof
 channels, and only an answer invariant across every complete, surviving interpretation is ever
 returned. This sits on top of two supporting layers: **H-DEM** (Deterministic Epistemic Machine),
 an explicit possible-world engine that computes the provably certain answer over a finite set of
@@ -73,7 +73,7 @@ checked for exact equivalence against Sigma-PBA on generated, structured data, a
 H-FMRL/H-DEM/H-PLT bridge (H-FMRL supplies typed per-token morphological alternatives) is already
 the mechanism behind the opt-in Portuguese atomic-relation pack described below. It is **not**
 validated as a general open-language accuracy win, is not a drop-in replacement for a trained
-Transformer, and is not a new core engine — every one of these is either a bounded, per-language
+Transformer, and is not a new core engine. Every one of these is either a bounded, per-language
 pack with its own explicit holdout gate, or a candidate architecture still gated on further
 evidence. See [Benchmarks](BENCHMARKS.md#what-is-not-yet-solved) for exactly what has and hasn't
 cleared that bar so far, including refuted intermediate designs this line already tried and
@@ -183,8 +183,8 @@ topically related sentence.
 
 `dedup_threshold`'s own plain Jaccard-similarity check has a more elaborate history than its size
 suggests, worth naming as an example of how this project promotes a mechanism. An earlier,
-considerably more sophisticated design — a calibrated tournament between competing merge tactics,
-reusing an orphaned reliability-scoring strategist from this project's own earlier research —
+considerably more sophisticated design (a calibrated tournament between competing merge tactics,
+reusing an orphaned reliability-scoring strategist from this project's own earlier research)
 reached the same measured coverage gain as this plain dedup check, exactly, on the same held-out
 episodes. Per this project's own discipline (demote to the honest, simpler mechanism whenever a
 plain control ties a fancier one, rather than keep the more impressive name), the calibrated
@@ -210,17 +210,17 @@ verified evidence rather than silently dropping the offending item. See
 Everything above (routing, verification, evidence budgets, HSSD) is machinery a caller could use
 directly, but most real consumers want one call that takes a question plus a document set and
 returns a verified answer. `HorizonAnswerEngine.answer(question, documents)` is that call: it
-routes, verifies, budgets and renders in one pass, returning an `AnsweredResult` — `state`
+routes, verifies, budgets and renders in one pass, returning an `AnsweredResult` with `state`
 (`"RESOLVED"` or an abstain-state name; a confident wrong answer never happens, the engine
-declines instead), `answer_text`/`evidence_text` (the composed, verified evidence — the same text
+declines instead), `answer_text`/`evidence_text` (the composed, verified evidence: the same text
 under two names, `answer_text` kept for backwards compatibility), `direct_answer` (the separate,
 optional minimal-answer channel described above), and telemetry (`documents_considered`,
 `verified_candidates`, `answer_bytes`, `chosen_size`) a caller can use to reason about how close a
 corpus is to the engine's own internal budgets.
 
-Every tunable value the engine consumes — claim-routing channel weights, acquisition/answer byte
+Every tunable value the engine consumes (claim-routing channel weights, acquisition/answer byte
 budgets, the shortlist size and relevance gate the final answer is picked from, the answer
-selector, HPPS exploration reserve — lives in one frozen `EngineProfile` dataclass, passed in at
+selector, HPPS exploration reserve) lives in one frozen `EngineProfile` dataclass, passed in at
 construction (`HorizonAnswerEngine(profile=..., scope_id=..., session_id=...)`), not scattered
 across call sites. A profile is just data: `EngineProfile.save()`/`.load()` round-trip it through
 JSON, so retuning a deployment never means touching code.
@@ -228,16 +228,16 @@ JSON, so retuning a deployment never means touching code.
 Three named presets ship, because the right values genuinely differ by deployment scale, and
 corpus size alone does not reliably indicate which one applies (measured directly: a real,
 small technical-QA corpus's own candidate-pool size was statistically indistinguishable from a
-large benchmark episode's) — so this is a deliberate, named choice an operator makes, not
+large benchmark episode's), so this is a deliberate, named choice an operator makes, not
 something the engine infers automatically:
 
-- **`DEFAULT_PROFILE`** ("Scale Memory") — tuned for a large corpus (hundreds of documents and
+- **`DEFAULT_PROFILE`** ("Scale Memory"): tuned for a large corpus (hundreds of documents and
   up); the exact configuration behind this project's own published judge-scored results (see
   [Benchmarks](BENCHMARKS.md)), deliberately conservative about how much evidence competes for
   the final answer so a huge corpus never dilutes a precise one.
-- **`TEAM_MEMORY_PROFILE`** ("Team Memory") — a measured middle ground for a medium corpus (a
+- **`TEAM_MEMORY_PROFILE`** ("Team Memory"): a measured middle ground for a medium corpus (a
   small team's internal docs).
-- **`PERSONAL_MEMORY_PROFILE`** ("Personal Memory") — favors completeness over precision-per-byte
+- **`PERSONAL_MEMORY_PROFILE`** ("Personal Memory"): favors completeness over precision-per-byte
   for a small, personal-scale corpus, where the default's own anti-dilution caution can drop the
   one sentence carrying the concrete answer. Recommended starting point for that class of
   deployment; see [Benchmarks](BENCHMARKS.md#real-world-horizonanswerengine-validation-five-live-corpora-136-hand-verified-questions)
@@ -246,7 +246,7 @@ something the engine infers automatically:
 ## Deployment surfaces (`api/`)
 
 `api/` is the packaged, runnable surface that wraps `HorizonAnswerEngine` for an actual
-deployment — HTTP and MCP transports, a shared choke point, and the one place model-facing
+deployment: HTTP and MCP transports, a shared choke point, and the one place model-facing
 network calls are allowed to originate from. It is a separate concern from the AGPL core: see
 [Licensing policy](LICENSE_POLICY.md) for why this split exists and what it does and doesn't
 mean for licensing.
@@ -254,7 +254,7 @@ mean for licensing.
 Both transports share `api/_engine_bridge.py` rather than each reimplementing request handling:
 `maybe_answer(question, documents)` is the one function both `api/server.py` (`POST
 /v1/answers`) and `api/mcp_server.py` (the `horizon_ask` tool) call, so a behavior added at this
-layer — activation gating, request validation, the optional polish step — never has to be kept in
+layer (activation gating, request validation, the optional polish step) never has to be kept in
 sync across two copies.
 
 **Activation mode** decides *when* the engine runs at all, as deploy-time configuration
@@ -269,7 +269,7 @@ keyword mode is for a deployment with no LLM in the loop making that call.
 **Polish** (`OpenAICompatiblePolishAdapter`, `horizon_memory.adapters`) is the one place a model
 call can happen, and it is structurally incapable of deciding facts: it receives only Horizon's
 own already-verified `answer_text`, is instructed not to add/remove/invent content, and its output
-is a separate, clearly-labeled `polished_answer` field that never replaces `answer_text` — a
+is a separate, clearly-labeled `polished_answer` field that never replaces `answer_text`. A
 failed or errored polish call degrades to the unmodified verified answer rather than affecting it.
 The destination endpoint and credential-holding env-var name are read only from this process's own
 environment (`HORIZON_POLISH_BASE_URL`/`HORIZON_POLISH_API_KEY_ENV`), never accepted as request
@@ -284,7 +284,7 @@ The HTTP transport also requires a bearer token (`machine_auth.py`) on every req
 health check, and rate-limits every request (`rate_limit.py`) with a token bucket that refills
 continuously rather than resetting on a fixed clock tick. The token is generated once on first run,
 persisted locally, and additionally bound to a best-effort OS machine identifier recomputed on
-every request, so a copied credentials file stops working on a different machine — a real, but
+every request, so a copied credentials file stops working on a different machine: a real, but
 deliberately narrow, property scoped to "one operator, one machine," not multi-tenant auth. MCP
 (stdio transport, spawned directly by the local client) deliberately carries neither mechanism:
 there is no network hop for a token or rate limit to protect there. See
@@ -333,11 +333,11 @@ the untouched GUM test reached 93.90% positive accuracy and 97.47% selective pre
 covers only atomic one-token `nsubj+obj` probes under its finite grammar; PT/ZH and phrase/multihop
 generalization remain research work.
 
-### Promoted deterministic PT atomic relation pack — reachable, tested, not holdout-confirmed
+### Promoted deterministic PT atomic relation pack: reachable, tested, not holdout-confirmed
 
 `portuguese_atomic_relations.py` shares the same language-neutral surface kernel as the EN pack
 above, but Portuguese's closed-class morphology (clitics, contractions, prepositional governance)
-is too rich for a raw-token skip list — an earlier version tried exactly that, tuned to 100% on one
+is too rich for a raw-token skip list. An earlier version tried exactly that, tuned to 100% on one
 development treebank, and then failed on every fresh test split it was pointed at. Its replacement
 is a genuine typed constraint-satisfaction resolver, reusing the same theoretical stack named
 above: **H-FMRL** supplies typed per-token morphological alternatives, **H-DEM**/**H-DCA** turn
@@ -346,13 +346,13 @@ and **H-PLT** resolves a role only when every complete interpretation world agre
 
 `RoleReadResult`, `read_pt_atomic_relation`, `resolve_pt_surface_role` and
 `OpenTextHorizonMemory.answer_atomic_relation_pt` are exported from the stable top-level
-`horizon_memory` namespace, not gated behind `horizon_memory.research` — a deliberate product
-decision, made explicitly before the pack cleared the same bar as its EN counterpart. **This is
-the honest, stated difference from the EN pack above**: the EN pack was wired into the stable
-namespace only after clearing a fresh, never-touched holdout (UD English-GUM, 95.12% positive,
-97.50% selective). The PT pack's own first fresh holdout (`UD_Portuguese-CINTIL` test) **failed
-its promotion bar by a narrow margin** — 92.39% positive accuracy clears the >=90% gate, but
-94.44% selective precision misses the >=95% gate by 0.56pp. Treat the PT pack as reachable and
+`horizon_memory` namespace, not gated behind `horizon_memory.research`. This is a deliberate
+product decision, made explicitly before the pack cleared the same bar as its EN counterpart.
+**This is the honest, stated difference from the EN pack above**: the EN pack was wired into the
+stable namespace only after clearing a fresh, never-touched holdout (UD English-GUM, 95.12%
+positive, 97.50% selective). The PT pack's own first fresh holdout (`UD_Portuguese-CINTIL` test)
+**failed its promotion bar by a narrow margin**: 92.39% positive accuracy clears the >=90% gate,
+but 94.44% selective precision misses the >=95% gate by 0.56pp. Treat the PT pack as reachable and
 useful today, not as evidence it has reached the same standing as the EN pack; see
 [Benchmarks](BENCHMARKS.md#pt-atomic-relation-pack--early-raw-token-adapter-rejected-h-fmrlh-demh-plt-bridge-now-in-core-opt-in-holdout-confirmation-failed-narrowly)
 for the full numbers and per-error diagnosis.
@@ -363,12 +363,12 @@ Two different opt-in facades extend the authority boundary above to input that i
 `RouteDocument` a caller built by hand, for two different input shapes.
 
 **`OpenTextHorizonMemory`** is for arbitrary, unstructured text. It records each input document
-under the weakest predicate that is universally true of it — a sealed source contains this exact
-`surface_document` span — inventing no entity, relation or meaning at ingestion time. Verified
+under the weakest predicate that is universally true of it: a sealed source contains this exact
+`surface_document` span, inventing no entity, relation or meaning at ingestion time. Verified
 documents then enter the same deterministic route/verify/compose path described above; the two
 atomic-relation packs' `answer_atomic_relation_en`/`_pt` entry points, and the CJK/PT-BR memory-
 delivery transfer results in [Benchmarks](BENCHMARKS.md), all run through this facade. It is
-deliberately not sold as text understanding — it makes exactly one claim (this span exists,
+deliberately not sold as text understanding: it makes exactly one claim (this span exists,
 unmodified, in this source) and lets everything downstream stay proof-carrying on top of that.
 
 **The authorized typed sidecar** (`docs/TYPED_SIDECAR.md`) is for the opposite shape: a caller who
@@ -376,7 +376,7 @@ already has structured facts (a database row, a tool result, an event stream) an
 to schema/rule identity, source microcitations, capabilities, lifecycle and completeness proofs
 without inventing an extraction step at all. Where the open-text facade's job is turning
 unstructured text into the weakest true claim, the sidecar's job is attaching a strong, explicit
-authority contract to input that is already structured — the two are complementary entry points
+authority contract to input that is already structured. The two are complementary entry points
 into the same durable/evidence/proof core, not competing designs.
 
 ## Research graduation
@@ -408,8 +408,8 @@ assumed, with mixed results across language and noise conditions; see
 
 `narrative_composition.py` is a second, independent opt-in mechanism in the same namespace: it
 composes multiple already-linked typed facts (from `TypedCausalExecutor`) into one coherent
-rendered narrative — ordering by cause/contrast/sequence relations read directly off each fact's
-own fields, never inventing a relation — instead of answering only one atomic fact at a time. It
+rendered narrative, ordering by cause/contrast/sequence relations read directly off each fact's
+own fields and never inventing a relation, instead of answering only one atomic fact at a time. It
 is exported but **never wired into any default routing/ranking/answer path**: a caller must
 already hold correctly-linked typed facts and invoke it explicitly. Entity/fiber linking from raw
 unstructured text (deciding which facts describe the same real-world thing in the first place)
@@ -477,7 +477,7 @@ raising a reader's actual evidence coverage at the identical byte budget did
 not move the judge score in a statistically distinguishable way, confirmed
 by a working negative control. The remaining gap is explained by the
 reader's own difficulty composing multiple facts it already has into one
-correct answer, not by missing evidence — see
+correct answer, not by missing evidence: see
 [Benchmarks](BENCHMARKS.md#reading-comprehension-pilot-program) for the exact
 numbers. This reframes further work on this pipeline toward the consumer-side
 reading contract or reader capacity, not toward more retrieval/ranking work.

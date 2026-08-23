@@ -24,7 +24,7 @@ leaves your computer unless you choose to connect one yourself.
 
 The parts of Horizon that read and understand natural-language questions have so far been
 carefully tested in **English and Portuguese** only. Other languages, starting with Chinese, are
-planned but not validated yet — see [Roadmap](ROADMAP.md).
+planned but not validated yet; see [Roadmap](ROADMAP.md).
 
 Horizon grew out of a multi-year research project that tried many different approaches to AI
 memory and kept only the ones that survived real testing. If you're curious about that history,
