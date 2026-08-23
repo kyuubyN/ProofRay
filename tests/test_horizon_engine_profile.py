@@ -123,6 +123,14 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             EngineProfile(answer_relevance_gate_ratio=-0.1)
 
+    def test_rejects_negative_completeness_bonus(self):
+        with self.assertRaises(ValueError):
+            EngineProfile(answer_completeness_bonus=-0.1)
+
+    def test_completeness_bonus_defaults_to_none(self):
+        self.assertIsNone(EngineProfile().answer_completeness_bonus)
+        EngineProfile(answer_completeness_bonus=0.0)  # zero is a valid, explicit opt-in
+
     def test_rejects_empty_length_tiers(self):
         with self.assertRaises(ValueError):
             EngineProfile(answer_min_length_tiers=())
@@ -188,6 +196,14 @@ class NamedPresetTests(unittest.TestCase):
         self.assertEqual(DEFAULT_PROFILE.answer_shortlist_size, 50)
         self.assertEqual(DEFAULT_PROFILE.answer_relevance_gate_ratio, 0.3)
         self.assertEqual(DEFAULT_PROFILE.answer_bytes, 24_576)
+        self.assertIsNone(DEFAULT_PROFILE.answer_completeness_bonus)
+
+    def test_team_and_personal_memory_carry_the_calibrated_completeness_bonus(self):
+        # Added 2026-08-23 -- calibrated on a disjoint half of two fresh external HuggingFace
+        # corpora, reconfirmed on the other, held-out half; see engine_profile.py's own comment
+        # and docs/BENCHMARKS.md for the full numbers.
+        self.assertEqual(TEAM_MEMORY_PROFILE.answer_completeness_bonus, 0.5)
+        self.assertEqual(PERSONAL_MEMORY_PROFILE.answer_completeness_bonus, 0.5)
 
     def test_presets_round_trip_through_file(self):
         for profile in (TEAM_MEMORY_PROFILE, PERSONAL_MEMORY_PROFILE):

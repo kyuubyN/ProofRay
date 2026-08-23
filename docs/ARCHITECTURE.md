@@ -243,6 +243,19 @@ something the engine infers automatically:
   deployment; see [Benchmarks](BENCHMARKS.md#real-world-horizonanswerengine-validation-five-live-corpora-136-hand-verified-questions)
   for the real-corpus validation behind that recommendation.
 
+The final answer-selection step (`_pick_clean_answer`) also carries an opt-in
+`answer_completeness_bonus` (`None` by default, preserving the historical behavior byte-for-byte).
+Found necessary against a real external corpus (raw book text windowed into fixed-length records,
+so genuinely relevant claims are routinely sentence fragments): the historical selector hard-gates
+candidates by "looks like a complete sentence" one tier at a time, which could exclude the single
+most relevant claim outright rather than merely rank it lower. The opt-in instead folds that same
+signal into the existing greedy score as an additive bonus, matching the bonus-not-gate pattern
+already used for `anchor_bonus`/`specificity_bonus` elsewhere in this codebase. `TEAM_MEMORY_
+PROFILE`/`PERSONAL_MEMORY_PROFILE` ship with it calibrated on; `DEFAULT_PROFILE` (and the
+`full_dossier`-rendering profile behind the published judge-scored results, which bypasses this
+selector entirely) are unaffected. See [Benchmarks](BENCHMARKS.md#two-independent-external-huggingface-corpora-a-real-reproducible-answer-selection-bug-found-and-fixed)
+for the bug this fixes and the calibration evidence.
+
 ## Deployment surfaces (`api/`)
 
 `api/` is the packaged, runnable surface that wraps `HorizonAnswerEngine` for an actual

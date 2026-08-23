@@ -11,6 +11,7 @@ the greedy diversity pick ever runs.
 """
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
@@ -115,6 +116,74 @@ class AdaptiveLengthTests(unittest.TestCase):
         self.assertEqual(len(result.answer_lines), 1,
                          "a question with exactly one genuinely relevant claim should not "
                          "be padded with unrelated content to reach a fixed count")
+
+
+class CompletenessBonusRegressionTests(unittest.TestCase):
+    """`answer_completeness_bonus` opt-in fix (2026-08-23) -- found on two fresh external
+    HuggingFace corpora (a Brazilian-Portuguese legislative/news corpus and an English
+    public-domain-fiction corpus split into fixed-length windows): `_pick_clean_answer`'s tiered
+    fallback can exclude the single highest-relevance claim outright, purely for not "looking like
+    a complete sentence" (starting lowercase / lacking a trailing period, as a genuine dialogue or
+    windowed-text fragment routinely does), and never falls back to a looser tier because the
+    stricter tier already returned something non-empty from a much less relevant, but
+    complete-looking, claim.
+    """
+
+    def setUp(self):
+        self.fragment_doc = _doc(
+            1, "the Zorbex compound reacts violently with chlorine gas at room "
+               "temperature, the Zorbex compound reacts violently with chlorine gas "
+               "at room temperature")
+        self.complete_but_generic_doc = _doc(
+            2, "The laboratory safety manual describes general storage procedures "
+               "for various chemical compounds kept in the facility.")
+        self.documents = (self.fragment_doc, self.complete_but_generic_doc)
+        self.question = "How does the Zorbex compound react with chlorine gas?"
+
+    def test_default_profile_reproduces_the_known_gap(self):
+        # DEFAULT_PROFILE leaves `answer_completeness_bonus=None` -- the historical tiered
+        # cascade stays byte-for-byte unchanged, so this specific known gap still reproduces here.
+        # This test exists to catch an accidental behavior change to the *default* path, not to
+        # bless the gap itself.
+        engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE)
+        result = engine.answer(self.question, self.documents)
+        self.assertEqual(result.state, "RESOLVED")
+        texts = [line.text for line in result.answer_lines]
+        self.assertFalse(any("Zorbex" in t for t in texts),
+                          "DEFAULT_PROFILE's behavior changed -- update this test deliberately, "
+                          "not by accident, if the tiered cascade itself was intentionally revised")
+
+    def test_completeness_bonus_recovers_the_highest_relevance_fragment(self):
+        profile = dataclasses.replace(
+            DEFAULT_PROFILE, name="completeness-bonus-test", answer_completeness_bonus=0.5)
+        engine = HorizonAnswerEngine(profile=profile, scope_id=SCOPE)
+        result = engine.answer(self.question, self.documents)
+        self.assertEqual(result.state, "RESOLVED")
+        texts = [line.text for line in result.answer_lines]
+        self.assertTrue(any("Zorbex" in t for t in texts),
+                         "the highest-relevance claim should win once completeness is a bonus, "
+                         "not a hard gate")
+
+    def test_completeness_bonus_still_respects_the_relevance_gate(self):
+        # A tight relevance gate (DEFAULT_PROFILE's own 0.3) must still exclude a genuinely
+        # irrelevant claim even under the new selector -- the fix must not turn into "always
+        # include everything regardless of relevance."
+        irrelevant_doc = _doc(
+            3, "A totally unrelated municipal water treatment report describes "
+               "infrastructure upgrades scheduled for next fiscal year.")
+        profile = dataclasses.replace(
+            DEFAULT_PROFILE, name="completeness-bonus-gate-test", answer_completeness_bonus=0.5)
+        engine = HorizonAnswerEngine(profile=profile, scope_id=SCOPE)
+        result = engine.answer(
+            self.question, (self.fragment_doc, self.complete_but_generic_doc, irrelevant_doc))
+        texts = [line.text for line in result.answer_lines]
+        self.assertFalse(any("water treatment" in t for t in texts),
+                          "an irrelevant claim must still be excluded by the relevance gate")
+
+    def test_bonus_none_is_the_dataclass_default(self):
+        # Every named profile constant must default this field to None unless a deployment
+        # explicitly opts in -- guards against a future edit accidentally flipping the default.
+        self.assertIsNone(DEFAULT_PROFILE.answer_completeness_bonus)
 
 
 if __name__ == "__main__":

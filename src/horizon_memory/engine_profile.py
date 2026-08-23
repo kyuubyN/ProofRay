@@ -77,6 +77,23 @@ class EngineProfile:
     # does not need to pre-decide which single fact matters most.
     answer_shortlist_size: int = 50
     answer_relevance_gate_ratio: float = 0.3
+    # `None` (default) preserves the historical hard-gated tier cascade in `_pick_clean_answer`
+    # byte-for-byte: a claim that fails a tier's `require_sentence`/`min_length` check is excluded
+    # from that tier's candidate pool entirely, and the cascade only advances to a looser tier when
+    # the current one is *empty*. Real-corpus testing (2026-08-23, a 120-document HuggingFace
+    # public-domain fiction corpus split into fixed 500-byte windows, so most genuinely relevant
+    # spans are sentence fragments) found this can make the cascade stop at tier one even when its
+    # own best surviving candidate is far less relevant than a fragment the tier just excluded --
+    # confirmed via `ClaimGenerator` scoring the fragment 1.0 vs. the surviving sentence's 0.01,
+    # yet the sentence still winning because the fragment was never in tier one's candidate pool at
+    # all. Setting this to a non-negative float switches to a single-pass selector: every claim
+    # clearing one loose length floor stays eligible (no hard sentence-shape exclusion), and
+    # "looks like a complete sentence" becomes an *additive* bonus inside the existing greedy gain
+    # formula instead of a gate -- matching the bonus-not-gate pattern already used successfully
+    # elsewhere in this file (`anchor_bonus`, `specificity_bonus`) rather than the hard-gate pattern
+    # this project's own history has repeatedly found regresses recall (e.g. the ZH
+    # marker-as-hard-gate correction in `supersession_collapse.py`).
+    answer_completeness_bonus: float | None = None
     answer_selector: str = "diversity"
     # `clean` is the historical API surface. `full_dossier` returns the complete verified
     # composed packet under `answer_bytes`, which is the surface the D144 MemGym result judged.
@@ -122,6 +139,8 @@ class EngineProfile:
             raise ValueError("answer_shortlist_size must be positive")
         if not 0.0 <= self.answer_relevance_gate_ratio <= 1.0:
             raise ValueError("answer_relevance_gate_ratio must be in [0,1]")
+        if self.answer_completeness_bonus is not None and self.answer_completeness_bonus < 0:
+            raise ValueError("answer_completeness_bonus must be non-negative")
         if self.answer_selector not in ("diversity", "hpps"):
             raise ValueError("answer_selector must be 'diversity' or 'hpps'")
         if self.answer_render_mode not in ("clean", "full_dossier"):
@@ -153,6 +172,7 @@ class EngineProfile:
             "dedup_threshold": self.dedup_threshold,
             "answer_shortlist_size": self.answer_shortlist_size,
             "answer_relevance_gate_ratio": self.answer_relevance_gate_ratio,
+            "answer_completeness_bonus": self.answer_completeness_bonus,
             "answer_selector": self.answer_selector,
             "answer_render_mode": self.answer_render_mode,
             "priority_aware_merge": self.priority_aware_merge,
@@ -211,9 +231,21 @@ DEFAULT_PROFILE = EngineProfile()
 # judge-score-validated the way `DEFAULT_PROFILE`/`PERSONAL_MEMORY_PROFILE` are at their own
 # extremes -- a reasonable interpolated default, not a separately benchmarked one; test against
 # your own corpus before relying on it.
+#
+# `answer_completeness_bonus=0.5` added 2026-08-23 after a real, reproducible bug: two fresh
+# external HuggingFace corpora (120 Brazilian-Portuguese legislative/news questions, 120 English
+# public-domain-fiction questions, neither previously seen by this project) found the historical
+# hard-gated tier cascade in `_pick_clean_answer` could exclude the single most relevant claim
+# outright just for not "looking like a complete sentence" -- confirmed via direct `ClaimGenerator`
+# inspection (a 1.0-relevance fragment excluded in favor of a 0.01-relevance full sentence). 0.5 was
+# chosen from a calibration sweep (odd-indexed half of each corpus, values 0.3/0.5/1.0 all landed on
+# the identical plateau -- not a hand-picked constant) and reconfirmed on the even-indexed holdout
+# half never touched during calibration, plus a zero-regression spot-check against the same three
+# already-validated MongoDB corpora below (byte-identical answers before/after). See
+# `docs/BENCHMARKS.md` for the full numbers.
 TEAM_MEMORY_PROFILE = EngineProfile(
     name="team-memory-v1", answer_relevance_gate_ratio=0.15,
-    answer_shortlist_size=150, answer_bytes=32_768)
+    answer_shortlist_size=150, answer_bytes=32_768, answer_completeness_bonus=0.5)
 
 # "Personal Memory" -- RECOMMENDED default for a personal-memory or small-corpus deployment: a
 # chat history, personal notes, a handful to a couple hundred documents, where completeness of the
@@ -230,9 +262,18 @@ TEAM_MEMORY_PROFILE = EngineProfile(
 # documents this exact "haystack" risk), so this profile is deliberately NOT recommended for
 # large, MemGym-DR-scale corpora, where the tight `DEFAULT_PROFILE` defaults remain the validated,
 # judge-scored choice.
+#
+# `answer_completeness_bonus=0.5` added 2026-08-23 -- same fix and calibration discipline as
+# `TEAM_MEMORY_PROFILE` above. On the two new external HuggingFace corpora (120 questions each,
+# right-document recovery measured by exact FactId attribution in the rendered answer, not a
+# proxy): the PT/legislative-news corpus moved 106/120 -> 110/120 and the EN/fiction corpus moved
+# 5/120 -> 119/120 -- the fiction corpus is exactly the shape (raw text windowed into fixed-length
+# records, so relevant spans are routinely fragments) that exposed the bug in the first place. Zero
+# regression on the five already-validated MongoDB corpora (byte-identical answers). See
+# `docs/BENCHMARKS.md` for the full numbers.
 PERSONAL_MEMORY_PROFILE = EngineProfile(
     name="personal-memory-v1", answer_relevance_gate_ratio=0.0,
-    answer_shortlist_size=500, answer_bytes=40_000)
+    answer_shortlist_size=500, answer_bytes=40_000, answer_completeness_bonus=0.5)
 
 __all__ = [
     "SCHEMA", "DEFAULT_PROFILE", "TEAM_MEMORY_PROFILE", "PERSONAL_MEMORY_PROFILE", "EngineProfile",

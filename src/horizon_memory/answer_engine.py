@@ -352,11 +352,20 @@ def _pick_clean_answer(chosen, relevance: dict, origin: dict, question: str,
     tier-fallback loop returns after tier one anyway (a non-empty pick stops the fallback). Real
     MemGym-DR claims are ordinary academic sentences, almost always well over 90 characters, so
     this has not been observed to matter on real data -- but it was reproducible with a
-    deliberately short synthetic claim. Not fixed here: `lab/runners/validate_answer_relevance_gate.py`
-    measures real coverage, which is the authoritative check for whether this narrow case is worth
-    a more invasive redesign (e.g. unioning candidates across tiers instead of an early-return
-    waterfall) -- fixing it on reasoning alone, without that evidence, risks the same class of
-    mistake the gate ratio itself is deliberately not guessing at."""
+    deliberately short synthetic claim.
+
+    2026-08-23: this narrow case was observed on real data after all -- a 120-document HuggingFace
+    public-domain fiction corpus (raw Project Gutenberg text windowed into fixed 500-byte records,
+    so genuinely relevant spans are routinely sentence fragments) made the tier-one cascade stop on
+    a claim scored 0.01 while a claim scored 1.0 sat excluded from that tier's own candidate pool.
+    `profile.answer_completeness_bonus` (default `None`, preserving this exact tiered cascade
+    byte-for-byte) opts into `_pick_relevance_weighted_answer` below, which keeps every claim
+    eligible and folds "looks like a complete sentence" into the existing greedy gain formula as an
+    additive bonus instead of a hard per-tier exclusion -- matching the bonus-not-gate pattern this
+    file already uses for `anchor_bonus`/`specificity_bonus` rather than redesigning the tier
+    cascade itself without the real-data evidence the module docstring above says this needs."""
+    if profile.answer_completeness_bonus is not None:
+        return _pick_relevance_weighted_answer(chosen, relevance, origin, question, profile)
     question_tokens = _content_words(question)
 
     def build_shortlist(min_length: int, require_sentence: bool):
@@ -422,6 +431,67 @@ def _pick_clean_answer(chosen, relevance: dict, origin: dict, question: str,
         if picked:
             return tuple(picked)
     return ()
+
+
+def _looks_like_complete_sentence(text: str, cjk: bool) -> bool:
+    """The same "is this a real, well-formed sentence" signal `_pick_clean_answer`'s tiers use as
+    a hard gate -- reused here as a boolean feeding an additive score bonus instead."""
+    if cjk:
+        return text.endswith(("。", "！", "？", "…"))
+    return text.endswith(".") and bool(text) and text[0].isupper()
+
+
+def _pick_relevance_weighted_answer(chosen, relevance: dict, origin: dict, question: str,
+                                    profile: EngineProfile) -> tuple[AnsweredClaim, ...]:
+    """`profile.answer_completeness_bonus` opt-in: one flat candidate pool instead of a tiered
+    cascade, so a highly relevant fragment can never be excluded outright just for not "looking
+    like a sentence" -- see `_pick_clean_answer`'s docstring for the real-corpus case this fixes.
+
+    Only the loosest configured `min_length` (never `require_sentence`) still filters candidates,
+    keeping a floor against genuinely trivial fragments while letting relevance decide the rest.
+    """
+    question_tokens = _content_words(question)
+    loosest_min_length = min(min_length for min_length, _ in profile.answer_min_length_tiers)
+
+    shortlist, seen_clean = [], set()
+    for claim in sorted(chosen, key=lambda c: -relevance.get(c.source_id, 0.0)):
+        text = claim.surface.strip()
+        normalized = " ".join(text.split()).lower()
+        if normalized in seen_clean:
+            continue
+        cjk = is_cjk(text)
+        effective_min_length = max(1, loosest_min_length // 3) if cjk else loosest_min_length
+        if len(text) < effective_min_length:
+            continue
+        seen_clean.add(normalized)
+        shortlist.append((claim, cjk))
+        if len(shortlist) >= profile.answer_shortlist_size:
+            break
+
+    if not shortlist:
+        return ()
+
+    top_relevance = relevance.get(shortlist[0][0].source_id, 0.0)
+    gate = top_relevance * profile.answer_relevance_gate_ratio
+    eligible = [(c, cjk) for c, cjk in shortlist if relevance.get(c.source_id, 0.0) >= gate]
+
+    def gain(claim, cjk, covered):
+        new_words = _content_words(claim.surface) - question_tokens - covered
+        complete_bonus = profile.answer_completeness_bonus \
+            if _looks_like_complete_sentence(claim.surface.strip(), cjk) else 0.0
+        return len(new_words) * (0.3 + relevance.get(claim.source_id, 0.0) + complete_bonus)
+
+    picked, covered = [], set()
+    while eligible:
+        best, best_cjk = max(eligible, key=lambda pair: gain(pair[0], pair[1], covered))
+        if gain(best, best_cjk, covered) <= 0:
+            break
+        picked.append(AnsweredClaim(
+            best.surface.strip(), origin.get(best.source_id, -1), best.source_id,
+            relevance.get(best.source_id, 0.0)))
+        covered |= _content_words(best.surface)
+        eligible.remove((best, best_cjk))
+    return tuple(picked)
 
 
 def _pick_hpps_answer(chosen, relevance: dict, origin: dict, question: str,

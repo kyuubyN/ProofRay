@@ -845,3 +845,90 @@ finding above that this preset renders more surviving claims side by side rather
 This is a single measurement on one machine and one question, not a statistical study; treat it as
 a concrete data point for what a real personal-memory-scale query costs, not a general latency
 claim.
+
+## Two independent external HuggingFace corpora: a real, reproducible answer-selection bug found and fixed
+
+Every result above (MongoDB included) uses conversational, chat-shaped source text. This section
+uses two genuinely different, previously-unseen public corpora sourced directly from HuggingFace:
+120 hand-written Brazilian-Portuguese questions (with realistic typos/abbreviations) against 120
+sampled items from a real legislative/news dataset (Brazilian Chamber of Deputies bulletins, police
+operations, Senate sessions), and 120 hand-written English questions against 120 sampled excerpts
+from a public-domain fiction corpus (19th/20th-century novels via Project Gutenberg). Question *i*
+maps 1:1 to sampled item *i* in both files, confirmed by direct inspection before any measurement.
+Ground truth is exact `FactId` attribution: `AnsweredResult.answer_lines` (what the rendered
+`answer_text` actually draws from) is checked against the one source document each question was
+written from — an automated, non-fuzzy signal, not a proxy metric.
+
+**A real bug was found, not just a low score.** The English fiction corpus turned out to be raw
+book text windowed into fixed 500-byte records by the dataset's own construction — every "document"
+routinely starts and ends mid-sentence. The very first full run found only 3/120 (default profile)
+and 5/120 (personal profile) questions correctly attributed to their source document; nearly every
+answer instead returned unrelated content that recurred *identically* across many different
+questions, a strong signal of a systematic defect rather than ordinary retrieval noise.
+
+Root-caused precisely, not guessed: `ClaimGenerator`'s own ranking was already correct (the true
+source document's claims scored 1.0/0.86/0.43 against a distractor document's 0.01-0.02 in a
+direct, isolated 2-document reproduction) — the defect was one stage later, in
+`_pick_clean_answer`'s tiered fallback (`answer_engine.py`). Its first tier only admits claims that
+"look like a complete sentence" (start uppercase, end with a period, at least 90 characters); a
+genuinely correct but fragment-shaped claim is excluded from that tier's candidate pool *entirely*,
+and the fallback to looser tiers only triggers when a tier is *empty* — so a single unrelated but
+complete-looking low-relevance sentence stopped the cascade before the correct fragment ever got a
+chance to compete. This is exactly the "known, narrow interaction" the code's own 2026-08-19
+docstring had already flagged as theoretical and unobserved on real data; this corpus is the first
+real (if artificially windowed) case where it actually fires.
+
+**The fix (`EngineProfile.answer_completeness_bonus`, `None` by default)** turns "looks like a
+complete sentence" from a hard per-tier exclusion into an additive scoring bonus inside the
+existing greedy selection formula — the same bonus-not-gate pattern this codebase already uses
+successfully for `anchor_bonus`/`specificity_bonus`, rather than the hard-gate pattern this
+project's own history has repeatedly found regresses recall (e.g. the Chinese
+marker-as-hard-gate correction in `supersession_collapse.py`). `DEFAULT_PROFILE` itself is left
+completely untouched (`answer_completeness_bonus` stays `None`, preserving the historical tiered
+cascade byte-for-byte) — the field is opt-in everywhere.
+
+**Calibrated, not guessed.** The 120 questions in each corpus were split into a calibration half
+(odd-indexed, 60 questions) and a holdout half (even-indexed, 60 questions, never touched while
+choosing a value). Sweeping 0.3/0.5/1.0 on the calibration half landed on an *identical* result at
+all three values for both profiles and both corpora — a flat plateau, not a hand-tuned point — so
+0.5 was picked (matching `specificity_bonus`'s own value elsewhere in this codebase) and confirmed
+on the untouched holdout half:
+
+| Profile | Corpus | Calibration (n=60) | Holdout (n=60) |
+|---|---|---:|---:|
+| `DEFAULT_PROFILE` | PT/legislative-news | 45→51 | 52→53 |
+| `DEFAULT_PROFILE` | EN/fiction | 1→45 | 2→45 |
+| `PERSONAL_MEMORY_PROFILE` | PT/legislative-news | 52→55 | 54→55 |
+| `PERSONAL_MEMORY_PROFILE` | EN/fiction | 1→60 | 4→59 |
+
+(`before→after` = right-source attribution out of 60, `answer_completeness_bonus=None`→`=0.5`.)
+
+**Full-corpus (all 120 questions each) result at the calibrated value**, right-source attribution
+out of 120, zero abstentions introduced in any cell:
+
+| Profile | PT/legislative-news | EN/fiction |
+|---|---:|---:|
+| `DEFAULT_PROFILE`, before fix | 97/120 | 3/120 |
+| `DEFAULT_PROFILE`, after fix | **104/120** | **90/120** |
+| `PERSONAL_MEMORY_PROFILE`, before fix | 106/120 | 5/120 |
+| `PERSONAL_MEMORY_PROFILE`, after fix | **110/120** | **119/120** |
+
+The Portuguese legislative/news corpus also surfaced a second, *different*, still-open finding
+worth recording precisely so it is not confused with the bug above: even at the correctly-ranked
+stage, roughly 10-13% of questions route to a topically-similar but factually wrong document (e.g.
+a question about one legislative committee's meeting resolving to a different bill about
+technology parks) — confirmed via direct `ClaimGenerator` inspection that the correct document does
+not even reach the ranking's own top 15 candidates for some of these. This is genuine retrieval
+confusion between bureaucratic-news items sharing heavy generic vocabulary ("câmara", "projeto",
+"comissão", "aprovou"), not the answer-selection bug above, and `answer_completeness_bonus` does not
+target it — it is unaffected by this fix in either direction and remains open.
+
+**Zero regression**, verified directly, not assumed: the calibrated fix was re-run against the same
+already-validated real conversational corpora and questions above (the puppy/AirPods multi-hop
+question, plus fresh spot-checks against the PT-slang and formal-technical-QA MongoDB corpora) —
+every `answer_text` and `answer_bytes` value was byte-for-byte identical before and after, for both
+`DEFAULT_PROFILE` and `PERSONAL_MEMORY_PROFILE`. `TEAM_MEMORY_PROFILE` and `PERSONAL_MEMORY_PROFILE`
+now ship with `answer_completeness_bonus=0.5` built in; `DEFAULT_PROFILE` (and the
+`full_dossier`-rendering `MEMGYM_REFERENCE_PROFILE` behind the published D144/LongMemEval
+byte-identical claims, which bypasses `_pick_clean_answer` entirely and was never affected by this
+code path in the first place) are both unchanged.
