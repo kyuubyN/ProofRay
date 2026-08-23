@@ -60,6 +60,17 @@ class SurfaceSvoConfig:
     # pronoun head in "the one that got away" -- unsafe to treat as skippable on its own, but
     # never ambiguous when it is the first part of a hyphenated compound like "one-tap").
     numeral_hyphen_prefixes: frozenset[str] = frozenset()
+    # Passive voice: a closed, finite set of "be"-auxiliary forms. Empty by default -- no existing
+    # caller (PT) populates this, so this stays a byte-for-byte no-op for every caller that doesn't
+    # opt in. When non-empty, `select_svo_readings` checks whether the matched predicate token is
+    # immediately preceded by a maximal run of these forms; if so, the clause is passive and the
+    # ARG1/ARG2 search directions below are swapped accordingly (see the dedicated branch). This
+    # is a grammatical fact about a closed word class, not a per-verb lexicon -- English has
+    # exactly these forms of "be", full stop.
+    passive_auxiliaries: frozenset[str] = frozenset()
+    # The marker introducing a passive agent phrase ("by", as in "...was broken BY John"). Also a
+    # closed, single-member class in English. Empty by default alongside `passive_auxiliaries`.
+    passive_agent_markers: frozenset[str] = frozenset()
 
 
 def select_svo_readings(tokens: tuple[SurfaceKernelToken, ...], demand: AtomicDemand, *,
@@ -137,6 +148,21 @@ def select_svo_readings(tokens: tuple[SurfaceKernelToken, ...], demand: AtomicDe
                 return active[1]
         return active[0]
 
+    by_index = {token.index: token for token in tokens}
+
+    def passive_auxiliary_run_start(predicate: SurfaceKernelToken) -> int | None:
+        """Index of the first token in the maximal run of passive-auxiliary tokens
+        immediately preceding `predicate` ("was being broken" -> the "was" index), or None if
+        the token directly before `predicate` isn't one (active voice, or no config opt-in)."""
+        if not config.passive_auxiliaries:
+            return None
+        idx = predicate.index - 1
+        start = None
+        while idx in by_index and lemma(by_index[idx]) in config.passive_auxiliaries:
+            start = idx
+            idx -= 1
+        return start
+
     readings = []
     for predicate in predicates:
         clause_left = max(
@@ -147,12 +173,36 @@ def select_svo_readings(tokens: tuple[SurfaceKernelToken, ...], demand: AtomicDe
             (token.index for token in tokens
              if token.index > predicate.index and lemma(token) in config.clause_boundaries),
             default=len(tokens))
+        passive_aux_start = passive_auxiliary_run_start(predicate)
         for known_token in known:
             if not clause_left < known_token.index < clause_right:
                 continue
             candidate = None
             rule = ""
-            if demand.answer_role == "ARG1":
+            if passive_aux_start is not None and demand.answer_role == "ARG1":
+                # The agent of a passive clause, if expressed at all, is introduced by "by" and
+                # sits AFTER the predicate -- never left of it the way an active-voice subject
+                # would. No "by"-phrase means no expressed agent: abstain (candidate stays None)
+                # rather than fall back to the active-voice rule, which would answer with
+                # whatever happens to sit left of the auxiliary -- not the semantic agent.
+                markers = [token for token in tokens
+                           if predicate.index < token.index < clause_right and
+                           lemma(token) in config.passive_agent_markers]
+                if markers:
+                    after_marker = [token for token in tokens
+                                    if markers[0].index < token.index < clause_right and
+                                    usable(token)]
+                    if after_marker:
+                        candidate, rule = phrase_head(after_marker), "passive_by_phrase_agent"
+            elif passive_aux_start is not None and demand.answer_role == "ARG2":
+                # The surface subject of a passive clause is the semantic patient -- it sits
+                # left of the auxiliary run, in exactly the position an active-voice subject
+                # would occupy relative to the verb.
+                before_aux = [token for token in tokens
+                              if clause_left < token.index < passive_aux_start and usable(token)]
+                if before_aux:
+                    candidate, rule = before_aux[-1], "passive_surface_subject_patient"
+            elif demand.answer_role == "ARG1":
                 before = [token for token in tokens
                           if clause_left < token.index < predicate.index and usable(token)]
                 if before:
