@@ -1,0 +1,13 @@
+# Required-review routing (see GOVERNANCE.md and CONTRIBUTING.md's "Review and merge policy").
+# GitHub requests a review from every owner matching a changed path, and branch protection on
+# `main` requires that review before a pull request can merge -- including the founding
+# maintainer's own pull requests, since branch protection here has no admin bypass.
+#
+# GitHub never counts a PR author's own approval, so listing only one name here would make that
+# person's own pull requests permanently unmergeable -- both current collaborators are listed for
+# exactly that reason: whichever one of you didn't open the PR is the one who can approve it.
+#
+# The last matching pattern wins, so keep the repo-wide default first and any narrower
+# path-specific line after it, per GitHub's own documented CODEOWNERS precedence.
+
+* @kyuubyN @YuriTals
