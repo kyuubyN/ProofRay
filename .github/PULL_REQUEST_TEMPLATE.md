@@ -26,5 +26,5 @@ test plan. -->
 ---
 
 By opening this pull request I confirm I've read and agree to
-[`CLA.md`](../CLA.md) (checked automatically on your first PR --
+[`CLA.md`](../docs/CLA.md) (checked automatically on your first PR --
 see `.github/workflows/cla.yml`).

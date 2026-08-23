@@ -153,14 +153,14 @@ something the engine infers automatically:
 
 - **`DEFAULT_PROFILE`** ("Scale Memory") — tuned for a large corpus (hundreds of documents and
   up); the exact configuration behind this project's own published judge-scored results (see
-  [Benchmarks](../BENCHMARKS.md)), deliberately conservative about how much evidence competes for
+  [Benchmarks](BENCHMARKS.md)), deliberately conservative about how much evidence competes for
   the final answer so a huge corpus never dilutes a precise one.
 - **`TEAM_MEMORY_PROFILE`** ("Team Memory") — a measured middle ground for a medium corpus (a
   small team's internal docs).
 - **`PERSONAL_MEMORY_PROFILE`** ("Personal Memory") — favors completeness over precision-per-byte
   for a small, personal-scale corpus, where the default's own anti-dilution caution can drop the
   one sentence carrying the concrete answer. Recommended starting point for that class of
-  deployment; see [Benchmarks](../BENCHMARKS.md#real-world-horizonanswerengine-validation-five-live-corpora-136-hand-verified-questions)
+  deployment; see [Benchmarks](BENCHMARKS.md#real-world-horizonanswerengine-validation-five-live-corpora-136-hand-verified-questions)
   for the real-corpus validation behind that recommendation.
 
 ## Deployment surfaces (`api/`)
@@ -168,7 +168,7 @@ something the engine infers automatically:
 `api/` is the packaged, runnable surface that wraps `HorizonAnswerEngine` for an actual
 deployment — HTTP and MCP transports, a shared choke point, and the one place model-facing
 network calls are allowed to originate from. It is a separate concern from the AGPL core: see
-[Licensing policy](../LICENSE_POLICY.md) for why this split exists and what it does and doesn't
+[Licensing policy](LICENSE_POLICY.md) for why this split exists and what it does and doesn't
 mean for licensing.
 
 Both transports share `api/_engine_bridge.py` rather than each reimplementing request handling:
@@ -334,7 +334,7 @@ The pipeline has five stages:
 This pipeline, at a byte budget matched to what it naturally uses, was
 compared against a strong lexical baseline (BM25) at both a matched budget
 and a substantially larger one, scored by a validated LLM-judge instrument
-(see [Benchmarks](../BENCHMARKS.md)). It won at both budgets, and giving the
+(see [Benchmarks](BENCHMARKS.md)). It won at both budgets, and giving the
 baseline more budget did not close the gap. What still limits accuracy beyond
 that point — whether more of the right evidence is being missed, or whether
 a small reader model struggles to compose evidence it already has into a

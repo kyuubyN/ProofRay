@@ -18,7 +18,7 @@ tooling exists in this repo today (already noted as deferred in
 conversation in the first place**: shipping a compiled binary to a third party is still
 *distributing* the AGPL-licensed engine inside it. Compiling to a binary does not change or
 avoid the license -- see [`LICENSE_COMMERCIAL_PLACEHOLDER.md`](LICENSE_COMMERCIAL_PLACEHOLDER.md)
-and [`../LICENSE_POLICY.md`](../LICENSE_POLICY.md). Whatever commercial terms eventually get
+and [`../docs/LICENSE_POLICY.md`](../docs/LICENSE_POLICY.md). Whatever commercial terms eventually get
 drafted need to account for the binary distribution path specifically, not just the hosted-API
 path.
 

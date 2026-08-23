@@ -8,7 +8,7 @@ and this tutorial. Nothing here changes how the engine itself works -- see the r
 ## Licensing
 
 `src/horizon_memory/` (the engine this folder wraps) stays `AGPL-3.0-or-later`, exactly as
-documented in [`../LICENSE_POLICY.md`](../LICENSE_POLICY.md). A separate commercial license may
+documented in [`../docs/LICENSE_POLICY.md`](../docs/LICENSE_POLICY.md). A separate commercial license may
 be offered later without revoking anything already granted under AGPL -- see
 [`LICENSE_COMMERCIAL_PLACEHOLDER.md`](LICENSE_COMMERCIAL_PLACEHOLDER.md) for exactly what that
 does and does not mean today (short version: no binding commercial terms exist yet).

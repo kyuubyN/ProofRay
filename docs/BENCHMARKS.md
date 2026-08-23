@@ -794,5 +794,5 @@ Calibration also found corpus size does not reliably separate "safe to loosen" f
 tight defaults": a real technical-QA corpus's own candidate-pool size measured statistically
 indistinguishable from a real MemGym-DR episode. Both findings are why three separate named
 presets ship (`DEFAULT_PROFILE` / `TEAM_MEMORY_PROFILE` / `PERSONAL_MEMORY_PROFILE`, see
-[Architecture](docs/ARCHITECTURE.md#answer-engine)) rather than one adaptively-tuned default —
+[Architecture](ARCHITECTURE.md#answer-engine)) rather than one adaptively-tuned default —
 an operator picks the preset matching their own deployment's real scale.

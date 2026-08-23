@@ -29,13 +29,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-signatures: ".github/cla-signatures.json"
-          path-to-document: "https://github.com/${{ github.repository }}/blob/main/CLA.md"
+          path-to-document: "https://github.com/${{ github.repository }}/blob/main/docs/CLA.md"
           branch: "cla-signatures"
           allowlist: kyuubyN
           custom-pr-sign-comment: "I have read the CLA Document and I hereby sign the CLA"
           custom-notsigned-prcomment: >-
             Thanks for the pull request! Before this can be reviewed, please sign the
-            [Contributor License Agreement](https://github.com/${{ github.repository }}/blob/main/CLA.md)
+            [Contributor License Agreement](https://github.com/${{ github.repository }}/blob/main/docs/CLA.md)
             by commenting exactly: `I have read the CLA Document and I hereby sign the CLA`.
             Signing grants a license (per CLA.md) — it does not grant governance rights,
             maintainership or equity; see GOVERNANCE.md for how decisions are actually made.

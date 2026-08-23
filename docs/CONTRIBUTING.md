@@ -12,7 +12,7 @@ information, benchmark answer keys, personal data or code you cannot license.
 Anything beyond a trivial fix (a typo, a broken link, a small docs
 correction, a one-line bug fix with an obvious root cause) starts as an
 **RFC issue**, not a pull request. Open one with the
-[RFC issue template](.github/ISSUE_TEMPLATE/rfc.md), describing the problem,
+[RFC issue template](../.github/ISSUE_TEMPLATE/rfc.md), describing the problem,
 the proposed approach, and its scope/limits — the same discipline this
 project already applies to its own research claims (see `RESEARCH.md`).
 Discussion happens on the issue first; a pull request is opened only after

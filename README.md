@@ -92,11 +92,11 @@ yourself.
 - [HorizonAI Engine](HorizonAI%20Engine/README.md): the full tutorial covering quickstart,
   connecting a database, adding a model, and chat assistants
 - [Architecture](docs/ARCHITECTURE.md): how it's actually built, for the technically curious
-- [Benchmarks and claim boundaries](BENCHMARKS.md): the tests we ran and what they showed
+- [Benchmarks and claim boundaries](docs/BENCHMARKS.md): the tests we ran and what they showed
 - [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md): the research history behind the project
 - [Authorized typed sidecar](docs/TYPED_SIDECAR.md): for connecting structured data sources
-- [Research module](RESEARCH.md): experimental, not-yet-stable ideas being tried
-- [Authors](AUTHORS.md)
+- [Research module](docs/RESEARCH.md): experimental, not-yet-stable ideas being tried
+- [Authors](docs/AUTHORS.md)
 
 ## The license, in plain terms
 
@@ -111,16 +111,16 @@ specifically so it's easy to connect Horizon to other systems, even closed-sourc
 
 You're welcome to charge for hosting it, supporting it, or building on it. You just can't remove
 the license and credit notices, or present your own version as if it were the official project.
-The full legal details are in [LICENSE_POLICY.md](LICENSE_POLICY.md),
-[TRADEMARKS.md](TRADEMARKS.md), [GOVERNANCE.md](GOVERNANCE.md) and
-[AI_TRAINING_POLICY.md](AI_TRAINING_POLICY.md).
+The full legal details are in [LICENSE_POLICY.md](docs/LICENSE_POLICY.md),
+[TRADEMARKS.md](docs/TRADEMARKS.md), [GOVERNANCE.md](docs/GOVERNANCE.md) and
+[AI_TRAINING_POLICY.md](docs/AI_TRAINING_POLICY.md).
 
 ## Who's responsible for what
 
 Horizon is a general-purpose tool. If you deploy it, you're responsible for the data you feed it,
 what you automate with it, and following the rules that apply to your own use case. See
-[DISCLAIMER.md](DISCLAIMER.md), [SECURITY.md](SECURITY.md) and
-[RESPONSIBLE_USE.md](RESPONSIBLE_USE.md).
+[DISCLAIMER.md](docs/DISCLAIMER.md), [SECURITY.md](docs/SECURITY.md) and
+[RESPONSIBLE_USE.md](docs/RESPONSIBLE_USE.md).
 
 ## Citing Horizon
 
