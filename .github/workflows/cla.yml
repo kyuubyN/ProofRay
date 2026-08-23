@@ -30,6 +30,15 @@ jobs:
         with:
           path-to-signatures: ".github/cla-signatures.json"
           path-to-document: "https://github.com/${{ github.repository }}/blob/main/CLA.md"
+          # Deliberately NOT `main`: main requires a reviewed PR to merge anything (see
+          # CONTRIBUTING.md's "Review and merge policy"), and this bot must record a signature
+          # the instant someone comments the sign phrase -- routing that through a PR would mean
+          # every new contributor's first signature is blocked on a maintainer manually approving
+          # a bot-generated bookkeeping commit, defeating the point of automating this at all.
+          # `cla-signatures` is a deliberately unprotected, orphan branch the bot commits to
+          # directly; it was pre-seeded once (`{"signedContributors":[]}`) because the default
+          # GITHUB_TOKEN could not create a brand-new branch itself even with `contents: write`
+          # (a known limitation of this action -- see its own issue tracker for the same report).
           branch: "cla-signatures"
           allowlist: kyuubyN
           custom-pr-sign-comment: "I have read the CLA Document and I hereby sign the CLA"
