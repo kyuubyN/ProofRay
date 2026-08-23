@@ -7,6 +7,28 @@ Contributions must include tests, preserve provenance and abstention semantics,
 and distinguish measured results from hypotheses. Do not submit confidential
 information, benchmark answer keys, personal data or code you cannot license.
 
+## Propose before you build: RFC issues
+
+Anything beyond a trivial fix (a typo, a broken link, a small docs
+correction, a one-line bug fix with an obvious root cause) starts as an
+**RFC issue**, not a pull request. Open one with the
+[RFC issue template](.github/ISSUE_TEMPLATE/rfc.md), describing the problem,
+the proposed approach, and its scope/limits — the same discipline this
+project already applies to its own research claims (see `RESEARCH.md`).
+Discussion happens on the issue first; a pull request is opened only after
+the approach is accepted there, and its description must link back to the
+RFC issue it implements. A pull request that skips this for a non-trivial
+change will be redirected back to an issue rather than reviewed as-is.
+
+## Review and merge policy
+
+Nothing merges into `main` without an explicit human approval — there is no
+auto-merge on this repository, and branch protection enforces required
+review even for the founding maintainer's own pull requests (see
+`.github/CODEOWNERS`). A pull request must also pass CI
+(`.github/workflows/ci.yml`) and have every review conversation resolved
+before it can merge.
+
 By contributing, you agree to [`CLA.md`](CLA.md) — a license grant covering
 the AGPL core, the Apache-dual-licensed `adapters/` files, and any future
 commercial license, plus a Developer Certificate of Origin-style
