@@ -62,10 +62,10 @@ In short: **proved answer → verified excerpts → abstention**. Relevance can 
 examines first, but only source authority and a reopenable proof can turn evidence into an asserted
 direct answer.
 
-## Connect Gemini without giving it memory authority
+##Example: Connect Gemini (or another AI) without giving it memory authority
 
 An LLM can sit after ProofRay as a presentation layer, or it can call ProofRay as a tool. In both
-designs, MongoDB stays local and Gemini receives only ProofRay's result — never the complete database
+designs, MongoDB stays local and Gemini receives only ProofRay's result, never the complete database
 corpus. The runnable tutorial is
 [`gemini_proofray_tool_call.py`](ProofRay%20Engine/examples/gemini_proofray_tool_call.py).
 
