@@ -1,8 +1,8 @@
-# Origin and design lineage
+# ProofRay origin and design lineage
 
 ## The problem
 
-Horizon Memory began from a simple observation: an AI system can appear to
+ProofRay began as the Horizon Memory research line from a simple observation: an AI system can appear to
 understand a long interaction and then lose its usable past when the context
 window is truncated, summarized incorrectly, or replaced. Increasing a context
 window delays that failure; it does not create durable, independently
@@ -134,7 +134,7 @@ The public implementation is organized around these surviving principles:
 
 ## What this history does not claim
 
-Horizon Memory does not currently claim infinite memory, universal semantic
+ProofRay does not currently claim infinite memory, universal semantic
 understanding, replacement of every database or search engine, elimination of
 all hallucinations, or 99% end-to-end accuracy over arbitrary language.
 
@@ -144,7 +144,7 @@ specific release, protocol, dataset split and immutable result artifact.
 
 ## Attribution
 
-Horizon Memory and its originating research direction were created by **Kaue
+ProofRay, the historical Horizon Memory architecture and their originating research direction were created by **Kaue
 Oliveira Costa (kyuubyN)**, Brazil, ORCID
 [0009-0009-8502-3220](https://orcid.org/0009-0009-8502-3220), who remains the
 founding maintainer and research lead. Later contributors retain full credit

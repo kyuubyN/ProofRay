@@ -1,15 +1,15 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-""""Connect a database" -- Horizon has no database backend of its own; every call takes
+""""Connect a database" -- ProofRay has no database backend of its own; every call takes
 `documents: list[str] | tuple[RouteDocument, ...]` directly, so "connecting a database" is
-entirely the caller's own query, not a Horizon subsystem. This example builds a small SQLite
-fixture, queries it, and feeds the rows straight into `HorizonAnswerEngine` -- swap the SQLite
+entirely the caller's own query, not a ProofRay subsystem. This example builds a small SQLite
+fixture, queries it, and feeds the rows straight into `ProofRayAnswerEngine` -- swap the SQLite
 query for your own Postgres/MySQL/whatever query and the rest of this example is unchanged.
 
-This example calls `HorizonAnswerEngine` (the AGPL core) directly, hence the AGPL header --
+This example calls `ProofRayAnswerEngine` (the AGPL core) directly, hence the AGPL header --
 see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
-Run: python3 "HorizonAI Engine/examples/sqlite_documents_example.py"
+Run: python3 "ProofRay Engine/examples/sqlite_documents_example.py"
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 SCOPE_ID = 1
 SESSION_ID = "sqlite-example"
@@ -58,7 +58,7 @@ def main() -> None:
         _build_fixture_database(db_path)
         documents = _documents_from_database(db_path)
 
-        engine = HorizonAnswerEngine(
+        engine = ProofRayAnswerEngine(
             profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
         result = engine.answer(
             "What percent did the Meridian project reduce cost by?", documents)

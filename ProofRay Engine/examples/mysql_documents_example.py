@@ -8,14 +8,14 @@ MySQL, so this requires a real instance and, deliberately, will not start one fo
 at yours with these env vars (pymysql takes keyword arguments rather than a single URL):
 
     MYSQL_HOST=localhost MYSQL_USER=root MYSQL_PASSWORD=secret MYSQL_DB=yourdb \
-        python3 "HorizonAI Engine/examples/mysql_documents_example.py"
+        python3 "ProofRay Engine/examples/mysql_documents_example.py"
 
 Without MYSQL_HOST set, this prints setup instructions and exits cleanly instead of failing.
 
-This example calls `HorizonAnswerEngine` (the AGPL core) directly, hence the AGPL header --
+This example calls `ProofRayAnswerEngine` (the AGPL core) directly, hence the AGPL header --
 see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
-Run: python3 "HorizonAI Engine/examples/mysql_documents_example.py"
+Run: python3 "ProofRay Engine/examples/mysql_documents_example.py"
 Requires: pip install pymysql
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 SCOPE_ID = 1
 SESSION_ID = "mysql-example"
@@ -85,7 +85,7 @@ def main() -> None:
               "is heavier than this demo needs, and this project won't spin one up for you).")
         print('Set it and re-run, e.g.:\n'
               '  MYSQL_HOST=localhost MYSQL_USER=root MYSQL_PASSWORD=secret MYSQL_DB=yourdb '
-              'python3 "HorizonAI Engine/examples/mysql_documents_example.py"')
+              'python3 "ProofRay Engine/examples/mysql_documents_example.py"')
         return
 
     import pymysql
@@ -104,7 +104,7 @@ def main() -> None:
     finally:
         conn.close()
 
-    engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
+    engine = ProofRayAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
     result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
 
     port = os.environ.get("MYSQL_PORT", "3306")

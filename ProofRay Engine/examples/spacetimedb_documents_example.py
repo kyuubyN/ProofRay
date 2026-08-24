@@ -18,7 +18,7 @@ background process, and this project would rather you start it once, on purpose,
 example silently launch one. Point this script at your database with:
 
     SPACETIMEDB_URL="http://127.0.0.1:3000" SPACETIMEDB_DATABASE="your_module" \
-        python3 "HorizonAI Engine/examples/spacetimedb_documents_example.py"
+        python3 "ProofRay Engine/examples/spacetimedb_documents_example.py"
 
 Without those set (or if the server isn't reachable), this prints setup instructions and exits
 cleanly instead of failing. Also unlike every other example here, this one assumes YOUR module
@@ -29,11 +29,11 @@ your schema differs, adjust `_documents_from_spacetimedb` below -- there's no ge
 seeding here the way there is for Mongo/Redis, since SpacetimeDB's schema is defined by your own
 published module, not something this script can create on the fly.
 
-This example calls `HorizonAnswerEngine` (the AGPL core) directly, hence the AGPL header --
+This example calls `ProofRayAnswerEngine` (the AGPL core) directly, hence the AGPL header --
 see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
-Run: python3 "HorizonAI Engine/examples/spacetimedb_documents_example.py"
-Requires: pip install requests (already a HorizonAI Engine dependency)
+Run: python3 "ProofRay Engine/examples/spacetimedb_documents_example.py"
+Requires: pip install requests (already a ProofRay Engine dependency)
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 SCOPE_ID = 1
 SESSION_ID = "spacetimedb-example"
@@ -109,7 +109,7 @@ def main() -> None:
         print("  spacetime start")
         print("  spacetime publish your_module --server local")
         print('  SPACETIMEDB_URL="http://127.0.0.1:3000" SPACETIMEDB_DATABASE="your_module" \\')
-        print('      python3 "HorizonAI Engine/examples/spacetimedb_documents_example.py"')
+        print('      python3 "ProofRay Engine/examples/spacetimedb_documents_example.py"')
         return
 
     table = os.environ.get("SPACETIMEDB_TABLE", "articles")
@@ -127,7 +127,7 @@ def main() -> None:
         print(f"Connected, but found no usable rows in {table!r} (need a body/text/content column).")
         return
 
-    engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
+    engine = ProofRayAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
     question = os.environ.get("SPACETIMEDB_QUESTION", "What does this data say?")
     result = engine.answer(question, documents)
 

@@ -1,6 +1,6 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""HorizonAPI -- an OpenAI-style HTTP surface over the deterministic `HorizonAnswerEngine`.
+"""ProofRay API -- an OpenAI-style HTTP surface over the deterministic answer engine.
 
 Two endpoints, one specific GET mode, one optional cosmetic step:
 
@@ -20,12 +20,12 @@ Two endpoints, one specific GET mode, one optional cosmetic step:
 
 **Activation mode** (deploy-time config, never a per-request field -- see
 `_engine_bridge.ACTIVATION_MODE`): by default every `POST /v1/answers` runs the engine
-unconditionally (today's only behavior, unchanged). Setting `HORIZON_ACTIVATION_MODE=keyword`
+unconditionally (today's only behavior, unchanged). Setting `PROOFRAY_ACTIVATION_MODE=keyword`
 gates the engine behind a small, closed, server-configured trigger-phrase list
-(`HORIZON_ACTIVATION_KEYWORDS`) -- a question matching none of them returns `state:
+(`PROOFRAY_ACTIVATION_KEYWORDS`) -- a question matching none of them returns `state:
 "not_activated"` without running the pipeline at all. The alternative activation mode -- an
-orchestrating LLM agent deciding for itself when Horizon is relevant -- needs no server-side
-mechanism here; that's exactly what `api/mcp_server.py`'s `horizon_ask` tool already is.
+orchestrating LLM agent deciding for itself when ProofRay is relevant -- needs no server-side
+mechanism here; that's exactly what `api/mcp_server.py`'s `proofray_ask` tool already is.
 
 Everything here is the same zero-LLM, zero-neural-net, deterministic pipeline
 `HorizonAnswerEngine` already wraps -- this file only adds HTTP request/response plumbing on top

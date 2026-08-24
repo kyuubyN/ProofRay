@@ -1,6 +1,6 @@
 # Roadmap
 
-This page says where the project is headed, not exactly when it'll get there. Horizon only ever
+This page says where the project is headed, not exactly when it'll get there. ProofRay only ever
 claims a capability once it's been built and independently tested. See
 [Benchmarks](docs/BENCHMARKS.md) for what's actually validated today, and treat everything below
 as direction, not a promise or a release date.
@@ -17,10 +17,10 @@ Development therefore prioritizes timestamped multi-session conversations, prefe
 updates, commitments, informal references, typos/slang, absent memories, ambiguity and strict user-scope
 isolation. Public long-memory benchmarks are useful parts of this portfolio, but no one dataset defines
 the product. Arithmetic reading-comprehension corpora remain regression tests for the proof executor;
-they are not the primary measure of whether Horizon works as a memory.
+they are not the primary measure of whether ProofRay works as a memory.
 
 The frozen research protocol is documented in
-[Horizon Personal Recall](lab/HORIZON_PERSONAL_RECALL_CHARTER.md). It reports each underlying memory
+[ProofRay Personal Recall](lab/PROOFRAY_PERSONAL_RECALL_CHARTER.md). It reports each underlying memory
 need separately from its formal, informal, noisy and cross-language renderings, so adding paraphrases
 cannot inflate the number of independent facts solved.
 
@@ -61,7 +61,7 @@ arm stay opt-in rather than inheriting a score from older bytes.
 
 ## More languages
 
-Today, the parts of Horizon that read natural-language questions (not just store and retrieve raw
+Today, the parts of ProofRay that read natural-language questions (not just store and retrieve raw
 facts) have been carefully tested in **English and Portuguese**, each cleared through its own real
 test against text the corresponding mechanism had never seen before. **Chinese support is next**,
 and we intend to bring it in as soon as it's ready to meet that same bar, not before. Every language
@@ -78,23 +78,23 @@ precisely, but improving what happens after the right evidence has already been 
 
 ## Easier to run
 
-Today, using Horizon means running Python. A packaged, no-install version (a plain binary you can
+Today, using ProofRay means running Python. A packaged, no-install version (a plain binary you can
 just double-click, with an installer for your operating system) is a direction we want to go,
 along with a small local interface for people who'd rather not write code at all. Feasibility notes
 for this specific effort already exist in
-[HorizonAI Engine's own roadmap](HorizonAI%20Engine/ROADMAP.md) for anyone curious about the
+[ProofRay Engine's own roadmap](ProofRay%20Engine/ROADMAP.md) for anyone curious about the
 technical shape of that work.
 
 ## Connecting directly to your data
 
-Right now, connecting Horizon to a database means writing a small amount of your own code to pull
+Right now, connecting ProofRay to a database means writing a small amount of your own code to pull
 rows out and hand them over (see the tutorial's own database examples). A more direct path,
-pointing Horizon at a database connection and letting it take it from there, is a real, larger
+pointing ProofRay at a database connection and letting it take it from there, is a real, larger
 piece of work we'd like to take on, not a small checkbox.
 
 ## Beyond one operator, one machine
 
-Horizon's current security model is deliberately scoped to a single operator running it on their
+ProofRay's current security model is deliberately scoped to a single operator running it on their
 own machine. Supporting a real multi-user or team deployment, with its own separate access model,
 is a direction being considered for later, once the simpler case is solid.
 

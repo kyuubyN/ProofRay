@@ -1,6 +1,6 @@
 # Use and responsibility
 
-Horizon Memory is general-purpose research and software infrastructure. It is
+ProofRay is general-purpose research and software infrastructure. It is
 not medical, legal, financial, safety-critical or regulatory advice, and its
 availability does not certify a deployment for any purpose.
 

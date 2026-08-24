@@ -1,6 +1,6 @@
-# Architecture
+# ProofRay architecture
 
-Horizon Memory separates durable state, retrieval, proof and consumption. This
+ProofRay separates durable state, retrieval, proof and consumption. This
 keeps a model useful without allowing it to rewrite memory authority.
 
 ```mermaid
@@ -21,7 +21,7 @@ flowchart LR
 
 ## Theoretical foundations
 
-Horizon's design is not an arbitrary collection of engineering choices; it follows from one
+ProofRay's design is not an arbitrary collection of engineering choices; it follows from one
 falsifiable hypothesis. **Memory reliability and generative fluency are different problems**, and
 a small, deterministic, composable machine can outperform a generative model specifically at the
 first one, precisely because it never has to imagine, complete, or reinterpret a source. This is
@@ -256,7 +256,8 @@ source, scope, session, version, sequence, observation time, role, speaker, opti
 and a caller-verifiable text digest. It also accepts
 FactId-bound observed context intents. Mixed legacy/structured arrays, unknown fields and cross-scope
 documents fail closed; metadata is never encoded into source text. The conversational generator is
-still disabled by default and requires deploy-time `HORIZON_CONVERSATIONAL_RECALL=true`. That flag
+still disabled by default and requires deploy-time `PROOFRAY_CONVERSATIONAL_RECALL=true`. The
+historical `HORIZON_CONVERSATIONAL_RECALL` spelling remains a compatibility alias. That flag
 also selects `CONVERSATIONAL_HIGH_RECALL_PROFILE`, so deployment uses the measured cut rather than
 the unrelated scale-memory limit. Consumed development alone still does not authorize a universal
 default.
@@ -403,9 +404,11 @@ layer (activation gating, request validation, the optional polish step) never ha
 sync across two copies.
 
 **Activation mode** decides *when* the engine runs at all, as deploy-time configuration
-(`HORIZON_ACTIVATION_MODE`), never a per-request field: `"direct"` (the default) runs the engine
+(`PROOFRAY_ACTIVATION_MODE`, with `HORIZON_ACTIVATION_MODE` accepted as a legacy alias), never a
+per-request field: `"direct"` (the default) runs the engine
 unconditionally on every request; `"keyword"` gates it behind a small, closed, server-configured
-trigger-phrase list (`HORIZON_ACTIVATION_KEYWORDS`), returning `state: "not_activated"` with zero
+trigger-phrase list (`PROOFRAY_ACTIVATION_KEYWORDS`; legacy alias
+`HORIZON_ACTIVATION_KEYWORDS`), returning `state: "not_activated"` with zero
 pipeline cost when a question matches none of them. The two modes serve different integration
 shapes: an orchestrating LLM agent deciding for itself whether to call `horizon_ask` already *is*
 an activation decision (tool mode, the recommended default, needs no keyword list at all);
@@ -417,7 +420,8 @@ own already-verified `answer_text`, is instructed not to add/remove/invent conte
 is a separate, clearly-labeled `polished_answer` field that never replaces `answer_text`. A
 failed or errored polish call degrades to the unmodified verified answer rather than affecting it.
 The destination endpoint and credential-holding env-var name are read only from this process's own
-environment (`HORIZON_POLISH_BASE_URL`/`HORIZON_POLISH_API_KEY_ENV`), never accepted as request
+environment (`PROOFRAY_POLISH_BASE_URL`/`PROOFRAY_POLISH_API_KEY_ENV`, with the historical
+`HORIZON_*` spellings accepted), never accepted as request
 fields, after an earlier version that did accept them was found to let any caller redirect the
 outbound call and a named secret to a host of its own choosing.
 

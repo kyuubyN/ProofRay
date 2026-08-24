@@ -1,6 +1,6 @@
-# HorizonAPI
+# ProofRay API
 
-An OpenAI-style HTTP surface over `HorizonAnswerEngine` -- the same deterministic,
+An OpenAI-style HTTP surface over the ProofRay answer engine -- the same deterministic,
 zero-LLM, zero-neural-net route -> verify -> compose pipeline this project validates
 against MemGym-DR and LongMemEval, behind conventional `POST`/`GET` endpoints.
 
@@ -11,7 +11,7 @@ not just the compressed answer.
 Structured cross-session recall remains an explicit deployment choice:
 
 ```bash
-HORIZON_CONVERSATIONAL_RECALL=true python3 api/server.py
+PROOFRAY_CONVERSATIONAL_RECALL=true python3 api/server.py
 ```
 
 That flag enables `ConversationalRecallGenerator` together with the exact measured
@@ -32,14 +32,14 @@ The first run prints a bearer token you'll need for every request except `GET /v
 "Authentication and rate limiting" below):
 
 ```
-Bearer token (also saved at /home/you/.config/horizon-memory/api_credentials.json): 3f9a2b...
+Bearer token (also saved at /home/you/.config/proofray/api_credentials.json): 3f9a2b...
 ```
 
 Lost it or need it again later without restarting the server? `python3 api/show_api_token.py`.
 
 An MCP server exposing the same functionality to a chat client (Claude Desktop, Cursor, ...) also
 lives here: `python3 api/mcp_server.py`. See
-[`../HorizonAI Engine/README.md`](../HorizonAI%20Engine/README.md) for the full MCP setup and a
+[`../ProofRay Engine/README.md`](../ProofRay%20Engine/README.md) for the full ProofRay MCP setup and a
 generalized tutorial covering local models, hosted API models, and bring-your-own-database
 patterns.
 
@@ -71,7 +71,7 @@ A missing or wrong token returns `401`.
 Separately, every request (including `GET /v1/health`) is rate-limited per caller: a token bucket
 that refills continuously rather than resetting on a fixed clock tick, defaulting to 60
 requests/minute. If you legitimately send a high volume of documents per call (not more calls),
-raise the limit rather than working around it: `HORIZON_RATE_LIMIT_PER_MINUTE=600 python3
+raise the limit rather than working around it: `PROOFRAY_RATE_LIMIT_PER_MINUTE=600 python3
 api/server.py`. Exceeding it returns `429`; every rejection is logged at `WARNING` on the server
 side so you can tell a real rate-limit hit from a client bug.
 
@@ -113,7 +113,7 @@ Request body:
   every referenced fact. Support labels, answers, rubrics and arbitrary fields are rejected.
 - Structured history enables same-scope cross-session verification. The consumed-development
   `ConversationalRecallGenerator` remains opt-in via deploy-time
-  `HORIZON_CONVERSATIONAL_RECALL=true`; it is not silently enabled for legacy requests.
+  `PROOFRAY_CONVERSATIONAL_RECALL=true`; it is not silently enabled for legacy requests.
 - `include_sources` (bool, default `false`) -- when `true`, the response's `sources` field
   is populated with the full verified claim list (every sentence the engine actually
   routed, verified, and considered -- not just what made the compressed answer), each
@@ -126,15 +126,15 @@ Request body:
 - `polish` (bool, default `false`) -- when `true`, additionally rewrites the answer for
   fluency via an external OpenAI-compatible model (Groq, OpenAI, a local Ollama/llama.cpp/
   vLLM/LM Studio server -- anything speaking the `/chat/completions` shape). The external
-  model only ever sees Horizon's own already-verified `answer` text, never the raw
+  model only ever sees ProofRay's own already-verified `answer` text, never the raw
   documents, and is explicitly instructed not to add, remove, or invent facts. `answer`
   itself is never affected by `polish` -- see `polished_answer`/`polish_state` below.
 - `polish_model` (string) -- **required** when `polish: true`; the model name as the
   provider expects it (e.g. `"qwen/qwen3.6-27b"`).
 
 The polish destination and credential are **deploy-time configuration, not request fields**:
-`HORIZON_POLISH_BASE_URL` (env var, defaults to Groq's `/chat/completions` endpoint) and
-`HORIZON_POLISH_API_KEY_ENV` (env var naming *another* environment variable that holds the
+`PROOFRAY_POLISH_BASE_URL` (env var, defaults to Groq's `/chat/completions` endpoint) and
+`PROOFRAY_POLISH_API_KEY_ENV` (env var naming *another* environment variable that holds the
 API key, never the key itself; unset means an unauthenticated call). An earlier version
 accepted `polish_base_url`/`polish_api_key_env` directly in the request body; that let any
 caller of this unauthenticated API redirect the server's outbound polish call to a host of
@@ -142,15 +142,15 @@ its choosing while naming a real secret to attach as a Bearer token (SSRF + cred
 exfiltration) -- removed for that reason, not replaced.
 
 **Activation mode** is also deploy-time configuration, never a request field, for the same reason.
-By default (`HORIZON_ACTIVATION_MODE` unset or `"direct"`), every request runs the engine
-unconditionally -- today's only behavior. Setting `HORIZON_ACTIVATION_MODE=keyword` gates the
+By default (`PROOFRAY_ACTIVATION_MODE` unset or `"direct"`), every request runs the engine
+unconditionally -- today's only behavior. Setting `PROOFRAY_ACTIVATION_MODE=keyword` gates the
 engine behind a small, closed, server-configured trigger-phrase list: a question matching none of
-`HORIZON_ACTIVATION_KEYWORDS` (comma-separated env var; falls back to a built-in EN+PT default set
+`PROOFRAY_ACTIVATION_KEYWORDS` (comma-separated env var; falls back to a built-in EN+PT default set
 such as "remember"/"recall"/"lembra"/"lembrar" when unset) returns `state: "not_activated"`
 without the engine running at all -- zero pipeline cost, and no document/claim processing of any
 kind happens for that request. This is meant for a deployment with no LLM in the loop deciding
-whether Horizon is relevant; if an orchestrating agent already makes that call itself (e.g. via
-`horizon_ask` over MCP, deciding for itself when to invoke the tool), leave this at the default and
+whether ProofRay is relevant; if an orchestrating agent already makes that call itself (e.g. via
+`proofray_ask` over MCP, deciding for itself when to invoke the tool), leave this at the default and
 let the agent's own judgment be the activation decision -- the two modes are alternatives for
 different integration shapes, not something a single deployment needs to combine.
 
@@ -200,7 +200,7 @@ does not replace the `direct_answer_proof_closed=true` requirement.
 
 `state` is `"resolved"` when an answer was composed, the lowercased name of a router
 abstain state (e.g. `"abstention"`) when the supplied documents did not verify against the
-question -- Horizon fails closed rather than guessing -- or `"not_activated"` when the
+question -- ProofRay fails closed rather than guessing -- or `"not_activated"` when the
 server-configured activation gate (above) declined to run the engine at all. On abstention or
 `"not_activated"`, `answer`, `answer_lines`, and `sources` are all empty/`null`;
 `documents_considered`/`verified_candidates`/`answer_bytes` are all `0` for `"not_activated"`

@@ -9,16 +9,16 @@ CI. Point it at a real table by setting `DYNAMODB_USE_REAL_AWS=1` plus `DYNAMODB
 standard AWS credentials/region env vars:
 
     DYNAMODB_USE_REAL_AWS=1 DYNAMODB_TABLE=your-table AWS_DEFAULT_REGION=us-east-1 \
-        python3 "HorizonAI Engine/examples/dynamodb_documents_example.py"
+        python3 "ProofRay Engine/examples/dynamodb_documents_example.py"
 
 Nothing else in this file changes -- boto3 talks the same way to a real table or to moto's
-in-process mock, which is the entire point of the bring-your-own-database pattern: Horizon
+in-process mock, which is the entire point of the bring-your-own-database pattern: ProofRay
 never knows or cares which one served the documents.
 
-This example calls `HorizonAnswerEngine` (the AGPL core) directly, hence the AGPL header --
+This example calls `ProofRayAnswerEngine` (the AGPL core) directly, hence the AGPL header --
 see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
-Run: python3 "HorizonAI Engine/examples/dynamodb_documents_example.py"
+Run: python3 "ProofRay Engine/examples/dynamodb_documents_example.py"
 Requires: pip install boto3 moto
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 SCOPE_ID = 1
 SESSION_ID = "dynamodb-example"
@@ -96,7 +96,7 @@ def main() -> None:
     table, is_mock = _get_table()
     documents = _documents_from_dynamodb(table)
 
-    engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
+    engine = ProofRayAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
     result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
 
     print("state:", result.state)

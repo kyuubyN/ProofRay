@@ -1,9 +1,9 @@
-# HorizonAI Engine
+# ProofRay Engine
 
-The packaged, runnable surface of Horizon Memory's deterministic engine: the HTTP API, an MCP
+The packaged, runnable surface of ProofRay's deterministic engine: the HTTP API, an MCP
 server for connecting a chat client directly, a generic polish step for local or hosted models,
 and this tutorial. Nothing here changes how the engine itself works -- see the repository root's
-[`README.md`](../README.md) for what Horizon Memory *is*. This folder is how you *run* it.
+[`README.md`](../README.md) for what ProofRay *is*. This folder is how you *run* it.
 
 ## Licensing
 
@@ -18,26 +18,26 @@ does and does not mean today (short version: no binding commercial terms exist y
 ```bash
 # from the repository root
 pip install -e .
-pip install -r "HorizonAI Engine/requirements.txt"
-python3 "HorizonAI Engine/examples/quickstart.py"
+pip install -r "ProofRay Engine/requirements.txt"
+python3 "ProofRay Engine/examples/quickstart.py"
 ```
 
 The minimum code, from [`examples/quickstart.py`](examples/quickstart.py):
 
 ```python
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 documents = (
     RouteDocument(1, "The Meridian project reduced compute cost by exactly 42 percent...",
                   scope_id=1, session_id="s1", version=1, source="doc:1"),
 )
-engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=1, session_id="s1")
+engine = ProofRayAnswerEngine(profile=DEFAULT_PROFILE, scope_id=1, session_id="s1")
 result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
 print(result.state, result.answer_text)
 ```
 
 Zero LLM, zero neural net, inside this call -- `result.state` is `"RESOLVED"` or an abstain state
-name; a confident wrong answer never happens, Horizon declines instead.
+name; a confident wrong answer never happens, ProofRay declines instead.
 
 ## Memory presets: pick the profile for your corpus size
 
@@ -45,14 +45,14 @@ name; a confident wrong answer never happens, Horizon declines instead.
 knowledge base) -- it is the exact configuration a published 0.95 judge-score result was measured
 at, deliberately conservative about how much evidence competes for the final answer so a huge
 corpus never dilutes a precise one. On a much smaller corpus (a personal chat history, a small
-team's internal docs) that same conservatism can be too tight: Horizon always finds the right
+team's internal docs) that same conservatism can be too tight: ProofRay always finds the right
 source, but the one sentence carrying the actual number or name sometimes loses out to a shorter,
 less specific neighbor. Two more presets ship for exactly that case:
 
 ```python
-from horizon_memory import DEFAULT_PROFILE, TEAM_MEMORY_PROFILE, PERSONAL_MEMORY_PROFILE
+from proofray import DEFAULT_PROFILE, TEAM_MEMORY_PROFILE, PERSONAL_MEMORY_PROFILE
 
-engine = HorizonAnswerEngine(profile=PERSONAL_MEMORY_PROFILE, scope_id=1, session_id="s1")
+engine = ProofRayAnswerEngine(profile=PERSONAL_MEMORY_PROFILE, scope_id=1, session_id="s1")
 ```
 
 | Preset | Best for | What changes vs. `DEFAULT_PROFILE` |
@@ -90,12 +90,12 @@ testing has shown it to be actively harmful there.
 
 ## Connect a database (bring your own documents)
 
-Horizon has no database of its own -- `documents` is always a plain list/tuple you build. "Connect
+ProofRay has no database of its own -- `documents` is always a plain list/tuple you build. "Connect
 a database" means: run your own query, turn each row into a `RouteDocument`, pass them in. Nine
 complete, runnable walkthroughs:
 
 - [`examples/sqlite_documents_example.py`](examples/sqlite_documents_example.py) -- builds a
-  small SQLite fixture, queries it, feeds the rows to Horizon. No server, nothing to install.
+  small SQLite fixture, queries it, feeds the rows to ProofRay. No server, nothing to install.
 - [`examples/duckdb_documents_example.py`](examples/duckdb_documents_example.py) -- same idea,
   embedded and in-memory by default. No server, always works.
 - [`examples/mongodb_documents_example.py`](examples/mongodb_documents_example.py) -- same
@@ -138,7 +138,7 @@ result = engine.answer(question, documents)
 
 ## Writing your documents and questions for the best precision
 
-Horizon will always try its best with whatever you give it, but a few real, measured findings
+ProofRay will always try its best with whatever you give it, but a few real, measured findings
 from testing it against messy, real-world data are worth knowing before you connect your own.
 
 **For your documents:**
@@ -151,9 +151,9 @@ from testing it against messy, real-world data are worth knowing before you conn
   losing to a shorter, unrelated, grammatically complete-looking sentence when the actual answer
   was itself a sentence fragment. We fixed the selection logic once we found this, but a corpus of
   real, complete sentences never runs into the problem in the first place.
-- **Put the context a question needs inside the text itself, not only in a separate field Horizon
+- **Put the context a question needs inside the text itself, not only in a separate field ProofRay
   never reads.** A message like "I went to the doctor yesterday" can only answer "when" if the
-  actual calendar date is written somewhere Horizon can see it; a timestamp sitting in a database
+  actual calendar date is written somewhere ProofRay can see it; a timestamp sitting in a database
   column you never pass into the document text is invisible to it. If your source has a natural
   date, name, or ID attached to a message, write it into the document itself (`"On May 8th, 2023,
   Caroline said: ..."`), not just in metadata alongside it.
@@ -168,23 +168,23 @@ from testing it against messy, real-world data are worth knowing before you conn
 **For the question you ask:**
 
 - **Include the specific word you actually care about, if you know it: a name, a number, a
-  product, an ID.** Horizon ranks by how distinctively a document's own wording matches your
+  product, an ID.** ProofRay ranks by how distinctively a document's own wording matches your
   question, so a specific term does far more work than a general description of the topic.
-- **Ask one thing at a time when you can.** Horizon can and does answer questions that need facts
+- **Ask one thing at a time when you can.** ProofRay can and does answer questions that need facts
   from more than one place, but a single, focused question is the easiest case for it to get
   completely right.
 
 **You don't need to write carefully.** Every number above, and every real-corpus result in
 [Benchmarks](../docs/BENCHMARKS.md), was measured against genuinely casual, typo-laden questions,
 not clean, careful ones: "qdo vai acontecer a sessao de julgamneto da CVM em 26 4?", "wht did the
-margravine ask herr heilbrun about things english?", "abt", "insted", "rember". Horizon's matching
+margravine ask herr heilbrun about things english?", "abt", "insted", "rember". ProofRay's matching
 already checks both exact wording and a fuzzy, letter-level channel underneath it, specifically so
 a misspelling, a dropped accent, or an abbreviation does not cost you the right answer. Write your
 question the way you'd actually type it.
 
 ## Polish answers with a local or API model
 
-Horizon's own answer is already deterministic and verified -- polishing is optional, purely
+ProofRay's own answer is already deterministic and verified -- polishing is optional, purely
 cosmetic prose rewriting, never a source of new facts. One adapter,
 `OpenAICompatiblePolishAdapter`, works against anything speaking the OpenAI `/chat/completions`
 shape (Groq, OpenAI, Ollama, llama.cpp's server, vLLM, LM Studio):
@@ -202,12 +202,12 @@ Two runnable examples, both dry-run-safe by default (`allow_network=False`, no n
 key required):
 
 ```bash
-python3 "HorizonAI Engine/examples/local_model_polish_example.py"   # e.g. Ollama
-python3 "HorizonAI Engine/examples/api_model_polish_example.py"     # e.g. Groq
+python3 "ProofRay Engine/examples/local_model_polish_example.py"   # e.g. Ollama
+python3 "ProofRay Engine/examples/api_model_polish_example.py"     # e.g. Groq
 ```
 
 The same thing via the HTTP API -- `POST /v1/answers` with `polish: true` (start the server first
-with `HORIZON_POLISH_API_KEY_ENV=GROQ_KEY GROQ_KEY=your-key python3 "HorizonAI Engine/run_api_server.py"`
+with `PROOFRAY_POLISH_API_KEY_ENV=GROQ_KEY GROQ_KEY=your-key python3 "ProofRay Engine/run_api_server.py"`
 -- the destination/credential are this process's own env config, never request fields, see below).
 The server prints a bearer token on that first run -- every request needs it (see
 [`../api/README.md`](../api/README.md)'s "Authentication and rate limiting"):
@@ -221,7 +221,7 @@ curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json
 }'
 ```
 
-`answer` in the response is always Horizon's own deterministic text; `polished_answer` is the
+`answer` in the response is always ProofRay's own deterministic text; `polished_answer` is the
 additional, optional rewrite (`null` if `polish` wasn't requested, or if the polish call itself
 errored -- a broken external model call never affects the primary answer, see
 [`../api/README.md`](../api/README.md)).
@@ -231,7 +231,7 @@ errored -- a broken external model call never affects the primary answer, see
 Run the server:
 
 ```bash
-python3 "HorizonAI Engine/run_mcp_server.py"
+python3 "ProofRay Engine/run_mcp_server.py"
 ```
 
 Add it to Claude Desktop's config (`claude_desktop_config.json`):
@@ -239,9 +239,9 @@ Add it to Claude Desktop's config (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
-    "horizon-memory": {
+    "proofray": {
       "command": "python3",
-      "args": ["/absolute/path/to/HorizonAI Engine/run_mcp_server.py"],
+      "args": ["/absolute/path/to/ProofRay Engine/run_mcp_server.py"],
       "env": { "GROQ_KEY": "your-key-here" }
     }
   }
@@ -253,7 +253,8 @@ MCP clients only pass a small safe allowlist of environment variables to a launc
 default (`HOME`, `PATH`, etc.), not your shell's full environment, so any key the polish step
 needs (`GROQ_KEY`, etc.) must be listed there explicitly.
 
-`horizon_ask` tool parameters (identical to `POST /v1/answers`'s body):
+`proofray_ask` tool parameters (identical to `POST /v1/answers`'s body; `horizon_ask` remains a
+compatibility alias):
 
 | Parameter | Type | Meaning |
 |---|---|---|
@@ -263,7 +264,7 @@ needs (`GROQ_KEY`, etc.) must be listed there explicitly.
 | `polish` | bool, default `false` | additionally rewrite the answer via an OpenAI-compatible model |
 | `polish_model` | string | required when `polish` is true |
 
-The polish destination/credential (`HORIZON_POLISH_BASE_URL`/`HORIZON_POLISH_API_KEY_ENV`) are
+The polish destination/credential (`PROOFRAY_POLISH_BASE_URL`/`PROOFRAY_POLISH_API_KEY_ENV`) are
 deploy-time env config, not tool parameters -- an earlier version took `polish_base_url`/
 `polish_api_key_env` directly as caller-suppliable arguments; that let any caller redirect the
 server's outbound polish call and named secret to a host of its own choosing (SSRF + credential
@@ -272,20 +273,20 @@ this same fix -- this table previously still listed them as parameters, which wa
 
 ## Activation modes: tool judgment vs. a keyword gate
 
-Two ways to decide *when* Horizon should engage, picked at deploy time, never per-request --
+Two ways to decide *when* ProofRay should engage, picked at deploy time, never per-request --
 use whichever matches your integration, not both at once for the same deployment.
 
 **Tool mode (recommended, the default -- nothing to configure).** An orchestrating LLM agent
-already decides for itself, from its own read of the conversation, whether calling `horizon_ask`
+already decides for itself, from its own read of the conversation, whether calling `proofray_ask`
 is relevant right now. That judgment call already *is* the activation decision -- this mode needs
 no keyword list, no separate mechanism, and is exactly what you get by doing nothing.
 
-**Keyword mode**, for a deployment with no LLM making that call: set `HORIZON_ACTIVATION_MODE=keyword`
+**Keyword mode**, for a deployment with no LLM making that call: set `PROOFRAY_ACTIVATION_MODE=keyword`
 before starting either server. A question matching none of a small, closed, server-configured
 trigger-phrase list returns `state: "not_activated"` -- the engine never runs, zero pipeline cost.
 
 ```bash
-HORIZON_ACTIVATION_MODE=keyword python3 "HorizonAI Engine/run_api_server.py"
+PROOFRAY_ACTIVATION_MODE=keyword python3 "ProofRay Engine/run_api_server.py"
 ```
 
 ```bash
@@ -305,15 +306,15 @@ curl -X POST http://127.0.0.1:8420/v1/answers -H "Content-Type: application/json
 ```
 
 The default trigger set covers common EN+PT phrasings ("remember", "recall", "lembra",
-"lembrar", ...). Override it with `HORIZON_ACTIVATION_KEYWORDS` (comma-separated, server-side env
+"lembrar", ...). Override it with `PROOFRAY_ACTIVATION_KEYWORDS` (comma-separated, server-side env
 only -- never a request field, for the same reason `polish_base_url` isn't one, see above):
 
 ```bash
-HORIZON_ACTIVATION_MODE=keyword HORIZON_ACTIVATION_KEYWORDS="what was,qual foi" \
-  python3 "HorizonAI Engine/run_api_server.py"
+PROOFRAY_ACTIVATION_MODE=keyword PROOFRAY_ACTIVATION_KEYWORDS="what was,qual foi" \
+  python3 "ProofRay Engine/run_api_server.py"
 ```
 
-Applies identically to both transports (`POST /v1/answers` and `horizon_ask` over MCP) -- one
+Applies identically to both transports (`POST /v1/answers` and `proofray_ask` over MCP) -- one
 gate, shared by both, since they already run through the same underlying implementation.
 
 ## Deferred
@@ -324,7 +325,8 @@ Named on purpose, not silently dropped:
 - **No auth / rate limiting** on either the HTTP API or the MCP server.
 - **No persistent corpus** -- every call takes its documents inline; there's no "upload once,
   query by id later" mode yet.
-- **One MCP tool only** (`horizon_ask`) -- no separate ingest/session tools yet.
+- **One canonical MCP operation** (`proofray_ask`, plus legacy alias `horizon_ask`) -- no separate
+  ingest/session tools yet.
 - **No standalone binary/installer, no GUI, no direct database connectivity** -- feasibility
   notes (what's straightforward vs. what's real new engineering) live in
   [`ROADMAP.md`](ROADMAP.md).

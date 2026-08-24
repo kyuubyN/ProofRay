@@ -10,16 +10,16 @@ By default this runs against `fakeredis` (an in-process, pure-Python Redis stand
 at a real deployment by setting `REDIS_URL`, e.g.:
 
     REDIS_URL="redis://localhost:6379/0" \
-        python3 "HorizonAI Engine/examples/redis_documents_example.py"
+        python3 "ProofRay Engine/examples/redis_documents_example.py"
 
 Nothing else in this file changes -- redis-py and fakeredis expose the same client API, which is
-the entire point of the bring-your-own-database pattern: Horizon never knows or cares which one
+the entire point of the bring-your-own-database pattern: ProofRay never knows or cares which one
 served the documents.
 
-This example calls `HorizonAnswerEngine` (the AGPL core) directly, hence the AGPL header --
+This example calls `ProofRayAnswerEngine` (the AGPL core) directly, hence the AGPL header --
 see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
-Run: python3 "HorizonAI Engine/examples/redis_documents_example.py"
+Run: python3 "ProofRay Engine/examples/redis_documents_example.py"
 Requires: pip install redis fakeredis
 """
 from __future__ import annotations
@@ -31,7 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 SCOPE_ID = 1
 SESSION_ID = "redis-example"
@@ -88,7 +88,7 @@ def main() -> None:
     client, is_mock = _get_client()
     documents = _documents_from_redis(client)
 
-    engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
+    engine = ProofRayAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
     result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
 
     print("state:", result.state)

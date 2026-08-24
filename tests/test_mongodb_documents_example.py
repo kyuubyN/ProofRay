@@ -10,7 +10,7 @@ from horizon_memory import HorizonAnswerEngine
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXAMPLE = ROOT / "HorizonAI Engine/examples/mongodb_documents_example.py"
+EXAMPLE = ROOT / "ProofRay Engine/examples/mongodb_documents_example.py"
 
 
 def _load_example():

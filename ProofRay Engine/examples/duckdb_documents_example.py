@@ -7,10 +7,10 @@ at all, in-memory by default, so this example needs nothing beyond `pip install 
 Swap the `SELECT` for your own table/query (or point `duckdb.connect(...)` at a real `.duckdb`
 file instead of `:memory:`) and the rest of this example is unchanged.
 
-This example calls `HorizonAnswerEngine` (the AGPL core) directly, hence the AGPL header --
+This example calls `ProofRayAnswerEngine` (the AGPL core) directly, hence the AGPL header --
 see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
-Run: python3 "HorizonAI Engine/examples/duckdb_documents_example.py"
+Run: python3 "ProofRay Engine/examples/duckdb_documents_example.py"
 Requires: pip install duckdb
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 SCOPE_ID = 1
 SESSION_ID = "duckdb-example"
@@ -71,7 +71,7 @@ def main() -> None:
     finally:
         conn.close()
 
-    engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
+    engine = ProofRayAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
     result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
 
     print("state:", result.state)

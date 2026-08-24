@@ -1,6 +1,6 @@
 cff-version: 1.2.0
-message: "If you use Horizon Memory, cite this software and the founding paper when available."
-title: "Horizon Memory"
+message: "If you use ProofRay, cite this software and the founding paper when available."
+title: "ProofRay"
 type: software
 version: 0.1.0-alpha.1
 date-released: 2026-08-13
@@ -22,4 +22,5 @@ repository-code: "https://github.com/kyuubyN/HorizonMemory"
 license: "AGPL-3.0-or-later"
 abstract: >-
   Standalone, model-agnostic, proof-carrying memory and retrieval architecture
-  for AI systems.
+  for AI systems, developed by ProofRay Intelligence from the historical
+  Horizon research line in Q-HDRE.

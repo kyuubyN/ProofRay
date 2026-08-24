@@ -45,4 +45,4 @@ by itself.
 
 Authorship remains visible in Git history and release notes. Contribution does
 not authorize claims that a contributor or employer created the original
-Horizon Memory architecture.
+ProofRay architecture and its historical Horizon lineage.

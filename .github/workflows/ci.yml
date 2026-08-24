@@ -65,6 +65,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: horizon-memory-dist
+          name: proofray-dist
           path: dist/
           retention-days: 14

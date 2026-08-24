@@ -1,6 +1,6 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Small command-line entry point; the memory API remains the primary surface."""
+"""ProofRay command-line entry point; the memory API remains the primary surface."""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ from . import __version__
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="horizon", description="Horizon Memory utilities")
+    parser = argparse.ArgumentParser(prog="proofray", description="ProofRay utilities")
     parser.add_argument("--version", action="store_true", help="print the installed version")
     parser.add_argument("--doctor", action="store_true", help="print a local runtime diagnostic")
     args = parser.parse_args()
@@ -20,6 +20,7 @@ def main() -> int:
         return 0
     if args.doctor:
         print(json.dumps({
+            "proofray": __version__,
             "horizon_memory": __version__,
             "python": platform.python_version(),
             "platform": platform.platform(),

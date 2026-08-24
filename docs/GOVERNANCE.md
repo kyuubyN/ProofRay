@@ -1,6 +1,8 @@
 # Governance
 
-Horizon Memory is an open technical commons with a clearly preserved origin.
+ProofRay is an open technical commons with a clearly preserved origin. It is
+maintained under the institutional name ProofRay Intelligence and descends from
+the Horizon research line in Q-HDRE.
 
 ## Founding role
 
