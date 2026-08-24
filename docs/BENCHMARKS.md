@@ -2,21 +2,28 @@
 
 ## LoCoMo personal-recall transport (consumed development)
 
-The current 32-turn scorer-blind cascade reaches at least one annotated turn on **1,770/1,982
-(89.30%)** questions with non-empty evidence annotations, all annotated turns on **1,580/1,982
-(79.72%)**, and **2,084/2,821 (73.87%)** annotated turn IDs. These are retrieval figures, not
-answer accuracy. Four questions have empty evidence lists and three annotated source IDs are absent
-from the runtime conversation, so the raw physical ceilings are 1,979/1,982 all-hit and 2,818/2,821
-turn recall.
+The scorer-blind cascade at its historical 32-candidate cut reaches at least one annotated turn on
+**1,770/1,982 (89.30%)** questions with non-empty evidence annotations, all annotated turns on
+**1,580/1,982 (79.72%)**, and **2,084/2,821 (73.87%)** annotated turn IDs. The frozen high-recall
+consumer cut at 64 reaches **1,799/1,982 (90.77%)** hit, **1,611/1,982 (81.28%)** all-hit and
+**2,188/2,821 (77.56%)** turn recall, with mean 44.49 returned candidates. These are retrieval
+figures, not answer accuracy. Four questions have empty evidence lists and three annotated source
+IDs are absent from the runtime conversation, so the raw physical ceilings are 1,979/1,982 all-hit
+and 2,818/2,821 turn recall.
 
-The exact cascade is now an opt-in core `ConversationalRecallGenerator`. A scorer-blind replay over
-all **1,986** questions compared its FactId ranking against the frozen lab implementation and found
-**0 mismatches** (`result_sha256=1e647aa3...a80`, artifact SHA-256
-`9384eef5...ab9`). The dataset is consumed development and the 89.30% arm does not cross the project's
-90% default-activation threshold, so structured conversational recall remains opt-in. The
-structured HTTP/MCP surface now preserves speaker, session and observation-time metadata, but the
-generator remains deploy-time opt-in and this consumed-development result still cannot authorize a
-default.
+The exact cascade is an opt-in core `ConversationalRecallGenerator`, and
+`CONVERSATIONAL_HIGH_RECALL_PROFILE` binds its consumer to the measured 64 cut while preserving the
+24,576-byte final-answer ceiling. The dataset is consumed development and the 90.77% value is
+candidate hit rather than final answer correctness, so it does not override the roadmap requirement
+for an independently manifested personal cohort. Structured HTTP/MCP preserves speaker, session and
+observation-time metadata, but the generator remains deploy-time opt-in; enabling it selects the
+measured profile instead of silently using the unrelated scale-memory limit.
+
+The final two-path replay recomputed all **1,986/1,986** questions and compared the independent lab
+construction with the packaged core through prefix 96 before opening evidence annotations: **0
+ranking mismatches**. It reproduced the 32/64/96 cuts exactly, used 281,820 KiB peak RSS and took
+1,453.31 s while computing both paths (`result_sha256=6fa00695...b3e2`, artifact SHA-256
+`3923b600...bc2d`).
 
 ## LongMemEval proof-first final output (consumed development)
 
@@ -60,14 +67,23 @@ history. Nothing here is a universal ≥90% claim; the mechanism's later core pr
 retroactively validate this counterfactual. The one remaining row abstains on a real
 corpus/annotation ambiguity.
 
-The executor and its question-bound certificate are now packaged in the core, but benchmark
-adapters, labels and judges are not. A scorer-blind MemGym-DR audit over the 120 consumed-development
-episodes gave **0/120 resolved proofs** (`result_sha256=2f1130f7...9cc1`). This cleanly falsifies the
-idea that the current finite operator family itself solves MemGym composition: those questions are
-predominantly explanatory/integrative rather than closed scalar programs. Because all 120 misses
-fail closed, enabling the resolver in a cascade does not erase the deterministic evidence fallback,
-but it provides no measured MemGym coverage. The next MemGym composition mechanism must certify
-question obligations and contradictions; adding more arithmetic operators is not the identified gate.
+The scalar executor and its question-bound certificate are packaged in the core, but benchmark
+adapters, labels and judges are not. The original scorer-blind MemGym-DR scalar audit gave **0/120
+resolved proofs**, confirming that more arithmetic is not the identified gate. The subsequent
+Explanatory Obligation Proof kernel compiles visible turn subqueries and the final query into a
+source-bounded DAG, closes exact witnesses and bridges through Sigma-PBA, and records reuse/join
+closures. Its monotonic v6 runtime-only replay closes **6/120** proof dossiers, leaving 86 unsupported,
+16 contested and 12 abstaining; it preserves all earlier closed rows and uses no scorer, gold, model
+or API (`result_sha256=084a7362...e92`). This is proof coverage, not judge-scored answer accuracy.
+`ExplanatoryProofResolver` is therefore packaged as an opt-in contextual resolver with a reopenable
+certificate; `ProofCascadeResolver` provides scalar-first then EOP ordering, but it is not the
+default MemGym answer path. The remaining gate is multi-claim
+COMPARE/QUANTIFY/EXPLAIN composition, not retrieval or scalar arithmetic.
+
+A separate runtime-only promotion audit recomputed all 120 rows through the packaged core and found
+**0 mismatches** across state, graph, bindings, bridges, closures, certificate and diagnostics. It
+reproduced 86 unsupported / 16 contested / 12 abstain / 6 resolved exactly
+(`result_sha256=3666855d...1dad`, artifact SHA-256 `89949ee6...66b`).
 
 ### Untouched post-calibration holdout v3: 119/120 did not transfer end-to-end
 

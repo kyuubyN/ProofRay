@@ -22,7 +22,9 @@ os.environ.setdefault(
     str(Path(tempfile.gettempdir()) / "horizon-memory-test-credentials.json"))
 
 import _engine_bridge  # noqa: E402
-from horizon_memory import RouteDocument  # noqa: E402
+from horizon_memory import (  # noqa: E402
+    CONVERSATIONAL_HIGH_RECALL_PROFILE, DEFAULT_PROFILE, RouteDocument,
+)
 from horizon_memory.adapters.openai_compatible import TransportResponse  # noqa: E402
 from rate_limit import RATE_LIMITER  # noqa: E402
 from server import CREDENTIALS, STORE, app  # noqa: E402
@@ -105,6 +107,16 @@ class HorizonAPITests(unittest.TestCase):
         self.assertEqual(body["status"], "ok")
         self.assertIn("schema", body)
         self.assertIsInstance(body["conversational_recall"], bool)
+
+    def test_conversational_activation_selects_the_measured_64_cut_profile(self):
+        self.assertIs(_engine_bridge.conversational_engine_profile(False), DEFAULT_PROFILE)
+        self.assertIs(
+            _engine_bridge.conversational_engine_profile(True),
+            CONVERSATIONAL_HIGH_RECALL_PROFILE)
+        self.assertEqual(
+            _engine_bridge.conversational_engine_profile(True).claim_limit, 64)
+        with self.assertRaises(TypeError):
+            _engine_bridge.conversational_engine_profile(1)
 
     def test_create_answer_resolves_without_sources_by_default(self):
         response = self.client.post("/v1/answers", json={

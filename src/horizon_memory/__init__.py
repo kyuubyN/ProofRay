@@ -10,7 +10,8 @@ from __future__ import annotations
 from .api import HorizonMemory
 from .config import HorizonConfig, VALUE_MAX, VALUE_MIN
 from .engine_profile import (
-    DEFAULT_PROFILE, PERSONAL_MEMORY_PROFILE, TEAM_MEMORY_PROFILE, EngineProfile,
+    CONVERSATIONAL_HIGH_RECALL_PROFILE, DEFAULT_PROFILE, PERSONAL_MEMORY_PROFILE,
+    TEAM_MEMORY_PROFILE, EngineProfile,
 )
 from .answer_engine import (
     AnswerContextIntent, AnsweredClaim, AnsweredResult, ContextualDirectAnswerCertificate,
@@ -43,6 +44,16 @@ from .proof_convergent_executor import (
 )
 from .proof_convergent_resolver import (
     ProofConvergentCertificate, ProofConvergentResolver,
+)
+from .explanatory_obligation_proof import (
+    ExplanatoryIntent, ExplanatoryProofCertificate, ExplanatoryProofConfig,
+    ExplanatoryProofResult, ExplanatorySource, JoinClosure, ObligationGraph,
+    ObligationNode, WitnessBinding, WitnessedBridge, compile_obligation_graph,
+    solve_explanatory_obligations,
+)
+from .explanatory_proof_resolver import (
+    ExplanatoryDirectAnswerCertificate, ExplanatoryProofResolver,
+    ProofCascadeResolver,
 )
 from .claim_routing import ClaimGenerator, DEFAULT_WEIGHTS as CLAIM_GENERATOR_DEFAULT_WEIGHTS, claim_spans
 from .conformal_routing import (
@@ -123,7 +134,8 @@ from .types import (
 
 __all__ = [
     "HorizonMemory", "HorizonConfig", "VALUE_MAX", "VALUE_MIN",
-    "DEFAULT_PROFILE", "PERSONAL_MEMORY_PROFILE", "TEAM_MEMORY_PROFILE", "EngineProfile",
+    "CONVERSATIONAL_HIGH_RECALL_PROFILE", "DEFAULT_PROFILE", "PERSONAL_MEMORY_PROFILE",
+    "TEAM_MEMORY_PROFILE", "EngineProfile",
     "AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer",
     "ContextualDirectAnswerCertificate", "ContextualDirectAnswerResolver",
     "DirectAnswerCertificate", "DirectAnswerProposal", "DirectAnswerReader",
@@ -146,6 +158,11 @@ __all__ = [
     "compact_scalar_answer", "integrate_with_deterministic_fallback",
     "open_compact_scalar_answer", "render_convergent_answer",
     "ProofConvergentCertificate", "ProofConvergentResolver",
+    "ExplanatoryIntent", "ExplanatoryProofCertificate", "ExplanatoryProofConfig",
+    "ExplanatoryProofResult", "ExplanatorySource", "JoinClosure", "ObligationGraph",
+    "ObligationNode", "WitnessBinding", "WitnessedBridge", "compile_obligation_graph",
+    "solve_explanatory_obligations", "ExplanatoryDirectAnswerCertificate",
+    "ExplanatoryProofResolver", "ProofCascadeResolver",
     "ConformalCalibrator", "ConformalClaimGenerator", "ConformalDocumentGenerator",
     "LEXICAL_SUBLEXICAL_WEIGHTS", "collect_conformal_calibration_scores",
     "document_priority_by_source", "conformal_score_documents",

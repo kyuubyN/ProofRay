@@ -7,7 +7,8 @@ from datetime import date
 import pytest
 
 from horizon_memory import (
-    ConversationalRecallConfig, ConversationalRecallGenerator, HorizonAnswerEngine,
+    CONVERSATIONAL_HIGH_RECALL_PROFILE, ConversationalRecallConfig,
+    ConversationalRecallGenerator, HorizonAnswerEngine,
     QueryEnvelope, RouteDocument, RoutingIndex, compile_explicit_calendar_interval,
     expand_session_neighbors, protected_rank_merge, reciprocal_rank_fusion,
     stable_speaker_partition,
@@ -97,6 +98,12 @@ def test_generator_is_repeatable_under_input_shuffle_and_preserves_duplicate_fac
 
 def test_person_topic_stage_is_explicitly_disabled_by_the_frozen_default():
     assert ConversationalRecallConfig().person_topic_reserve == 0
+
+
+def test_high_recall_profile_changes_only_the_measured_consumer_cut():
+    assert CONVERSATIONAL_HIGH_RECALL_PROFILE.claim_limit == 64
+    assert CONVERSATIONAL_HIGH_RECALL_PROFILE.answer_bytes == 24_576
+    assert ConversationalRecallConfig().depth == 32
 
 
 def test_real_answer_engine_can_opt_into_cross_session_conversational_recall():

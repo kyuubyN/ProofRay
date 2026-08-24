@@ -235,10 +235,15 @@ requested; and morphology is admitted only when its bounded proposal head differ
 surface control. Every stage only reorders `FactId`s. Scores, topology and metadata cannot authorize
 an answer, and `HorizonVerifier` still rejects invalid scope, version, generation or source identity.
 
-All budgets live in frozen `ConversationalRecallConfig`, so consumed-development values are visible
-configuration rather than hidden package defaults. A full 1,986-question scorer-blind replay
-compared the frozen laboratory cascade with this core implementation and found **zero FactId-ranking
-mismatches** (`result_sha256=1e647aa3...a80`). The generator itself is opt-in, and
+All internal budgets live in frozen `ConversationalRecallConfig`, so consumed-development values are
+visible configuration rather than hidden package defaults. `CONVERSATIONAL_HIGH_RECALL_PROFILE`
+freezes the independently observed consumer cut at 64 without retuning those internal stages. At
+that cut the consumed LoCoMo replay reaches 1,799/1,982 annotated questions (90.77% hit), 1,611/1,982
+all-hit and 2,188/2,821 evidence IDs. Those are reachability metrics, not answer accuracy. The full
+scorer-blind equivalence replay compares the laboratory and core FactId prefixes before opening gold.
+That replay found zero mismatches across all 1,986 questions through prefix 96
+(`result_sha256=6fa00695...b3e2`).
+The generator itself is opt-in, and
 `HorizonAnswerEngine.allow_scope_fallback` is also `False` by default. A real cross-session call must
 construct structured documents, pass the generator and explicitly enable fallback. The optional
 person/topic reserve exists as a separately measurable configuration field but remains disabled in the
@@ -251,8 +256,10 @@ source, scope, session, version, sequence, observation time, role, speaker, opti
 and a caller-verifiable text digest. It also accepts
 FactId-bound observed context intents. Mixed legacy/structured arrays, unknown fields and cross-scope
 documents fail closed; metadata is never encoded into source text. The conversational generator is
-still disabled by default and requires deploy-time `HORIZON_CONVERSATIONAL_RECALL=true`, so transport
-support does not silently promote the consumed-development retrieval result.
+still disabled by default and requires deploy-time `HORIZON_CONVERSATIONAL_RECALL=true`. That flag
+also selects `CONVERSATIONAL_HIGH_RECALL_PROFILE`, so deployment uses the measured cut rather than
+the unrelated scale-memory limit. Consumed development alone still does not authorize a universal
+default.
 
 `QueryWitnessFrontloadConfig` is a separate opt-in final-ordering mechanism for multi-turn evidence.
 It ranks already-verified `AnsweredClaim` objects against the final question and caller-supplied
@@ -293,6 +300,21 @@ breaking the existing `resolve` protocol. The engine passes the same FactId-boun
 `AnswerContextIntent`s to resolution and certificate reopening, and preserves speaker, sequence and
 observation time in the verified authority rows. A contextual certificate that changes or ignores
 those coordinates fails closed before `DirectAnswer(state="resolved")` is admitted.
+
+`ExplanatoryProofResolver` implements that contextual protocol over the promoted EOP kernel. Each
+visible turn intent defines one exact FactId fiber; `ObligationNode`s compile the turn queries and
+final query into a DAG; `WitnessBinding`s bind exact source spans and roles; witnessed bridges join
+adjacent fibers; Sigma-PBA keeps alternative environments separate; and `JoinClosure` records reuse
+or final composition. Missing witnesses return unsupported, divergent complete worlds return
+contested, and budget or bridge exhaustion abstains. Its compact contextual certificate binds the
+question, authority coordinates, intents, bindings, bridges, closures and output, then reruns the
+finite kernel during reopening. The current MemGym runtime-only result is monotonic but sparse
+(6/120 closed proof dossiers), so this resolver is public and opt-in rather than the engine default.
+`ProofCascadeResolver` composes the existing scalar resolver before EOP without introducing another
+authority envelope; both return the canonical `DirectAnswerResolution` and the engine performs the
+same certificate-reopening gate.
+A 120-episode runtime-only lab/core audit found zero differences in proof state or certificate bytes
+(`result_sha256=3666855d...1dad`).
 
 The resolver also preserves each verified claim's `role` and `session_id`. By default, user assertions
 and role-less knowledge-base documents may participate as world authority; assistant utterances are

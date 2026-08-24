@@ -81,13 +81,17 @@ session, order and observation time as typed metadata instead of adding them to 
 
 ```python
 from datetime import date
-from horizon_memory import ConversationalRecallGenerator, HorizonAnswerEngine, RouteDocument
+from horizon_memory import (
+    CONVERSATIONAL_HIGH_RECALL_PROFILE, ConversationalRecallGenerator,
+    HorizonAnswerEngine, RouteDocument,
+)
 
 history = (
     RouteDocument(1, "I finally bought the cobalt bicycle.", 1, "summer-chat", 1, "chat:1",
                   sequence=1, event_time=date(2025, 7, 12).toordinal(), speaker="Alice"),
 )
 engine = HorizonAnswerEngine(
+    profile=CONVERSATIONAL_HIGH_RECALL_PROFILE,
     scope_id=1,
     session_id="current-chat",
     candidate_generator=ConversationalRecallGenerator(),
@@ -100,9 +104,11 @@ This generator only transports candidate `FactId`s. The normal Horizon verifier 
 authorizes every source, and unsupported or conflicting readout still has to abstain. Cross-session
 fallback is explicitly enabled above and remains off by default in the Python engine. HTTP and MCP
 also accept a backward-compatible structured document shape that preserves these coordinates without
-putting them into document text. The consumed-development conversational generator remains a
-deploy-time opt-in (`HORIZON_CONVERSATIONAL_RECALL=true`) because its current LoCoMo hit rate is below
-the default-activation gate.
+putting them into document text. The measured 64-candidate profile reaches 90.77% annotated-turn hit
+on consumed-development LoCoMo, but that is retrieval reachability rather than answer accuracy. It
+remains a deploy-time opt-in (`HORIZON_CONVERSATIONAL_RECALL=true`) until an independently manifested
+personal-conversation cohort confirms the result. Enabling the flag selects the exact
+`CONVERSATIONAL_HIGH_RECALL_PROFILE`, not the unevaluated 800-claim scale profile.
 
 `OpenTextHorizonMemory(..., ledger_path=...)` persists those route coordinates in the same attested
 sidecar record. Reopening the ledger reconstructs multi-session `RouteDocument`s exactly; legacy
@@ -129,6 +135,13 @@ This path is local and deterministic. A benchmark judge may score its frozen out
 API response or relevance score participates in proof construction or authorization. The default
 activation follows the measured >90% final-output gate; it does not make unsupported operator worlds
 answerable, and explicit `None` retains the prior evidence-only behavior.
+
+For visible multi-turn subqueries, `ExplanatoryProofResolver` is an additional opt-in contextual
+resolver. It closes a DAG of exact source obligations and witnessed bridges, rejects incomplete or
+contested worlds, and reopens a certificate bound to every context intent and authority coordinate.
+Its current MemGym consumed-development proof coverage is 6/120, so it is not enabled by default and
+is not advertised as MemGym answer accuracy. `ProofCascadeResolver` is the ready-made opt-in order:
+scalar proof first, explanatory proof second, ordinary engine evidence fallback last.
 
 ## What can you connect it to?
 

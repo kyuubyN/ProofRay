@@ -23,8 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from horizon_memory import (  # noqa: E402
-    AnswerContextIntent, AnsweredResult, ConversationalRecallGenerator, DEFAULT_PROFILE,
-    HorizonAnswerEngine, RouteDocument,
+    AnswerContextIntent, AnsweredResult, CONVERSATIONAL_HIGH_RECALL_PROFILE,
+    ConversationalRecallGenerator, DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument,
 )
 from horizon_memory.adapters import (  # noqa: E402
     OpenAICompatiblePolishAdapter, PolishConfig,
@@ -36,8 +36,18 @@ SESSION_ID = "api"
 CONVERSATIONAL_RECALL_ENABLED = os.environ.get(
     "HORIZON_CONVERSATIONAL_RECALL", "false").strip().casefold() in {
         "1", "true", "yes"}
+
+
+def conversational_engine_profile(enabled: bool):
+    """Bind the opt-in route to the exact measured 64-candidate consumer profile."""
+    if not isinstance(enabled, bool):
+        raise TypeError("conversational recall profile selector requires bool")
+    return CONVERSATIONAL_HIGH_RECALL_PROFILE if enabled else DEFAULT_PROFILE
+
+
 ENGINE = HorizonAnswerEngine(
-    profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID,
+    profile=conversational_engine_profile(CONVERSATIONAL_RECALL_ENABLED),
+    scope_id=SCOPE_ID, session_id=SESSION_ID,
     candidate_generator=(ConversationalRecallGenerator()
                          if CONVERSATIONAL_RECALL_ENABLED else None),
     # Structured conversational documents normally belong to earlier sessions.  The fallback

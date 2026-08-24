@@ -207,6 +207,15 @@ class EngineProfile:
 
 DEFAULT_PROFILE = EngineProfile()
 
+# Conversational candidate profile frozen on the scorer-blind LoCoMo consumed-development
+# cascade.  The mechanism itself is the default ``ConversationalRecallGenerator``; ``64`` is only
+# the measured consumer cut, not a retuned internal constant.  It reached 1,799/1,982 annotated
+# questions with at least one cited turn (90.77%) while retaining the physical 24,576-byte answer
+# ceiling.  This is retrieval reachability, not answer accuracy, and therefore remains an explicit
+# conversational deployment choice until an independently manifested personal cohort confirms it.
+CONVERSATIONAL_HIGH_RECALL_PROFILE = EngineProfile(
+    name="conversational-high-recall-v1", claim_limit=64)
+
 # Named deployment presets ("Scale" / "Team" / "Personal" memory). `DEFAULT_PROFILE` above is
 # "Scale Memory": its `answer_shortlist_size=50`/`answer_relevance_gate_ratio=0.3` are exactly the
 # values the published MemGym-DR/D144 (0.95) and LongMemEval (0.767) judge scores were measured
@@ -288,5 +297,6 @@ PERSONAL_MEMORY_PROFILE = EngineProfile(
     claim_paragraph_context=True)
 
 __all__ = [
-    "SCHEMA", "DEFAULT_PROFILE", "TEAM_MEMORY_PROFILE", "PERSONAL_MEMORY_PROFILE", "EngineProfile",
+    "SCHEMA", "DEFAULT_PROFILE", "CONVERSATIONAL_HIGH_RECALL_PROFILE",
+    "TEAM_MEMORY_PROFILE", "PERSONAL_MEMORY_PROFILE", "EngineProfile",
 ]

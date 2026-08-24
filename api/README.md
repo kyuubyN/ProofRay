@@ -8,6 +8,18 @@ No model decides what is true. Every answer is composed from verified, sealed,
 source-attributable claims -- the API can hand back that full evidence trail on request,
 not just the compressed answer.
 
+Structured cross-session recall remains an explicit deployment choice:
+
+```bash
+HORIZON_CONVERSATIONAL_RECALL=true python3 api/server.py
+```
+
+That flag enables `ConversationalRecallGenerator` together with the exact measured
+`CONVERSATIONAL_HIGH_RECALL_PROFILE` (64 candidates, 24,576-byte final ceiling). Its 90.77% LoCoMo
+figure is annotated-turn retrieval hit on consumed development, not end-to-end answer accuracy; the
+route therefore remains off until explicitly selected and every returned source still passes the
+normal verifier.
+
 ## Running it
 
 ```bash
