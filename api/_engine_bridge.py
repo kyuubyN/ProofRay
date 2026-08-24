@@ -1,6 +1,6 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Shared glue between the two HorizonAPI transports (`server.py`'s HTTP surface and
+"""Shared glue between the two ProofRay transports (`server.py`'s HTTP surface and
 `mcp_server.py`'s MCP surface) so both call one implementation instead of two drifting copies.
 
 This is transport-adjacent plumbing, not a model adapter -- it stays AGPL like `server.py` itself,
@@ -33,8 +33,15 @@ from horizon_memory.adapters.openai_compatible import Transport, RequestsTranspo
 
 SCOPE_ID = 1
 SESSION_ID = "api"
-CONVERSATIONAL_RECALL_ENABLED = os.environ.get(
-    "HORIZON_CONVERSATIONAL_RECALL", "false").strip().casefold() in {
+
+
+def _brand_env(name: str, default: str | None = None) -> str | None:
+    """Read the canonical PROOFRAY variable, then its HORIZON compatibility alias."""
+    return os.environ.get(f"PROOFRAY_{name}", os.environ.get(f"HORIZON_{name}", default))
+
+
+CONVERSATIONAL_RECALL_ENABLED = (_brand_env(
+    "CONVERSATIONAL_RECALL", "false") or "false").strip().casefold() in {
         "1", "true", "yes"}
 
 
@@ -112,9 +119,9 @@ _STRUCTURED_DOCUMENT_REQUIRED = frozenset({
 
 # Deploy-time config for the optional `polish` step -- never caller input (see
 # build_polish_config's docstring for why).
-POLISH_BASE_URL = os.environ.get(
-    "HORIZON_POLISH_BASE_URL", "https://api.groq.com/openai/v1/chat/completions")
-POLISH_API_KEY_ENV = os.environ.get("HORIZON_POLISH_API_KEY_ENV")
+POLISH_BASE_URL = _brand_env(
+    "POLISH_BASE_URL", "https://api.groq.com/openai/v1/chat/completions")
+POLISH_API_KEY_ENV = _brand_env("POLISH_API_KEY_ENV")
 
 # Deploy-time config for which "activation mode" gates ENGINE.answer() (see maybe_answer()):
 # "direct" (default -- every request runs the pipeline, today's only behavior, unchanged) or
@@ -122,13 +129,14 @@ POLISH_API_KEY_ENV = os.environ.get("HORIZON_POLISH_API_KEY_ENV")
 # per-request caller field -- same reasoning as POLISH_BASE_URL/POLISH_API_KEY_ENV above: a
 # setting that changes whether/how much server-side work a request triggers must come from this
 # process's own environment, not an unauthenticated caller's request body.
-ACTIVATION_MODE = os.environ.get("HORIZON_ACTIVATION_MODE", "direct").strip().lower()
+ACTIVATION_MODE = (_brand_env("ACTIVATION_MODE", "direct") or "direct").strip().lower()
 
 # A small, closed, server-configurable trigger-phrase set -- not a growing dictionary. Overridable
-# via HORIZON_ACTIVATION_KEYWORDS (comma-separated), server-side only, mirroring the same
+# via PROOFRAY_ACTIVATION_KEYWORDS (legacy HORIZON_ACTIVATION_KEYWORDS; comma-separated),
+# server-side only, mirroring the same
 # closed-list discipline already used for `_RETRACTION_MARKER`/`_ZH_CORRECTION_MARKER` elsewhere
 # in this project: a fixed, small set of trigger phrases, not an attempt to enumerate every way a
-# caller might ask Horizon to recall something.
+# caller might ask ProofRay to recall something.
 DEFAULT_ACTIVATION_KEYWORDS = frozenset({
     "remember", "recall", "what did", "when did", "do you remember",
     "lembra", "lembrar", "lembra-se", "lembras", "você lembra", "se lembra",
@@ -141,7 +149,7 @@ def _parse_activation_keywords(raw: str | None) -> frozenset[str]:
     return frozenset(word.strip().lower() for word in raw.split(",") if word.strip())
 
 
-ACTIVATION_KEYWORDS = _parse_activation_keywords(os.environ.get("HORIZON_ACTIVATION_KEYWORDS"))
+ACTIVATION_KEYWORDS = _parse_activation_keywords(_brand_env("ACTIVATION_KEYWORDS"))
 
 # Overridable by tests, matching how tests already reach into STORE directly. None (the default)
 # means "construct a real network-capable RequestsTransport" -- see build_polish_adapter().
@@ -497,7 +505,7 @@ def build_polish_config(body: dict) -> PolishConfig | None:
     a clean tool error in mcp_server.py) when `polish: true` but `polish_model` is missing.
 
     `base_url` and `api_key_env` come only from this process's own environment
-    (HORIZON_POLISH_BASE_URL / HORIZON_POLISH_API_KEY_ENV), never from the request body. An
+    (PROOFRAY_POLISH_BASE_URL / PROOFRAY_POLISH_API_KEY_ENV), never from the request body. An
     earlier version let an unauthenticated caller set both directly: pointing `polish_base_url`
     at an attacker-controlled host while naming a real secret in `polish_api_key_env` made this
     process read that secret from its own environment and hand it to the attacker as a Bearer

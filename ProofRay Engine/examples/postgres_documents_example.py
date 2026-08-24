@@ -1,9 +1,9 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-""""Connect a database" -- Horizon has no database backend of its own; every call takes
+""""Connect a database" -- ProofRay has no database backend of its own; every call takes
 `documents: list[str] | tuple[RouteDocument, ...]` directly, so "connecting a database" is
-entirely the caller's own query, not a Horizon subsystem. This example queries a PostgreSQL
-table and feeds the matching rows straight into `HorizonAnswerEngine` -- swap the `SELECT` for
+entirely the caller's own query, not a ProofRay subsystem. This example queries a PostgreSQL
+table and feeds the matching rows straight into `ProofRayAnswerEngine` -- swap the `SELECT` for
 your own and the rest of this example is unchanged.
 
 Unlike the SQLite/MongoDB examples, there is no pure-Python, no-server stand-in for Postgres, so
@@ -11,15 +11,15 @@ this example requires a real Postgres instance and will not start one for you (d
 no background server, no extra resource usage). Point it at yours with `POSTGRES_DSN`:
 
     POSTGRES_DSN="postgresql://user:pass@localhost:5432/yourdb" \
-        python3 "HorizonAI Engine/examples/postgres_documents_example.py"
+        python3 "ProofRay Engine/examples/postgres_documents_example.py"
 
 Without `POSTGRES_DSN` set, this prints setup instructions and exits cleanly (no crash, no
 server started) instead of failing.
 
-This example calls `HorizonAnswerEngine` (the AGPL core) directly, hence the AGPL header --
+This example calls `ProofRayAnswerEngine` (the AGPL core) directly, hence the AGPL header --
 see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
-Run: python3 "HorizonAI Engine/examples/postgres_documents_example.py"
+Run: python3 "ProofRay Engine/examples/postgres_documents_example.py"
 Requires: pip install psycopg2-binary
 """
 from __future__ import annotations
@@ -31,7 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 SCOPE_ID = 1
 SESSION_ID = "postgres-example"
@@ -89,7 +89,7 @@ def main() -> None:
               "(starting a real Postgres server just for a demo isn't worth the resources).")
         print('Set it and re-run, e.g.:\n'
               '  POSTGRES_DSN="postgresql://user:pass@localhost:5432/yourdb" '
-              'python3 "HorizonAI Engine/examples/postgres_documents_example.py"')
+              'python3 "ProofRay Engine/examples/postgres_documents_example.py"')
         return
 
     import psycopg2
@@ -102,7 +102,7 @@ def main() -> None:
     finally:
         conn.close()
 
-    engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
+    engine = ProofRayAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
     result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
 
     print("state:", result.state)

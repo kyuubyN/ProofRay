@@ -1,8 +1,8 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""A local, single-operator access token bound to this machine.
+"""A local, single-operator ProofRay access token bound to this machine.
 
-Horizon's HTTP API has no multi-tenant concept and is meant to run on the operator's own machine
+ProofRay's HTTP API has no multi-tenant concept and is meant to run on the operator's own machine
 (default bind `127.0.0.1`, see `server.py`). The property this module provides is narrower than a
 real multi-user auth system, and is deliberately not presented as one: a random token is generated
 once, on first run, and persisted locally alongside a best-effort OS machine identifier recomputed
@@ -25,14 +25,20 @@ from pathlib import Path
 
 
 def credentials_path() -> Path:
-    override = os.environ.get("HORIZON_API_CREDENTIALS_PATH")
+    override = os.environ.get("PROOFRAY_API_CREDENTIALS_PATH") or os.environ.get(
+        "HORIZON_API_CREDENTIALS_PATH")
     if override:
         return Path(override)
     if platform.system() == "Windows":
         base = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming")))
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
-    return base / "horizon-memory" / "api_credentials.json"
+    proofray_path = base / "proofray" / "api_credentials.json"
+    legacy_path = base / "horizon-memory" / "api_credentials.json"
+    # Reuse an existing alpha credential rather than silently rotating its bearer token.
+    if not proofray_path.exists() and legacy_path.exists():
+        return legacy_path
+    return proofray_path
 
 
 def _read_linux_machine_id() -> str | None:

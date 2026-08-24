@@ -1,9 +1,10 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Horizon Memory — standalone, model-agnostic memory for AI systems.
+"""ProofRay — standalone, model-agnostic memory for AI systems.
 
-The public entry point is :class:`HorizonMemory`. The package has no VTE,
-LLM, hosted-model, or network dependency in its core execution path.
+The historical ``horizon_memory`` namespace remains supported for compatibility.
+New integrations may import the same API through :mod:`proofray`. The package has
+no VTE, LLM, hosted-model, or network dependency in its core execution path.
 """
 from __future__ import annotations
 
@@ -210,3 +211,15 @@ __all__ = [
 ]
 
 __version__ = "0.1.0a1"
+
+# ProofRay public spelling.  These aliases intentionally preserve the mature Horizon
+# class identities, serialized records and import paths during the alpha rebrand.
+ProofRayMemory = HorizonMemory
+ProofRayConfig = HorizonConfig
+ProofRayAnswerEngine = HorizonAnswerEngine
+ProofRayVerifier = HorizonVerifier
+OpenTextProofRayMemory = OpenTextHorizonMemory
+__all__ += [
+    "ProofRayMemory", "ProofRayConfig", "ProofRayAnswerEngine", "ProofRayVerifier",
+    "OpenTextProofRayMemory",
+]

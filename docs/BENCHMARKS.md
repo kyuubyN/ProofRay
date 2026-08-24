@@ -119,7 +119,7 @@ is not accuracy. See `lab/results/proof-convergent-longmemeval-holdout-score-v2.
 counterfactual must not be cited as universal accuracy. The post-holdout fail-closed fixes require a
 new independent evaluation and are not retroactively validated on this consumed holdout.
 
-Horizon Memory has different validation surfaces. Results from structured
+ProofRay has different validation surfaces. Results from structured
 causal execution, retrieval and language-model reading are reported separately
 because they measure different things. Retrieval hit rate is not answer
 accuracy, and selective precision must always be accompanied by coverage.

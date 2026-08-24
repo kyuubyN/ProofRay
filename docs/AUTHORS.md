@@ -2,8 +2,9 @@
 
 ## Creator and founding maintainer
 
-- **Kaue Oliveira Costa (kyuubyN)** — creator of the Horizon Memory
-  architecture, original author, research lead and founding maintainer.
+- **Kaue Oliveira Costa (kyuubyN)** — creator of the ProofRay architecture
+  (originally developed as Horizon Memory), original author, research lead and
+  founding maintainer.
   - ORCID: <https://orcid.org/0009-0009-8502-3220>
   - Public contact: <kaue.o.costa@proton.me>
   - Country: Brazil

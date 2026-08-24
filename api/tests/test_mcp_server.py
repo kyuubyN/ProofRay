@@ -1,6 +1,6 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""HorizonAPI over MCP: the horizon_ask tool, exercised both as a plain function and through
+"""ProofRay over MCP: canonical and compatibility tools exercised through
 the real MCP server's list_tools()/call_tool() (no subprocess/stdio round-trip needed -- the
 mcp SDK's MCPServer exposes both as directly-awaitable coroutines)."""
 from __future__ import annotations
@@ -94,17 +94,18 @@ class MCPToolTests(unittest.TestCase):
     call_tool(), confirming the tool is actually registered and reachable as an MCP client
     would see it -- not just that the underlying Python function works."""
 
-    def test_horizon_ask_is_registered(self):
+    def test_proofray_and_horizon_alias_are_registered(self):
         async def run():
             return await mcp.list_tools()
         tools = anyio.run(run)
         names = [t.name for t in tools]
+        self.assertIn("proofray_ask", names)
         self.assertIn("horizon_ask", names)
 
     def test_call_tool_returns_the_serialized_answer(self):
         async def run():
             return await mcp.call_tool(
-                "horizon_ask", {"question": QUESTION, "documents": DOCUMENTS})
+                "proofray_ask", {"question": QUESTION, "documents": DOCUMENTS})
         result = anyio.run(run)
         self.assertFalse(result.is_error)
         body = json.loads(result.content[0].text)

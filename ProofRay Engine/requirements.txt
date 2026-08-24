@@ -4,7 +4,7 @@ flask>=3.0
 mcp[cli]>=2.0
 requests>=2.31
 
-# Only needed for examples/mongodb_documents_example.py -- not a Horizon dependency, this
+# Only needed for examples/mongodb_documents_example.py -- not a ProofRay dependency, this
 # example just demonstrates the bring-your-own-database pattern against MongoDB specifically.
 pymongo>=4.6
 mongomock>=4.1

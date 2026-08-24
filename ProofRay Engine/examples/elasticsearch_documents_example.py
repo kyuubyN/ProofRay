@@ -10,17 +10,17 @@ requires a real cluster and, deliberately, will not start one for you. Point it 
 `ELASTICSEARCH_URL`:
 
     ELASTICSEARCH_URL="http://localhost:9200" \
-        python3 "HorizonAI Engine/examples/elasticsearch_documents_example.py"
+        python3 "ProofRay Engine/examples/elasticsearch_documents_example.py"
 
 Without `ELASTICSEARCH_URL` set, this prints setup instructions and exits cleanly instead of
 failing. This is also the most direct "already have a search system, want deterministic answers
 instead" example in this folder: everything indexed for full-text search already has a `body`
 this script can pull out and route the same way as any other document source.
 
-This example calls `HorizonAnswerEngine` (the AGPL core) directly, hence the AGPL header --
+This example calls `ProofRayAnswerEngine` (the AGPL core) directly, hence the AGPL header --
 see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
-Run: python3 "HorizonAI Engine/examples/elasticsearch_documents_example.py"
+Run: python3 "ProofRay Engine/examples/elasticsearch_documents_example.py"
 Requires: pip install elasticsearch
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 SCOPE_ID = 1
 SESSION_ID = "elasticsearch-example"
@@ -83,7 +83,7 @@ def main() -> None:
               "(a real cluster is heavier than this demo needs).")
         print('Set it and re-run, e.g.:\n'
               '  ELASTICSEARCH_URL="http://localhost:9200" '
-              'python3 "HorizonAI Engine/examples/elasticsearch_documents_example.py"')
+              'python3 "ProofRay Engine/examples/elasticsearch_documents_example.py"')
         return
 
     from elasticsearch import Elasticsearch
@@ -92,7 +92,7 @@ def main() -> None:
     _seed_if_empty(client)
     documents = _documents_from_elasticsearch(client)
 
-    engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
+    engine = ProofRayAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
     result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
 
     print("state:", result.state)

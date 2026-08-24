@@ -51,7 +51,7 @@ assessment of impact. There is no bug-bounty program; acknowledgement in
 
 ## Misuse and abuse
 
-Horizon Memory is a persistent, provenance-tracking memory substrate. That
+ProofRay is a persistent, provenance-tracking memory substrate. That
 shape has real misuse potential distinct from ordinary software
 vulnerabilities — most notably covert surveillance, non-consensual profiling,
 and long-term tracking of individuals without their knowledge. This is a

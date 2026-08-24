@@ -1,16 +1,16 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Use Gemini only after Horizon has consulted MongoDB and verified its memory.
+"""Use Gemini only after ProofRay has consulted MongoDB and verified its memory.
 
 Two modes are demonstrated:
 
 ``polish``
-    Horizon queries MongoDB first. Gemini receives only Horizon's verified result and may rewrite
+    ProofRay queries MongoDB first. Gemini receives only ProofRay's verified result and may rewrite
     it for presentation. The database corpus never leaves the process.
 
 ``tool``
-    Gemini receives the user's question and must call ``query_horizon_memory``. The application
-    executes that tool locally against MongoDB/Horizon, returns only its verified result, and lets
+    Gemini receives the user's question and must call ``query_proofray_memory``. The application
+    executes that tool locally against MongoDB/ProofRay, returns only its verified result, and lets
     Gemini write the final response.
 
 With no ``MONGODB_URI``, the sibling MongoDB example uses an in-process ``mongomock`` fixture. Set
@@ -19,9 +19,9 @@ the variable to query a real MongoDB deployment. Gemini credentials are read onl
 
 Run from the repository root:
 
-    python3 "HorizonAI Engine/examples/gemini_horizon_tool_call.py" --mode polish
-    python3 "HorizonAI Engine/examples/gemini_horizon_tool_call.py" --mode tool
-    python3 "HorizonAI Engine/examples/gemini_horizon_tool_call.py" --mode both
+    python3 "ProofRay Engine/examples/gemini_proofray_tool_call.py" --mode polish
+    python3 "ProofRay Engine/examples/gemini_proofray_tool_call.py" --mode tool
+    python3 "ProofRay Engine/examples/gemini_proofray_tool_call.py" --mode both
 """
 from __future__ import annotations
 
@@ -44,14 +44,14 @@ import mongodb_documents_example as mongo  # noqa: E402
 DEFAULT_QUESTION = "What percent did the Meridian project reduce cost by?"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 GeminiGenerate = Callable[[dict], dict]
-HorizonTool = Callable[[str], dict]
+ProofRayTool = Callable[[str], dict]
 
 
-def query_horizon_memory(question: str) -> dict:
-    """Execute the only authority-bearing step locally against MongoDB and Horizon."""
+def query_proofray_memory(question: str) -> dict:
+    """Execute the only authority-bearing step locally against MongoDB and ProofRay."""
     collection, is_mock = mongo._get_collection()
     documents = mongo._documents_from_mongo(collection)
-    engine = mongo.HorizonAnswerEngine(
+    engine = mongo.ProofRayAnswerEngine(
         profile=mongo.DEFAULT_PROFILE,
         scope_id=mongo.SCOPE_ID,
         session_id=mongo.SESSION_ID,
@@ -78,6 +78,10 @@ def query_horizon_memory(question: str) -> dict:
     }
 
 
+# Public alpha compatibility: integrations copied from the Horizon-era tutorial keep working.
+query_horizon_memory = query_proofray_memory
+
+
 def _response_parts(response: dict) -> list[dict]:
     try:
         return list(response["candidates"][0]["content"]["parts"])
@@ -91,9 +95,9 @@ def _response_text(response: dict) -> str:
 
 def _tool_declaration() -> list[dict]:
     return [{"functionDeclarations": [{
-        "name": "query_horizon_memory",
+        "name": "query_proofray_memory",
         "description": (
-            "Query the local proof-carrying Horizon memory. Call this before answering a factual "
+            "Query the local proof-carrying ProofRay memory. Call this before answering a factual "
             "memory question."
         ),
         "parameters": {
@@ -107,32 +111,32 @@ def _tool_declaration() -> list[dict]:
 _SYSTEM = {
     "parts": [{"text": (
         "You are only a presentation layer and have no memory authority. Use only the result from "
-        "query_horizon_memory. If it returns state=abstain, say there is not enough verified "
+        "query_proofray_memory. If it returns state=abstain, say there is not enough verified "
         "memory. Never add or change a fact or number."
     )}]
 }
 
 
-def run_polish(question: str, horizon: dict, generate: GeminiGenerate) -> str:
-    """One model call: rewrite only the already-verified Horizon result."""
+def run_polish(question: str, proofray: dict, generate: GeminiGenerate) -> str:
+    """One model call: rewrite only the already-verified ProofRay result."""
     payload = {
         "systemInstruction": {"parts": [{"text": (
-            "You are only a presentation layer. Rewrite the verified Horizon result into one "
+            "You are only a presentation layer. Rewrite the verified ProofRay result into one "
             "concise answer. Do not add, infer, calculate, or change any fact or number. If its "
             "state is abstain, answer that there is not enough verified memory."
         )}]},
         "contents": [{"role": "user", "parts": [{"text": json.dumps({
             "question": question,
-            "horizon_state": horizon["state"],
-            "horizon_authority": horizon["authority"],
-            "horizon_answer": horizon["answer"],
+            "proofray_state": proofray["state"],
+            "proofray_authority": proofray["authority"],
+            "proofray_answer": proofray["answer"],
         }, ensure_ascii=False)}]}],
         "generationConfig": {"temperature": 0, "maxOutputTokens": 256},
     }
     return _response_text(generate(payload))
 
 
-def run_tool_call(question: str, horizon_tool: HorizonTool,
+def run_tool_call(question: str, proofray_tool: ProofRayTool,
                   generate: GeminiGenerate) -> dict:
     """Two model calls: request one native function call, execute it locally, then render."""
     tools = _tool_declaration()
@@ -143,26 +147,26 @@ def run_tool_call(question: str, horizon_tool: HorizonTool,
         "tools": tools,
         "toolConfig": {"functionCallingConfig": {
             "mode": "ANY",
-            "allowedFunctionNames": ["query_horizon_memory"],
+            "allowedFunctionNames": ["query_proofray_memory"],
         }},
         "generationConfig": {"temperature": 0, "maxOutputTokens": 256},
     })
     calls = [part["functionCall"] for part in _response_parts(first)
              if "functionCall" in part]
-    if len(calls) != 1 or calls[0].get("name") != "query_horizon_memory":
-        raise RuntimeError("Gemini did not request exactly one Horizon tool call")
+    if len(calls) != 1 or calls[0].get("name") != "query_proofray_memory":
+        raise RuntimeError("Gemini did not request exactly one ProofRay tool call")
     tool_question = calls[0].get("args", {}).get("question")
     if not isinstance(tool_question, str) or not tool_question.strip():
-        raise RuntimeError("Gemini supplied an invalid Horizon tool question")
-    horizon = horizon_tool(tool_question)
+        raise RuntimeError("Gemini supplied an invalid ProofRay tool question")
+    proofray = proofray_tool(tool_question)
     model_content = first["candidates"][0]["content"]
     second = generate({
         "systemInstruction": _SYSTEM,
         "contents": initial_contents + [
             model_content,
             {"role": "user", "parts": [{"functionResponse": {
-                "name": "query_horizon_memory",
-                "response": horizon,
+                "name": "query_proofray_memory",
+                "response": proofray,
             }}]},
         ],
         "tools": tools,
@@ -172,8 +176,8 @@ def run_tool_call(question: str, horizon_tool: HorizonTool,
     })
     return {
         "tool_question": tool_question,
-        "horizon_state": horizon["state"],
-        "horizon_authority": horizon["authority"],
+        "proofray_state": proofray["state"],
+        "proofray_authority": proofray["authority"],
         "answer": _response_text(second),
     }
 
@@ -221,14 +225,14 @@ def main() -> None:
     transport = GeminiREST(model=args.model)
     output = {"question": args.question, "model": args.model}
     if args.mode in ("polish", "both"):
-        horizon = query_horizon_memory(args.question)
-        output["horizon"] = {
-            key: value for key, value in horizon.items() if key != "answer"}
+        proofray = query_proofray_memory(args.question)
+        output["proofray"] = {
+            key: value for key, value in proofray.items() if key != "answer"}
         output["polished_answer"] = run_polish(
-            args.question, horizon, transport.generate)
+            args.question, proofray, transport.generate)
     if args.mode in ("tool", "both"):
         output["tool_call"] = run_tool_call(
-            args.question, query_horizon_memory, transport.generate)
+            args.question, query_proofray_memory, transport.generate)
     output["gemini_generate_content_calls"] = transport.call_count
     print(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True))
 

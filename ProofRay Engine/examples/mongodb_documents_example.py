@@ -1,28 +1,28 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-""""Connect a database" -- Horizon has no database backend of its own; every call takes
+""""Connect a database" -- ProofRay has no database backend of its own; every call takes
 `documents: list[str] | tuple[RouteDocument, ...]` directly, so "connecting a database" is
-entirely the caller's own query, not a Horizon subsystem. This example queries a MongoDB
-collection and feeds the matching documents straight into `HorizonAnswerEngine` -- swap the
+entirely the caller's own query, not a ProofRay subsystem. This example queries a MongoDB
+collection and feeds the matching documents straight into `ProofRayAnswerEngine` -- swap the
 `find(...)` query for your own and the rest of this example is unchanged.
 
 By default this runs against `mongomock` (an in-process, pure-Python MongoDB stand-in --
 `pip install mongomock`), so it works with no server at all and is safe to run in CI. Point it
 at a real deployment by setting the `MONGODB_URI` environment variable, e.g.:
 
-    MONGODB_URI="mongodb://localhost:27017" python3 "HorizonAI Engine/examples/mongodb_documents_example.py"
+    MONGODB_URI="mongodb://localhost:27017" python3 "ProofRay Engine/examples/mongodb_documents_example.py"
 
 Nothing else in this file changes -- pymongo and mongomock expose the same `find()` API, which
-is the entire point of the bring-your-own-database pattern: Horizon never knows or cares which
+is the entire point of the bring-your-own-database pattern: ProofRay never knows or cares which
 one served the documents.
 
-This example calls `HorizonAnswerEngine` (the AGPL core) directly, hence the AGPL header --
+This example calls `ProofRayAnswerEngine` (the AGPL core) directly, hence the AGPL header --
 see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
-Run: python3 "HorizonAI Engine/examples/mongodb_documents_example.py"
+Run: python3 "ProofRay Engine/examples/mongodb_documents_example.py"
 Requires: pip install pymongo mongomock
 
-Mongo `_id` values are mapped to Horizon's frozen 62-bit FactId domain with SHA-256. Python's
+Mongo `_id` values are mapped to ProofRay's frozen 62-bit FactId domain with SHA-256. Python's
 process-randomized built-in `hash()` must never be used for durable source identity.
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from proofray import DEFAULT_PROFILE, ProofRayAnswerEngine, RouteDocument
 
 SCOPE_ID = 1
 SESSION_ID = "mongodb-example"
@@ -95,7 +95,7 @@ def main() -> None:
     collection, is_mock = _get_collection()
     documents = _documents_from_mongo(collection)
 
-    engine = HorizonAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
+    engine = ProofRayAnswerEngine(profile=DEFAULT_PROFILE, scope_id=SCOPE_ID, session_id=SESSION_ID)
     result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
 
     print("state:", result.state)

@@ -5,7 +5,8 @@ client-suppliable header, so it isn't spoofable by the request itself).
 
 Refills continuously rather than resetting on a fixed clock tick, so a caller isn't punished for
 bursting right after an arbitrary reset boundary and isn't silently starved either:
-`HORIZON_RATE_LIMIT_PER_MINUTE` (default 60) is deploy-time env config, so an operator who
+`PROOFRAY_RATE_LIMIT_PER_MINUTE` (legacy `HORIZON_RATE_LIMIT_PER_MINUTE`, default 60) is
+deploy-time env config, so an operator who
 legitimately sends a high volume of documents per call (not more calls) can raise it without a
 code change. A rejected request is logged at WARNING, not silently dropped, so an operator can
 tell a real rate-limit hit from a client bug.
@@ -18,7 +19,7 @@ import time
 from collections import OrderedDict
 from threading import RLock
 
-logger = logging.getLogger("horizon.api.rate_limit")
+logger = logging.getLogger("proofray.api.rate_limit")
 
 _DEFAULT_PER_MINUTE = 60
 # Distinct-key eviction bound, matching the same "an unauthenticated caller must never make this
@@ -28,7 +29,8 @@ _MAX_TRACKED_KEYS = 10_000
 
 
 def configured_capacity() -> int:
-    raw = os.environ.get("HORIZON_RATE_LIMIT_PER_MINUTE")
+    raw = os.environ.get(
+        "PROOFRAY_RATE_LIMIT_PER_MINUTE", os.environ.get("HORIZON_RATE_LIMIT_PER_MINUTE"))
     if raw is None:
         return _DEFAULT_PER_MINUTE
     try:
@@ -78,7 +80,7 @@ class RateLimiter:
             allowed = bucket.allow()
         if not allowed:
             logger.warning(
-                "rate limit exceeded for %s (limit=%s/min; set HORIZON_RATE_LIMIT_PER_MINUTE to "
+                "rate limit exceeded for %s (limit=%s/min; set PROOFRAY_RATE_LIMIT_PER_MINUTE to "
                 "raise it)", key, self._capacity)
         return allowed
 

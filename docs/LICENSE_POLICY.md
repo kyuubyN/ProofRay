@@ -2,7 +2,7 @@
 
 ## The model: a free kernel, adapters are your distribution
 
-Horizon Memory is meant to work the way the Linux kernel does. The kernel
+ProofRay is meant to work the way the Linux kernel does. The kernel
 itself (`src/horizon_memory/`, excluding `adapters/`) is free software under
 **AGPL-3.0-or-later** — always free, always source-available, including for a
 modified version offered as a network service. Anyone can build a
@@ -13,7 +13,7 @@ and Red Hat build on the Linux kernel rather than on a fork of it.
 the SPDX expression `Apache-2.0 OR AGPL-3.0-or-later`: pick whichever license
 suits your integration. Apache-2.0 has no copyleft/network-source obligation,
 so a closed-source product, a hosted SaaS, or a proprietary adapter connecting
-Horizon to your own systems can use and extend those specific files without
+ProofRay to your own systems can use and extend those specific files without
 being required to publish its own source — exactly the freedom Ubuntu has to
 ship proprietary tools alongside the GPL kernel it's built on. This dual
 license applies **only** to files that carry that exact SPDX header; it is
@@ -37,8 +37,8 @@ as relicensing the engine or experimental retrieval implementation.
 
 The AGPL is a free-software license and does not forbid commercial use or a
 particular field of use. It protects source availability, including for
-modified network services. No contributor or user should describe Horizon
-Memory as “non-commercial software.”
+modified network services. No contributor or user should describe ProofRay as
+“non-commercial software.”
 
 Commercial use is permitted when its applicable license is followed. Separate
 commercial licenses may be offered later, but they do not revoke rights already

@@ -1,7 +1,7 @@
-"""Horizon Memory — live demo server.
+"""ProofRay — live demo server.
 
-Runs the REAL Horizon pipeline per query (routing -> verification -> composition), not a
-lookup table: documents are ingested into an actual HorizonMemory store, every returned claim
+Runs the real ProofRay pipeline per query (routing -> verification -> composition), not a
+lookup table: documents are ingested into an actual ProofRay-compatible store, every returned claim
 is re-opened and verified against its own source span before it is shown, and the answer is
 composed deterministically with zero LLM involvement.
 
@@ -64,7 +64,7 @@ def _load_dataset():
                 ROWS.append(row)
                 BY_QUESTION[row["question"].strip()] = row
             offset += length
-    print(f"[horizon] indexed {len(ROWS)} questions from {DATASET} (contexts read on demand)")
+    print(f"[proofray] indexed {len(ROWS)} questions from {DATASET} (contexts read on demand)")
 
 
 def _context_of(row):
@@ -217,15 +217,15 @@ def _warm_cache():
                     pool.imap_unordered(_warm_one, ordinals), start=1):
                 if error is not None:
                     failed += 1
-                    print(f"[horizon] warm-up failed for ordinal {ordinal}: {error}", flush=True)
+                    print(f"[proofray] warm-up failed for ordinal {ordinal}: {error}", flush=True)
                 else:
                     _RESULT_CACHE[ordinal] = payload
                 if done % 20 == 0:
-                    print(f"[horizon] warmed {done}/{len(ordinals)}", flush=True)
+                    print(f"[proofray] warmed {done}/{len(ordinals)}", flush=True)
     except Exception as error:          # a failed warm-up must never take the server down
-        print(f"[horizon] warm-up stopped: {error}", flush=True)
+        print(f"[proofray] warm-up stopped: {error}", flush=True)
         return
-    print(f"[horizon] warm-up complete in {time.time() - started:.0f}s "
+    print(f"[proofray] warm-up complete in {time.time() - started:.0f}s "
           f"({len(_RESULT_CACHE)}/{len(ordinals)} ready, {failed} failed)", flush=True)
 
 
@@ -290,6 +290,7 @@ def _query_from_body() -> str:
     return (body.get("query") or "").strip()
 
 
+@app.route("/api/search_proofray", methods=["POST"])
 @app.route("/api/search_horizon", methods=["POST"])
 def search_horizon():
     query = _query_from_body()

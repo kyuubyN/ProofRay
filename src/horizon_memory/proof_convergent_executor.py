@@ -406,7 +406,7 @@ _WORDNET_CACHE: dict[str, WordNetNounGraph] = {}
 
 
 def configured_wordnet() -> WordNetNounGraph | None:
-    directory = os.environ.get("HORIZON_WORDNET_DIR")
+    directory = os.environ.get("PROOFRAY_WORDNET_DIR", os.environ.get("HORIZON_WORDNET_DIR"))
     if not directory:
         return None
     resolved = str(Path(directory).resolve())

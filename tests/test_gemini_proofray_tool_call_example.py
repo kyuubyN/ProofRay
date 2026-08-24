@@ -6,11 +6,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXAMPLE = ROOT / "HorizonAI Engine/examples/gemini_horizon_tool_call.py"
+EXAMPLE = ROOT / "ProofRay Engine/examples/gemini_proofray_tool_call.py"
 
 
 def _load_example():
-    spec = importlib.util.spec_from_file_location("gemini_horizon_tool_call", EXAMPLE)
+    spec = importlib.util.spec_from_file_location("gemini_proofray_tool_call", EXAMPLE)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -61,7 +61,7 @@ def test_polish_sends_only_horizon_result_and_uses_one_model_call():
     assert "source_count" not in encoded
 
 
-def test_native_tool_cycle_calls_horizon_locally_then_renders_without_tool_loop():
+def test_native_tool_cycle_calls_proofray_locally_then_renders_without_tool_loop():
     module = _load_example()
     question = "What percent did Meridian reduce cost by?"
     payloads = []
@@ -73,13 +73,13 @@ def test_native_tool_cycle_calls_horizon_locally_then_renders_without_tool_loop(
             return {"candidates": [{"content": {
                 "role": "model",
                 "parts": [{"functionCall": {
-                    "name": "query_horizon_memory",
+                    "name": "query_proofray_memory",
                     "args": {"question": question},
                 }}],
             }}]}
         return _text_response("Meridian reduced compute cost by 42 percent.")
 
-    def horizon_tool(value):
+    def proofray_tool(value):
         tool_questions.append(value)
         return {
             "state": "resolved", "authority": "verified_evidence",
@@ -87,13 +87,13 @@ def test_native_tool_cycle_calls_horizon_locally_then_renders_without_tool_loop(
             "backend": "mongomock", "source_count": 3,
         }
 
-    output = module.run_tool_call(question, horizon_tool, generate)
+    output = module.run_tool_call(question, proofray_tool, generate)
     assert len(payloads) == 2
     assert tool_questions == [question]
     assert output == {
         "tool_question": question,
-        "horizon_state": "resolved",
-        "horizon_authority": "verified_evidence",
+        "proofray_state": "resolved",
+        "proofray_authority": "verified_evidence",
         "answer": "Meridian reduced compute cost by 42 percent.",
     }
     assert payloads[0]["toolConfig"]["functionCallingConfig"]["mode"] == "ANY"
@@ -102,7 +102,7 @@ def test_native_tool_cycle_calls_horizon_locally_then_renders_without_tool_loop(
     assert "Solstice" not in json.dumps(payloads)
 
 
-def test_local_mongo_tool_returns_verified_horizon_evidence_without_optional_dependency(
+def test_local_mongo_tool_returns_verified_proofray_evidence_without_optional_dependency(
         monkeypatch):
     module = _load_example()
     collection = _Collection([
@@ -116,9 +116,14 @@ def test_local_mongo_tool_returns_verified_horizon_evidence_without_optional_dep
             "The Solstice project is unrelated to Meridian and focuses on latency.")},
     ])
     monkeypatch.setattr(module.mongo, "_get_collection", lambda: (collection, True))
-    result = module.query_horizon_memory(module.DEFAULT_QUESTION)
+    result = module.query_proofray_memory(module.DEFAULT_QUESTION)
     assert result["state"] == "resolved"
     assert result["authority"] in {"direct_proof", "verified_evidence"}
     assert "42" in result["answer"]
     assert result["backend"] == "mongomock"
     assert result["source_count"] == 3
+
+
+def test_horizon_tool_name_remains_a_compatibility_alias():
+    module = _load_example()
+    assert module.query_horizon_memory is module.query_proofray_memory

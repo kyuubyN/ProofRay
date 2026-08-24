@@ -3,9 +3,9 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "horizon-memory"
+name = "proofray"
 version = "0.1.0a1"
-description = "Standalone, model-agnostic, proof-carrying memory for AI systems"
+description = "ProofRay: standalone, model-agnostic, proof-carrying memory for AI systems"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
@@ -25,6 +25,7 @@ dependencies = ["numpy>=1.24"]
 test = ["pytest>=8", "tomli>=2; python_version < '3.11'"]
 
 [project.scripts]
+proofray = "horizon_memory._cli:main"
 horizon = "horizon_memory._cli:main"
 
 [project.urls]

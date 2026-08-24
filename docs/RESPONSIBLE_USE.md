@@ -1,6 +1,6 @@
 # Responsible use
 
-Horizon Memory is a persistent, provenance-tracking memory substrate: it is
+ProofRay is a persistent, provenance-tracking memory substrate: it is
 designed to keep facts, and their sources, available indefinitely, and to
 retrieve them with precision. That shape carries a specific misuse risk that
 a generic software security policy does not cover — covert surveillance,
@@ -9,13 +9,13 @@ treated here as its own concern, not folded into `SECURITY.md`.
 
 ## What this document is, and is not
 
-This is a serious statement of what the project intends Horizon Memory to be
+This is a serious statement of what the project intends ProofRay to be
 used for, and what it does not want it used for — in the same spirit as
 `AI_TRAINING_POLICY.md`. **It does not add a field-of-use restriction to the
 AGPL software license.** The AGPL remains the complete license for the
 engine; its permissions cannot honestly be narrowed by a document like this
 one. The project considered a RAIL-style license with binding use
-restrictions and decided against it: Horizon Memory is meant to work the way
+restrictions and decided against it: ProofRay is meant to work the way
 Linux does — a free core that anyone builds on top of, the way Ubuntu,
 Fedora and Red Hat build on the Linux kernel — and a restricted license adds
 exactly the adoption friction and legal complexity that model depends on

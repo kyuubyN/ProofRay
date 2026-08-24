@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Horizon Memory — Live Demo</title>
+<title>ProofRay — Live Demo</title>
 <style>
   :root {
     --bg: #08090A;
@@ -166,8 +166,8 @@
 <div class="wrap">
 
   <div class="hero">
-    <img src="/assets/Horizon.jpeg" alt="Horizon">
-    <h1>Horizon Memory</h1>
+    <img src="/assets/ProofRay.jpeg" alt="ProofRay — a ray crossing an event horizon">
+    <h1>ProofRay</h1>
     <p>Memory that can show why it remembers.</p>
   </div>
 
@@ -185,7 +185,7 @@
   <div class="grid">
     <div class="panel horizon">
       <div class="panel-head">
-        <span class="name">Horizon &middot; deterministic, no LLM</span>
+        <span class="name">ProofRay &middot; deterministic, no LLM</span>
         <div class="spinner" id="spinH"></div>
       </div>
       <div class="panel-body" id="bodyH">
@@ -212,10 +212,10 @@
   </div>
 
   <footer>
-    Horizon runs live on every query: the documents are ingested into a real memory store, every
+    ProofRay runs live on every query: the documents are ingested into a real memory store, every
     sentence shown is re-opened and verified against its own source span before it is displayed,
     and the answer is composed deterministically with zero LLM calls.<br>
-    Across all 120 questions in this corpus, Horizon averages 0.95 against 0.73 for an
+    Across all 120 questions in this corpus, ProofRay averages 0.95 against 0.73 for an
     LLM-reader baseline on the same evidence budget (independent LLM judge, 95% CI excludes zero).
   </footer>
 
@@ -249,7 +249,7 @@ function run() {
 
 async function runHorizon(query) {
   try {
-    const res = await fetch('/api/search_horizon', {
+    const res = await fetch('/api/search_proofray', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({query})
     });
@@ -259,7 +259,7 @@ async function runHorizon(query) {
 
     if (d.state !== 'RESOLVED' || !d.claims.length) {
       $('bodyH').innerHTML =
-        `<p class="empty">Horizon abstained (${d.state}). No verified evidence supported an answer.</p>`;
+        `<p class="empty">ProofRay abstained (${d.state}). No verified evidence supported an answer.</p>`;
       return;
     }
 
@@ -326,7 +326,7 @@ async function runControl(query) {
 function renderScores(d) {
   const k = v => v >= 0.7 ? '' : ' low';
   $('scores').innerHTML = `
-    <div class="score"><span class="k">Horizon · judged</span>
+    <div class="score"><span class="k">ProofRay · judged</span>
       <span class="v${k(d.judge_score)}">${d.judge_score.toFixed(2)}</span></div>
     <div class="score"><span class="k">Baseline · judged</span>
       <span class="v${k(d.baseline_judge_score)}">${d.baseline_judge_score.toFixed(2)}</span></div>

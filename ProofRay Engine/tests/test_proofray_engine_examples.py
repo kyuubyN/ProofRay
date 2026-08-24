@@ -1,6 +1,6 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Smoke tests: every HorizonAI Engine example imports cleanly and runs end to end -- no live
+"""Smoke tests: every ProofRay Engine example imports cleanly and runs end to end -- no live
 network (the two polish examples default to `ALLOW_NETWORK = False`), no leftover files (the
 SQLite example is entirely tempfile-scoped)."""
 from __future__ import annotations
