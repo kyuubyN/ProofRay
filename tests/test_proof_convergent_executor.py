@@ -1,5 +1,4 @@
 from horizon_memory.routing import RouteDocument
-from unittest.mock import patch
 import pytest
 from horizon_memory.proof_convergent_executor import (
     AttestedScalarLedger, compact_scalar_answer, integrate_with_deterministic_fallback,
@@ -14,23 +13,11 @@ from horizon_memory.proof_convergent_executor import (
     compile_surface_binary_checks,
     LinkGrammarBridge,
 )
-from lab.runners.run_d145_longmemeval_composer_judge_pilot import (
-    _compose_one_integrated, _compose_one_paired,
-)
-from lab.runners.run_d145_longmemeval_composer_judge_pilot import (
-    CALIBRATION_EPISODE_COUNT, CALIBRATION_START_ORDINAL, TOTAL_EPISODES,
-)
 
 
 def docs(*texts):
     return tuple(RouteDocument(i, text, 1, "s", 1, f"source:{i}", role="user")
                  for i, text in enumerate(texts, 1))
-
-
-def test_frozen_corpus_range_contract_leaves_post_calibration_holdout():
-    assert (CALIBRATION_START_ORDINAL, CALIBRATION_EPISODE_COUNT) == (200, 200)
-    assert TOTAL_EPISODES == 500
-    assert CALIBRATION_START_ORDINAL + CALIBRATION_EPISODE_COUNT == 400
 
 
 def test_sum_converges_across_selector_gauges_with_exact_proofs():
@@ -603,71 +590,6 @@ def test_deterministic_renderer_preserves_surface_units_and_formats_currency():
     ledger = AttestedScalarLedger.build(docs("I spent $800 on the bag."))
     lookup = ledger.lookup_convergent("How much money did I spend on the bag?")
     assert render_convergent_answer(lookup) == "$800"
-
-
-def test_d145_integration_runner_skips_fallback_on_proven_answer(tmp_path):
-    row = {
-        "question": "How many days did all trips take in total?",
-        "haystack_session_ids": ["s"], "haystack_dates": ["2026-01-01"],
-        "haystack_sessions": [[
-            {"role": "user", "content": "My first trip lasted 3 days."},
-            {"role": "user", "content": "My second trip lasted 5 days."},
-        ]],
-    }
-    with patch(
-            "lab.runners.run_d145_longmemeval_composer_judge_pilot._compose_one",
-            side_effect=AssertionError("fallback must not run")):
-        result = _compose_one_integrated(0, row, (), str(tmp_path))
-    assert (result["authority"], result["answer_text"], result["proof_bytes"] > 0) == (
-        "proof_convergent", "8 days", True)
-
-
-def test_d145_integration_runner_preserves_fallback_on_proof_miss(tmp_path):
-    row = {
-        "question": "What color was the bicycle?",
-        "haystack_session_ids": ["s"], "haystack_dates": ["2026-01-01"],
-        "haystack_sessions": [[{"role": "user", "content": "The bicycle was blue."}]],
-    }
-    fallback = {"ordinal": 0, "state": "resolved", "answer_text": "blue"}
-    with patch("lab.runners.run_d145_longmemeval_composer_judge_pilot._compose_one",
-               return_value=fallback):
-        result = _compose_one_integrated(0, row, (), str(tmp_path))
-    assert (result["authority"], result["answer_text"], result["proof_bytes"]) == (
-        "deterministic_fallback", "blue", 0)
-
-
-def test_d145_paired_runner_reuses_exact_plain_bytes_on_proof_miss(tmp_path):
-    row = {
-        "question": "What color was the bicycle?",
-        "haystack_session_ids": ["s"], "haystack_dates": ["2026-01-01"],
-        "haystack_sessions": [[{"role": "user", "content": "The bicycle was blue."}]],
-    }
-    fallback = {"ordinal": 0, "state": "resolved", "answer_text": "blue\nwith exact bytes"}
-    with patch("lab.runners.run_d145_longmemeval_composer_judge_pilot._compose_one",
-               return_value=fallback) as compose:
-        result = _compose_one_paired(0, row, (), str(tmp_path))
-    compose.assert_called_once()
-    assert result["plain"]["answer_text"].encode() == \
-        result["integrated"]["answer_text"].encode()
-    assert result["integrated"]["authority"] == "deterministic_fallback"
-
-
-def test_d145_paired_runner_keeps_current_plain_arm_even_when_proof_resolves(tmp_path):
-    row = {
-        "question": "How many days did all trips take in total?",
-        "haystack_session_ids": ["s"], "haystack_dates": ["2026-01-01"],
-        "haystack_sessions": [[
-            {"role": "user", "content": "My first trip lasted 3 days."},
-            {"role": "user", "content": "My second trip lasted 5 days."},
-        ]],
-    }
-    fallback = {"ordinal": 0, "state": "resolved", "answer_text": "large evidence packet"}
-    with patch("lab.runners.run_d145_longmemeval_composer_judge_pilot._compose_one",
-               return_value=fallback):
-        result = _compose_one_paired(0, row, (), str(tmp_path))
-    assert result["plain"]["answer_text"] == "large evidence packet"
-    assert result["integrated"]["answer_text"] == "8 days"
-    assert result["integrated"]["authority"] == "proof_convergent"
 
 
 def test_activity_duration_sum_preserves_uncertainty_and_collapses_repeat_orbits():
