@@ -23,6 +23,22 @@ def _text_response(text: str) -> dict:
     }]}
 
 
+class _Cursor(list):
+    def sort(self, field, direction):
+        assert (field, direction) == ("_id", 1)
+        return _Cursor(sorted(self, key=lambda item: str(item[field])))
+
+
+class _Collection:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def find(self, query, projection):
+        assert query == {}
+        assert projection == {"_id": 1, "body": 1}
+        return _Cursor(self.rows)
+
+
 def test_polish_sends_only_horizon_result_and_uses_one_model_call():
     module = _load_example()
     payloads = []
@@ -86,8 +102,20 @@ def test_native_tool_cycle_calls_horizon_locally_then_renders_without_tool_loop(
     assert "Solstice" not in json.dumps(payloads)
 
 
-def test_local_mongomock_tool_returns_verified_horizon_evidence():
+def test_local_mongo_tool_returns_verified_horizon_evidence_without_optional_dependency(
+        monkeypatch):
     module = _load_example()
+    collection = _Collection([
+        {"_id": "mongo-a", "body": (
+            "The Meridian project reduced compute cost by exactly 42 percent compared "
+            "to the previous baseline architecture across every workload.")},
+        {"_id": "mongo-b", "body": (
+            "Meridian's cost reduction came from a redesigned caching layer that eliminated "
+            "redundant recomputation across adjacent pipeline stages.")},
+        {"_id": "mongo-c", "body": (
+            "The Solstice project is unrelated to Meridian and focuses on latency.")},
+    ])
+    monkeypatch.setattr(module.mongo, "_get_collection", lambda: (collection, True))
     result = module.query_horizon_memory(module.DEFAULT_QUESTION)
     assert result["state"] == "resolved"
     assert result["authority"] in {"direct_proof", "verified_evidence"}
