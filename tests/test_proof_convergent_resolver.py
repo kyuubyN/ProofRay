@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import pytest
 
 from horizon_memory import (
@@ -28,6 +29,53 @@ def test_resolver_returns_question_bound_reopenable_proof() -> None:
     assert not resolution.certificate.reopen(blob, "How much did I spend?", rows)
     assert not resolution.certificate.reopen(blob, question, (
         replace(rows[0], text="My camping trip lasted 30 days."), rows[1]))
+
+
+def test_irrelevant_history_replication_does_not_change_positive_proof_bytes() -> None:
+    rows = evidence(
+        "My camping trip to Big Sur lasted 3 days.",
+        "The camping trip in Yosemite lasted 5 days.",
+    )
+    question = "How many days did I spend camping in total?"
+    baseline = ProofConvergentResolver().resolve(question, rows)
+    assert baseline is not None
+    irrelevant = tuple(AnsweredClaim(
+        f"A penguin observation number {index} mentions no travel duration.",
+        100 + index, f"irrelevant:{index}", 0.0)
+        for index in range(16))
+    replicated = ProofConvergentResolver().resolve(question, rows + irrelevant)
+    assert replicated is not None
+    assert replicated.text == baseline.text
+    assert replicated.source_ids == baseline.source_ids
+    assert replicated.certificate.compact() == baseline.certificate.compact()
+    assert baseline.certificate.reopen(
+        baseline.certificate.compact(), question, rows + irrelevant)
+
+
+def test_certificate_binds_complete_authority_coordinates() -> None:
+    rows = (
+        AnsweredClaim(
+            "My camping trip to Big Sur lasted 3 days.", 1, "chat:1", 1.0,
+            "user", "session:1", "Alice", 7, 739000, 1, 3, (0, 43),
+            hashlib.sha256(
+                "My camping trip to Big Sur lasted 3 days.".encode()).hexdigest(), 9),
+        AnsweredClaim(
+            "The camping trip in Yosemite lasted 5 days.", 2, "chat:2", 1.0,
+            "user", "session:2", "Alice", 8, 739010, 1, 4, (0, 45),
+            hashlib.sha256(
+                "The camping trip in Yosemite lasted 5 days.".encode()).hexdigest(), 10),
+    )
+    question = "How many days did I spend camping in total?"
+    resolution = ProofConvergentResolver().resolve(question, rows)
+    assert resolution is not None
+    blob = resolution.certificate.compact()
+    assert resolution.certificate.reopen(blob, question, rows)
+    for field, value in (
+            ("scope_id", 2), ("session_id", "foreign"), ("version", 99),
+            ("generation_id", 77), ("source_id", "forged"),
+            ("source_span", (1, 43)), ("parent_sha256", "00" * 32)):
+        changed = (replace(rows[0], **{field: value}), rows[1])
+        assert not resolution.certificate.reopen(blob, question, changed), field
 
 
 def test_resolver_fails_closed_when_operator_worlds_disagree() -> None:

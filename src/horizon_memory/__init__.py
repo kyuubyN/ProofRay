@@ -12,9 +12,12 @@ from .config import HorizonConfig, VALUE_MAX, VALUE_MIN
 from .engine_profile import (
     DEFAULT_PROFILE, PERSONAL_MEMORY_PROFILE, TEAM_MEMORY_PROFILE, EngineProfile,
 )
-from .answer_engine import (AnswerContextIntent, AnsweredClaim, AnsweredResult, DirectAnswer,
-                            DirectAnswerCertificate, DirectAnswerProposal, DirectAnswerReader,
-                            DirectAnswerResolution, DirectAnswerResolver, HorizonAnswerEngine)
+from .answer_engine import (
+    AnswerContextIntent, AnsweredClaim, AnsweredResult, ContextualDirectAnswerCertificate,
+    ContextualDirectAnswerResolver, DirectAnswer, DirectAnswerCertificate,
+    DirectAnswerProposal, DirectAnswerReader, DirectAnswerResolution, DirectAnswerResolver,
+    HorizonAnswerEngine,
+)
 from .partition import (
     CausalPartitioner, PartitionContext, PartitionIndex, PartitionResult, PartitionStrategy,
 )
@@ -69,6 +72,8 @@ from .typed_sidecar import (
     AuthorizedAdapterBridge, DeclarativeSidecarAdapter, SidecarCompletenessDeclaration,
     SidecarFactDeclaration,
     SidecarLifecycle,
+    SidecarObservedIntent,
+    SidecarRouteMetadata,
     SidecarIngestReceipt,
     SidecarLimits,
 )
@@ -120,6 +125,7 @@ __all__ = [
     "HorizonMemory", "HorizonConfig", "VALUE_MAX", "VALUE_MIN",
     "DEFAULT_PROFILE", "PERSONAL_MEMORY_PROFILE", "TEAM_MEMORY_PROFILE", "EngineProfile",
     "AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer",
+    "ContextualDirectAnswerCertificate", "ContextualDirectAnswerResolver",
     "DirectAnswerCertificate", "DirectAnswerProposal", "DirectAnswerReader",
     "DirectAnswerResolution", "DirectAnswerResolver", "HorizonAnswerEngine",
     "WriteResult", "WriteState", "ReadResult", "ReadState", "ReadViewHandle",
@@ -157,6 +163,8 @@ __all__ = [
     "SidecarAuthority", "AttestedSidecarFact", "SidecarIngestAdapter",
     "AttestedCompletenessClaim", "SidecarCompilation", "CompletenessCertificate",
     "SidecarLifecycle",
+    "SidecarObservedIntent",
+    "SidecarRouteMetadata",
     "SidecarFactDeclaration", "SidecarCompletenessDeclaration", "DeclarativeSidecarAdapter",
     "AuthorizedAdapterBridge",
     "SidecarIngestReceipt", "AuthorizedSidecarMemory",

@@ -24,6 +24,10 @@ DOCUMENTS = [
     "redundant recomputation across adjacent pipeline stages.",
 ]
 QUESTION = "What percent did the Meridian project reduce cost by?"
+STRUCTURED = [{
+    "fact_id": 41, "text": "My camping trip to Big Sur lasted 3 days.", "source": "chat:41",
+    "scope": 1, "session": "history", "version": 1, "role": "user", "speaker": "Ana",
+}]
 
 
 class FakeTransport:
@@ -63,6 +67,15 @@ class HorizonAskImplTests(unittest.TestCase):
     def test_empty_documents_raises(self):
         with self.assertRaises(ValueError):
             _horizon_ask_impl(QUESTION, [])
+
+    def test_context_intents_are_supported_by_plain_mcp_implementation(self):
+        body = _horizon_ask_impl(
+            "How many days did I spend camping in total?", STRUCTURED,
+            context_intents=[{
+                "intent_id": "turn:0", "text": "How long was the Big Sur camping trip?",
+                "fact_ids": [41]}])
+        self.assertEqual(body["direct_answer_state"], "resolved")
+        self.assertEqual(body["answer"], "3 days")
 
     def test_polish_true_populates_polished_answer(self):
         transport = FakeTransport([TransportResponse(200, {}, json.dumps({

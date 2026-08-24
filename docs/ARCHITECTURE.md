@@ -246,10 +246,13 @@ frozen default because its gain has not yet been ablated after the morphology st
 question-response transport remains in `lab/`. MemGym witness front-loading has been promoted as the
 separate opt-in primitive below; its benchmark-specific adapter, controls and scores remain in `lab/`.
 
-The HTTP/MCP bridge does not yet expose this contract: it accepts `list[str]`, assigns one synthetic
-session, and has no speaker or timestamp payload. Therefore this promotion is honestly Python-only.
-HTTP support requires a backward-compatible structured payload and durable metadata preservation;
-prefixing speaker/time into source text would fabricate evidence spans and is forbidden.
+The HTTP/MCP bridge now exposes a backward-compatible structured document contract carrying FactId,
+source, scope, session, version, sequence, observation time, role, speaker, optional source span
+and a caller-verifiable text digest. It also accepts
+FactId-bound observed context intents. Mixed legacy/structured arrays, unknown fields and cross-scope
+documents fail closed; metadata is never encoded into source text. The conversational generator is
+still disabled by default and requires deploy-time `HORIZON_CONVERSATIONAL_RECALL=true`, so transport
+support does not silently promote the consumed-development retrieval result.
 
 `QueryWitnessFrontloadConfig` is a separate opt-in final-ordering mechanism for multi-turn evidence.
 It ranks already-verified `AnsweredClaim` objects against the final question and caller-supplied
@@ -263,11 +266,18 @@ episodes. The real final render budget remains **24,576 bytes**. A separate 4 Ki
 diagnostic moves from 0.551764 to 0.787985 while coverage over the complete 24 KiB render stays exactly
 0.910626; the 4 KiB window is not a runtime truncation or replacement budget. This validates
 conservation and ordering, not semantic answer correctness.
+The answer facade enforces that budget on the physical UTF-8 render, including newline separators;
+historical accounting that summed only claim surfaces could exceed the declared limit by `N-1`
+bytes and is retained only as a documented pre-fix artifact.
 
 `ProofConvergentResolver` is the public finite answer-execution layer. It projects the complete
 verified acquisition pool into `AttestedScalarLedger`, runs every applicable operator world, and
-releases a direct answer only if those worlds converge. Its `HCR1` certificate binds the question,
-compact scalar proof, exact source spans and source digests; the engine reopens the certificate before
+releases a direct answer only if those worlds converge. Its `HCR2` certificate binds the question,
+rendered answer, method, cited source IDs, compact scalar proof and every proof-participating
+authority coordinate (scope, session, version, generation, role, speaker, clocks, exact spans and
+parent digests). Closed-corpus nonmembership binds the complete authorized population; positive
+proofs bind cited rows so appending irrelevant history does not perturb proof bytes. The engine
+reopens the certificate before
 returning `DirectAnswer(state="resolved")`. A disagreement, unsupported construction, incomplete
 closure or modified source returns no direct answer, leaving the deterministic evidence cascade
 available. The executor and resolver have no model, network, scorer or dataset dependency. Benchmark
@@ -277,6 +287,12 @@ The resolver is enabled by default after the corrected LongMemEval arm cleared a
 full-denominator lower bound of 0.908333 using exact-byte score inheritance and zero assigned to every
 changed, unjudged row. `direct_answer_resolver=None` is the explicit evidence-only switch. This default
 does not turn a proof miss into a guess: `final_answer_text` falls back to the conserved evidence bytes.
+
+For multi-turn finite executors, `ContextualDirectAnswerResolver` adds `resolve_contextual` without
+breaking the existing `resolve` protocol. The engine passes the same FactId-bound
+`AnswerContextIntent`s to resolution and certificate reopening, and preserves speaker, sequence and
+observation time in the verified authority rows. A contextual certificate that changes or ignores
+those coordinates fails closed before `DirectAnswer(state="resolved")` is admitted.
 
 The resolver also preserves each verified claim's `role` and `session_id`. By default, user assertions
 and role-less knowledge-base documents may participate as world authority; assistant utterances are
@@ -499,6 +515,18 @@ atomic-relation packs' `answer_atomic_relation_en`/`_pt` entry points, and the C
 delivery transfer results in [Benchmarks](BENCHMARKS.md), all run through this facade. It is
 deliberately not sold as text understanding: it makes exactly one claim (this span exists,
 unmodified, in this source) and lets everything downstream stay proof-carrying on top of that.
+When a durable ledger is configured, optional conversational route coordinates are attested inside
+the same sidecar fact under `HORIZON-SIDECAR-FACT-v2`. Restart preserves scope, session, version,
+generation, sequence, event time, role, speaker and source span exactly. Metadata-free historical
+facts retain their v1 attestation and JSON representation. FactId-bound observed intents use a v3
+attestation and must reopen with complete, identical fiber membership. No parallel metadata database
+and no text/source prefix encoding are introduced.
+`OpenTextHorizonMemory` opts into reuse of the disposable `RoutingIndex` and Horizon admission store
+for repeated questions over the exact same attested document tuple. A successful ingest invalidates
+and closes that projection immediately. Plain `HorizonAnswerEngine` and HTTP requests remain
+ephemeral by default (`reuse_prepared_runtime=False`), and a per-engine lock prevents one concurrent
+snapshot replacement from closing another request's store. Cached and ephemeral answers/proofs are
+required to be byte-identical; the sidecar remains the sole durable authority.
 
 **The authorized typed sidecar** (`docs/TYPED_SIDECAR.md`) is for the opposite shape: a caller who
 already has structured facts (a database row, a tool result, an event stream) and wants them bound

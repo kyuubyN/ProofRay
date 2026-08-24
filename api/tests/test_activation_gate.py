@@ -84,6 +84,8 @@ class KeywordModeHttpTests(_KeywordModeTestCase):
 
         self.assertEqual(body["state"], "not_activated")
         self.assertIsNone(body["answer"])
+        self.assertEqual(body["action"], "not_activated")
+        self.assertIsNone(body["direct_answer_certificate"])
         self.assertIsNone(body["evidence"])
         self.assertEqual(body["documents_considered"], 0)
         self.assertEqual(call_count["n"], 0)  # the engine must never have been invoked

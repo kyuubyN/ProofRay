@@ -77,9 +77,14 @@ authority: the sealed source contains an exact `surface_document` span. Retrieva
 propose evidence from it, but no semantic predicate is silently upgraded to truth. Observed turn
 queries can be supplied as `AnswerContextIntent`; they steer composition and are never answer labels.
 Pass `ledger_path=` to persist the open-text sidecar. Reopening reconstructs only attested
-`surface_document` facts; additional bundles may be appended with new FactIds. Context intents are
-routing metadata and must be supplied again after restart when needed—they are not silently persisted
-as factual memory.
+`surface_document` facts; additional bundles may be appended with new FactIds. New open-text facts
+may attach `SidecarRouteMetadata` inside the same attestation and JSONL record, preserving scope,
+session, version, generation, sequence, event time, role, speaker and source span without changing
+source text. Metadata-free historical facts retain their exact v1 serialization; metadata-bearing
+facts use the `HORIZON-SIDECAR-FACT-v2` attestation domain. FactId-bound observed context intents are
+replicated across every member of their fiber and use `HORIZON-SIDECAR-FACT-v3`; recovery requires
+identical copies, exact FactId coverage, a coherent session and canonical insertion order. They remain
+routing observations rather than factual predicates, but no longer disappear after restart.
 
 ## Aggregation and updates
 

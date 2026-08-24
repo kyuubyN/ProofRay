@@ -14,8 +14,9 @@ all **1,986** questions compared its FactId ranking against the frozen lab imple
 **0 mismatches** (`result_sha256=1e647aa3...a80`, artifact SHA-256
 `9384eef5...ab9`). The dataset is consumed development and the 89.30% arm does not cross the project's
 90% default-activation threshold, so structured conversational recall remains opt-in. The
-plain-string HTTP surface still cannot represent speaker, session or observation-time metadata and
-is excluded from this claim.
+structured HTTP/MCP surface now preserves speaker, session and observation-time metadata, but the
+generator remains deploy-time opt-in and this consumed-development result still cannot authorize a
+default.
 
 ## LongMemEval proof-first final output (consumed development)
 

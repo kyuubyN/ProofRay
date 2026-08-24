@@ -22,6 +22,7 @@ from .typed_sidecar import (
     AttestedCompletenessClaim, AttestedSidecarFact, AuthorizedSidecarMemory,
     CompletenessCertificate, SidecarAuthority, SidecarCompilation, SidecarIngestAdapter,
     SidecarIngestReceipt, SidecarLifecycle,
+    SidecarObservedIntent, SidecarRouteMetadata, _route_metadata_payload,
 )
 
 
@@ -41,19 +42,37 @@ def _fact_from_json(value: dict[str, object]) -> TypedCausalFact:
 
 
 def _attested_to_json(item: AttestedSidecarFact) -> dict[str, object]:
-    return {
+    result = {
         "fact": asdict(item.fact), "lifecycle": asdict(item.lifecycle),
         "authority_sha256": item.authority_sha256,
         "attestation_sha256": item.attestation_sha256,
     }
+    # Omitting the optional field preserves the exact v1 JSON representation and attestation.
+    if item.route_metadata is not None:
+        result["route_metadata"] = _route_metadata_payload(item.route_metadata)
+    return result
 
 
 def _attested_from_json(value: dict[str, object]) -> AttestedSidecarFact:
     lifecycle_data = dict(value["lifecycle"])
     lifecycle_data["supersedes"] = tuple(lifecycle_data.get("supersedes", ()))
+    metadata_value = value.get("route_metadata")
+    if metadata_value is None:
+        metadata = None
+    else:
+        metadata_data = dict(metadata_value)
+        if metadata_data.get("span") is not None:
+            metadata_data["span"] = tuple(metadata_data["span"])
+        metadata_data["observed_intents"] = tuple(
+            SidecarObservedIntent(
+                str(item["intent_id"]), str(item["text"]),
+                tuple(item["fact_ids"]), int(item["insertion_order"]),
+                item.get("turn_index"), item.get("session_id"))
+            for item in metadata_data.get("observed_intents", ()))
+        metadata = SidecarRouteMetadata(**metadata_data)
     return AttestedSidecarFact(
         _fact_from_json(dict(value["fact"])), SidecarLifecycle(**lifecycle_data),
-        str(value["authority_sha256"]), str(value["attestation_sha256"]))
+        str(value["authority_sha256"]), str(value["attestation_sha256"]), metadata)
 
 
 def _claim_from_json(value: dict[str, object]) -> AttestedCompletenessClaim:

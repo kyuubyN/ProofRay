@@ -98,9 +98,19 @@ result = engine.answer("Which bicycle did Alice buy?", history)
 
 This generator only transports candidate `FactId`s. The normal Horizon verifier still reopens and
 authorizes every source, and unsupported or conflicting readout still has to abstain. Cross-session
-fallback is explicitly enabled above and remains off by default. The current HTTP endpoint accepts
-only plain document strings, so structured conversational recall is presently a Python-only surface;
-it is not silently approximated by putting speaker or timestamps into document text.
+fallback is explicitly enabled above and remains off by default in the Python engine. HTTP and MCP
+also accept a backward-compatible structured document shape that preserves these coordinates without
+putting them into document text. The consumed-development conversational generator remains a
+deploy-time opt-in (`HORIZON_CONVERSATIONAL_RECALL=true`) because its current LoCoMo hit rate is below
+the default-activation gate.
+
+`OpenTextHorizonMemory(..., ledger_path=...)` persists those route coordinates in the same attested
+sidecar record. Reopening the ledger reconstructs multi-session `RouteDocument`s exactly; legacy
+metadata-free ledgers continue to reopen under their original v1 attestations. FactId-bound observed
+context intents are also restored with exact fiber membership and insertion order.
+Repeated questions over an unchanged open-text snapshot reuse only disposable derived routing state;
+ingest invalidates it. Direct `HorizonAnswerEngine` calls remain request-ephemeral unless a persistent
+facade explicitly passes `reuse_prepared_runtime=True`.
 
 For finite questions that can be closed from exact measurements, counts, dates or relations, the
 default engine now attempts the proof-convergent resolver. It returns a short `direct_answer` only

@@ -38,10 +38,12 @@ and running out of genuinely new content) instead of being hardcoded.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import re
 import secrets
 import shutil
 import tempfile
+from threading import RLock
 from pathlib import Path
 from typing import Protocol
 
@@ -53,13 +55,26 @@ from .engine_profile import DEFAULT_PROFILE, EngineProfile
 from .materialized_proof_pressure_search import MaterializedIndependentHorizonSearchEngine
 from .proof_dossier import ProofDossier, build_proof_dossier
 from .raw_causal_channels import RawCausalDocument, is_cjk
-from .routing import CandidateGenerator, HorizonVerifier, QueryEnvelope, RouteDocument, RouteState, \
+from .routing import Candidate, CandidateGenerator, HorizonVerifier, QueryEnvelope, RouteDocument, RouteState, \
     RoutingIndex, SemanticRouter
 from .conformal_routing import document_priority_by_source
 from .witness_frontload import QueryWitnessFrontloadConfig, frontload_query_witnesses
 
 _TOKEN = re.compile(r"[^\W_]+")
 _DEFAULT_DIRECT_ANSWER_RESOLVER = object()
+
+
+@dataclass
+class _PreparedAnswerRuntime:
+    """Disposable derived route/admission state for one exact document snapshot."""
+    documents: tuple[RouteDocument, ...]
+    index: RoutingIndex
+    memory: HorizonMemory
+    workdir: str
+
+    def close(self) -> None:
+        self.memory.close()
+        shutil.rmtree(self.workdir, ignore_errors=True)
 
 
 def _content_words(text: str | None) -> frozenset[str]:
@@ -79,6 +94,14 @@ class AnsweredClaim:
     relevance_score: float
     role: str | None = None
     session_id: str | None = None
+    speaker: str | None = None
+    sequence: int | None = None
+    event_time: int | None = None
+    scope_id: int | None = None
+    version: int | None = None
+    source_span: tuple[int, int] | None = None
+    parent_sha256: str | None = None
+    generation_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -88,11 +111,21 @@ class AnswerContextIntent:
     intent_id: str
     text: str
     fact_ids: tuple[int, ...]
+    turn_index: int | None = None
+    session_id: str | None = None
 
     def __post_init__(self) -> None:
-        if (not self.intent_id or not self.text or not self.fact_ids or
+        if (not isinstance(self.intent_id, str) or not self.intent_id.strip()
+                or not isinstance(self.text, str) or not self.text.strip()
+                or not self.fact_ids or
                 self.fact_ids != tuple(sorted(set(self.fact_ids))) or
-                any(item < 0 for item in self.fact_ids)):
+                any(isinstance(item, bool) or not isinstance(item, int) or item < 0
+                    for item in self.fact_ids) or
+                (self.turn_index is not None and
+                 (isinstance(self.turn_index, bool)
+                  or not isinstance(self.turn_index, int) or self.turn_index < 0)) or
+                (self.session_id is not None and
+                 (not isinstance(self.session_id, str) or not self.session_id.strip()))):
             raise ValueError("answer context intent must be non-empty and FactId-canonical")
 
 
@@ -155,6 +188,20 @@ class DirectAnswerCertificate(Protocol):
     def compact(self) -> bytes: ...
     def reopen(self, blob: bytes, question: str,
                evidence: tuple[AnsweredClaim, ...]) -> bool: ...
+    def reopen_resolution(
+            self, blob: bytes, question: str, evidence: tuple[AnsweredClaim, ...], *,
+            text: str, method: str, source_ids: tuple[str, ...]) -> bool: ...
+
+
+class ContextualDirectAnswerCertificate(DirectAnswerCertificate, Protocol):
+    """Certificate whose proof is also bound to caller-observed context intents."""
+    def reopen_contextual(self, blob: bytes, question: str,
+                          evidence: tuple[AnsweredClaim, ...],
+                          context_intents: tuple[AnswerContextIntent, ...]) -> bool: ...
+    def reopen_contextual_resolution(
+            self, blob: bytes, question: str, evidence: tuple[AnsweredClaim, ...],
+            context_intents: tuple[AnswerContextIntent, ...], *, text: str,
+            method: str, source_ids: tuple[str, ...]) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -181,6 +228,13 @@ class DirectAnswerResolver(Protocol):
                 evidence: tuple[AnsweredClaim, ...]) -> DirectAnswerResolution | None: ...
 
 
+class ContextualDirectAnswerResolver(Protocol):
+    """Finite resolver for multi-turn questions with observed, FactId-bound subqueries."""
+    def resolve_contextual(
+            self, question: str, evidence: tuple[AnsweredClaim, ...],
+            context_intents: tuple[AnswerContextIntent, ...]) -> DirectAnswerResolution | None: ...
+
+
 @dataclass(frozen=True)
 class AnsweredResult:
     state: str                                # "RESOLVED" or a RouteState member name (abstain)
@@ -202,6 +256,7 @@ class AnsweredResult:
     # telemetry, mirrors the existing `documents_considered`/`verified_candidates` pattern; never
     # affects rendered answer bytes.
     chosen_size: int = 0
+    resolver_evidence: tuple[AnsweredClaim, ...] = ()
 
     @property
     def resolved(self) -> bool:
@@ -238,9 +293,11 @@ class HorizonAnswerEngine:
                  _DEFAULT_DIRECT_ANSWER_RESOLVER,
                  candidate_generator: CandidateGenerator | None = None,
                  allow_scope_fallback: bool = False,
-                 witness_frontload: QueryWitnessFrontloadConfig | None = None):
-        if not isinstance(allow_scope_fallback, bool):
-            raise TypeError("allow_scope_fallback must be bool")
+                 witness_frontload: QueryWitnessFrontloadConfig | None = None,
+                 reuse_prepared_runtime: bool = False):
+        if not isinstance(allow_scope_fallback, bool) or not isinstance(
+                reuse_prepared_runtime, bool):
+            raise TypeError("scope fallback and runtime reuse flags must be bool")
         if witness_frontload is not None and not isinstance(
                 witness_frontload, QueryWitnessFrontloadConfig):
             raise TypeError("witness_frontload must be QueryWitnessFrontloadConfig or None")
@@ -251,8 +308,10 @@ class HorizonAnswerEngine:
             from .proof_convergent_resolver import ProofConvergentResolver
             direct_answer_resolver = ProofConvergentResolver()
         elif (direct_answer_resolver is not None and
-              not callable(getattr(direct_answer_resolver, "resolve", None))):
-            raise TypeError("direct_answer_resolver must implement resolve() or be None")
+              not callable(getattr(direct_answer_resolver, "resolve", None)) and
+              not callable(getattr(direct_answer_resolver, "resolve_contextual", None))):
+            raise TypeError(
+                "direct_answer_resolver must implement resolve(), resolve_contextual(), or be None")
         self.profile = profile
         self.scope_id = scope_id
         self.session_id = session_id
@@ -261,41 +320,128 @@ class HorizonAnswerEngine:
         self.candidate_generator = candidate_generator
         self.allow_scope_fallback = allow_scope_fallback
         self.witness_frontload = witness_frontload
+        # Default calls remain request-ephemeral. Persistent facades may opt into reusing only
+        # derived indexes/admission bits for an identical, already-attested document snapshot.
+        self.reuse_prepared_runtime = reuse_prepared_runtime
+        # One engine may be shared by HTTP worker threads.  Runtime replacement closes the old
+        # Horizon store, so preparation and every use of that store must share the same lock.
+        self._runtime_lock = RLock()
+        self._prepared_runtime: _PreparedAnswerRuntime | None = None
+
+    def invalidate_prepared_runtime(self) -> None:
+        """Drop derived indexes/admission bits; caller-owned documents remain authoritative."""
+        with self._runtime_lock:
+            runtime, self._prepared_runtime = self._prepared_runtime, None
+            if runtime is not None:
+                runtime.close()
+
+    def close(self) -> None:
+        self.invalidate_prepared_runtime()
+
+    def _prepare_runtime(
+            self, documents: tuple[RouteDocument, ...]) -> _PreparedAnswerRuntime:
+        runtime = self._prepared_runtime
+        if runtime is not None and runtime.documents == documents:
+            return runtime
+        workdir = tempfile.mkdtemp(prefix="horizon-answer-")
+        memory = None
+        try:
+            index = RoutingIndex(documents)
+            memory = HorizonMemory.create(
+                HorizonConfig(workdir, self.scope_id, secrets.token_bytes(32)))
+            for document in documents:
+                memory.put(self.scope_id, document.fact_id, document.version, 1)
+            replacement = _PreparedAnswerRuntime(documents, index, memory, workdir)
+        except Exception:
+            if memory is not None:
+                memory.close()
+            shutil.rmtree(workdir, ignore_errors=True)
+            raise
+        self.invalidate_prepared_runtime()
+        self._prepared_runtime = replacement
+        return replacement
+
+    def __del__(self):
+        try:
+            self.invalidate_prepared_runtime()
+        except Exception:
+            pass
 
     def answer(self, question: str, documents: tuple[RouteDocument, ...], *,
                context_intents: tuple[AnswerContextIntent, ...] = ()) -> AnsweredResult:
+        # Serialize calls on one engine instance.  Different engine instances remain independent;
+        # this protects only the disposable cached store from concurrent close/replacement.
+        with self._runtime_lock:
+            try:
+                return self._answer_locked(
+                    question, documents, context_intents=context_intents)
+            except BaseException:
+                # Never reuse a projection after an interrupted/failed route whose store state
+                # may be unknown. Authority remains in caller documents/sidecar, so rebuilding is
+                # the only safe recovery.
+                self.invalidate_prepared_runtime()
+                raise
+            finally:
+                if not self.reuse_prepared_runtime:
+                    self.invalidate_prepared_runtime()
+
+    def _answer_locked(self, question: str, documents: tuple[RouteDocument, ...], *,
+                       context_intents: tuple[AnswerContextIntent, ...]) -> AnsweredResult:
         profile = self.profile
-        index = RoutingIndex(documents)
-        known_fact_ids = {document.fact_id for document in documents}
+        document_fact_ids = tuple(document.fact_id for document in documents)
+        if len(document_fact_ids) != len(set(document_fact_ids)):
+            raise ValueError("answer documents require unique FactIds")
+        runtime = self._prepare_runtime(documents)
+        index = runtime.index
+        known_fact_ids = set(document_fact_ids)
+        intent_ids = tuple(intent.intent_id for intent in context_intents)
+        if len(intent_ids) != len(set(intent_ids)):
+            raise ValueError("answer context intents require unique intent IDs")
         if any(set(intent.fact_ids) - known_fact_ids for intent in context_intents):
             raise ValueError("answer context intent references an unknown document FactId")
+        documents_by_id = {document.fact_id: document for document in documents}
+        for intent in context_intents:
+            sessions = {documents_by_id[fact_id].session_id for fact_id in intent.fact_ids}
+            if len(sessions) != 1:
+                raise ValueError("answer context intent crosses document sessions")
+            if intent.session_id is not None and sessions != {intent.session_id}:
+                raise ValueError("answer context intent session does not match its documents")
 
-        workdir = tempfile.mkdtemp(prefix="horizon-answer-")
+        workdir = runtime.workdir
         try:
-            memory = HorizonMemory.create(
-                HorizonConfig(workdir, self.scope_id, secrets.token_bytes(32)))
+            memory = runtime.memory
             try:
-                for document in documents:
-                    memory.put(self.scope_id, document.fact_id, document.version, 1)
-
                 # A proof-first resolver needs the complete caller-declared authority boundary,
                 # not the later presentation shortlist.  Every document above has just been
                 # admitted under the active scope/version; keep exact text, role and session out
                 # of band so finite operators cannot mix conversations or promote an assistant
                 # utterance to world truth.  Source IDs remain unique even when callers reuse a
                 # human-facing ``source`` label across several FactIds.
-                resolver_fact_ids = (
-                    frozenset(fact_id for intent in context_intents for fact_id in intent.fact_ids)
-                    if context_intents else frozenset(document.fact_id for document in documents)
-                )
-                complete_resolver_evidence = tuple(AnsweredClaim(
-                    document.text, document.fact_id,
-                    f"{document.source}:{document.fact_id}:(0, {len(document.text)})",
-                    0.0, document.role or "document", document.session_id)
-                    for document in documents if document.fact_id in resolver_fact_ids)
-
                 query = QueryEnvelope("q", question, self.scope_id, self.session_id, 10)
                 verifier = HorizonVerifier(memory, index)
+                complete_resolver_evidence = []
+                for document in documents:
+                    if (not self.allow_scope_fallback and
+                            document.session_id != self.session_id):
+                        continue
+                    admitted = verifier.verify(query, Candidate(
+                        document.fact_id, 0.0, "resolver_authority", 1,
+                        document.source))
+                    if admitted is None:
+                        continue
+                    complete_resolver_evidence.append(AnsweredClaim(
+                        document.text, document.fact_id,
+                        f"{document.source}:{document.fact_id}:(0, {len(document.text)})",
+                        0.0, document.role or "document", document.session_id,
+                        document.speaker, document.sequence, document.event_time,
+                        document.scope_id, document.version,
+                        document.span or (0, len(document.text)),
+                        hashlib.sha256(document.text.encode("utf-8")).hexdigest(),
+                        document.generation_id))
+                complete_resolver_evidence = tuple(complete_resolver_evidence)
+                admitted_fact_ids = {claim.fact_id for claim in complete_resolver_evidence}
+                if any(set(intent.fact_ids) - admitted_fact_ids for intent in context_intents):
+                    return _abstained("ABSTAIN_CONTEXT_AUTHORITY", len(documents))
                 claim_generator = self.candidate_generator or ClaimGenerator(
                     profile.claim_weights, specificity_bonus=profile.claim_specificity_bonus,
                     include_paragraphs=profile.claim_paragraph_context,
@@ -437,20 +583,23 @@ class HorizonAnswerEngine:
                         answer_lines, final_question=question,
                         turn_queries=tuple(intent.text for intent in context_intents),
                         text_of=lambda line: line.text, config=self.witness_frontload)
-                answer_bytes = sum(len(line.text.encode("utf-8")) for line in answer_lines)
+                answer_lines = _fit_rendered_answer_budget(
+                    answer_lines, profile.answer_bytes)
+                answer_bytes = len("\n".join(
+                    line.text for line in answer_lines).encode("utf-8"))
                 direct_answer = _read_direct_answer(
                     self.direct_answer_reader, self.direct_answer_resolver,
-                    question, answer_lines, complete_resolver_evidence)
+                    question, answer_lines, complete_resolver_evidence, context_intents)
 
                 return AnsweredResult(
                     "RESOLVED", tuple(claims), answer_lines, sources, core, ranked,
                     len(documents), len(sources), answer_bytes, profile.answer_selector,
                     selector_proof_closed, selector_residual, direct_answer,
-                    chosen_size=len(chosen))
+                    chosen_size=len(chosen), resolver_evidence=complete_resolver_evidence)
             finally:
-                memory.close()
+                pass  # cached derived runtime is invalidated explicitly or on snapshot change
         finally:
-            shutil.rmtree(workdir, ignore_errors=True)
+            pass
 
 
 def _pick_clean_answer(chosen, relevance: dict, origin: dict, question: str,
@@ -546,6 +695,25 @@ def _pick_clean_answer(chosen, relevance: dict, origin: dict, question: str,
     return ()
 
 
+def _fit_rendered_answer_budget(
+        lines: tuple[AnsweredClaim, ...], max_bytes: int) -> tuple[AnsweredClaim, ...]:
+    """Enforce the public UTF-8 render budget, including inter-line separators.
+
+    Dossiers historically accounted only for claim surfaces.  Joining N admitted claims inserts
+    N-1 newline bytes, which could make a nominal 24,576-byte answer physically larger than its
+    declared budget.  Preserve order and skip only rows that do not fit the remaining real render.
+    """
+    selected = []
+    used = 0
+    for line in lines:
+        cost = len(line.text.encode("utf-8")) + (1 if selected else 0)
+        if used + cost > max_bytes:
+            continue
+        selected.append(line)
+        used += cost
+    return tuple(selected)
+
+
 def _looks_like_complete_sentence(text: str, cjk: bool) -> bool:
     """The same "is this a real, well-formed sentence" signal `_pick_clean_answer`'s tiers use as
     a hard gate -- reused here as a boolean feeding an additive score bonus instead."""
@@ -635,14 +803,21 @@ def _pick_hpps_answer(chosen, relevance: dict, origin: dict, question: str,
 
 
 def _read_direct_answer(reader: DirectAnswerReader | None,
-                        resolver: DirectAnswerResolver | None, question: str,
+                        resolver: DirectAnswerResolver | ContextualDirectAnswerResolver | None,
+                        question: str,
                         evidence: tuple[AnsweredClaim, ...],
-                        resolver_evidence: tuple[AnsweredClaim, ...] | None = None) -> DirectAnswer:
+                        resolver_evidence: tuple[AnsweredClaim, ...] | None = None,
+                        context_intents: tuple[AnswerContextIntent, ...] = ()) -> DirectAnswer:
     resolver_rows = resolver_evidence if resolver_evidence is not None else evidence
     by_source = {item.source_id: item.text for item in resolver_rows}
     if resolver is not None:
         try:
-            resolution = resolver.resolve(question, resolver_rows)
+            contextual = getattr(resolver, "resolve_contextual", None)
+            used_contextual = callable(contextual)
+            if used_contextual:
+                resolution = contextual(question, resolver_rows, context_intents)
+            else:
+                resolution = resolver.resolve(question, resolver_rows)
             if resolution is not None:
                 if any(source_id not in by_source for source_id in resolution.source_ids):
                     return DirectAnswer("abstain", method="invalid_resolution_source",
@@ -651,7 +826,28 @@ def _read_direct_answer(reader: DirectAnswerReader | None,
                 if not isinstance(blob, bytes) or not blob or len(blob) > 65_536:
                     return DirectAnswer("abstain", method="invalid_resolution_certificate",
                                         residual=("invalid_certificate_bytes",))
-                if not resolution.certificate.reopen(blob, question, resolver_rows):
+                if used_contextual:
+                    contextual_reopen = getattr(
+                        resolution.certificate, "reopen_contextual_resolution", None)
+                    if not callable(contextual_reopen):
+                        return DirectAnswer(
+                            "abstain", method="invalid_resolution_certificate",
+                            residual=("certificate_does_not_bind_contextual_resolution",))
+                    reopened = contextual_reopen(
+                        blob, question, resolver_rows, context_intents,
+                        text=resolution.text, method=resolution.method,
+                        source_ids=resolution.source_ids)
+                else:
+                    reopen_resolution = getattr(
+                        resolution.certificate, "reopen_resolution", None)
+                    if not callable(reopen_resolution):
+                        return DirectAnswer(
+                            "abstain", method="invalid_resolution_certificate",
+                            residual=("certificate_does_not_bind_resolution",))
+                    reopened = reopen_resolution(
+                        blob, question, resolver_rows, text=resolution.text,
+                        method=resolution.method, source_ids=resolution.source_ids)
+                if not reopened:
                     return DirectAnswer("abstain", method="invalid_resolution_certificate",
                                         residual=("certificate_does_not_reopen",))
                 return DirectAnswer(
@@ -682,5 +878,6 @@ def _read_direct_answer(reader: DirectAnswerReader | None,
 
 
 __all__ = ["AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer",
+           "ContextualDirectAnswerCertificate", "ContextualDirectAnswerResolver",
            "DirectAnswerCertificate", "DirectAnswerProposal", "DirectAnswerReader",
            "DirectAnswerResolution", "DirectAnswerResolver", "HorizonAnswerEngine"]

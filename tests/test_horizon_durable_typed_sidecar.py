@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from dataclasses import replace
 import hashlib
+import json
 
 import pytest
 
@@ -82,3 +83,40 @@ def test_tampered_ledger_and_changed_manifest_fail_closed_on_recovery(tmp_path):
     changed = replace(AUTHORITY, rule_version=2)
     with pytest.raises(ValueError):
         DurableAuthorizedSidecarMemory("scope", clean, (changed,))
+
+
+def test_route_metadata_tampering_fails_even_after_record_chain_is_rehashed(tmp_path):
+    from horizon_memory import SidecarRouteMetadata
+    from horizon_memory.durable_typed_sidecar import _canonical
+
+    class MetadataAdapter(Adapter):
+        def compile_sidecar(self, batch):
+            source = CausalSourceEnvelope.seal(batch.source_id, batch.content)
+            fact = DeterministicCausalCompiler.compile(source, batch.declarations[0])
+            metadata = SidecarRouteMetadata(
+                1, "session:1", fact.version, generation_id=4, sequence=7,
+                event_time=8, role="user", speaker="Alice")
+            return (AttestedSidecarFact.seal(
+                fact, self.authority, self.lifecycle, metadata),)
+
+    path = tmp_path / "metadata.jsonl"
+    memory = DurableAuthorizedSidecarMemory("scope", path, (AUTHORITY,))
+    assert memory.ingest(MetadataAdapter(), _batch()).state == "APPLIED"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert "observed_intents" not in record["facts"][0]["route_metadata"]
+    record["facts"][0]["route_metadata"]["speaker"] = "Mallory"
+    record.pop("record_sha256")
+    record["record_sha256"] = hashlib.sha256(_canonical(record)).hexdigest()
+    path.write_bytes(_canonical(record) + b"\n")
+    with pytest.raises(ValueError, match="replay failed"):
+        DurableAuthorizedSidecarMemory("scope", path, (AUTHORITY,))
+
+
+def test_v1_attested_fact_serialization_remains_metadata_free(tmp_path):
+    path = tmp_path / "v1.jsonl"
+    memory = DurableAuthorizedSidecarMemory("scope", path, (AUTHORITY,))
+    assert memory.ingest(Adapter(), _batch()).state == "APPLIED"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert "route_metadata" not in record["facts"][0]
+    reopened = DurableAuthorizedSidecarMemory("scope", path, (AUTHORITY,))
+    assert reopened.attested_facts()[0].route_metadata is None

@@ -348,3 +348,22 @@ def test_negative_evaluation_clock_is_rejected_not_interpreted():
         "LOOKUP", CausalSelector("printer", "state")), as_of=-1)
     assert (result.state, result.reason) == (
         "unsupported", "invalid_sidecar_evaluation_time")
+
+
+def test_irrelevant_fiber_replication_cannot_change_active_fiber_answer_or_proof_ids():
+    memory = AuthorizedSidecarMemory("shop", (AUTHORITY,))
+    assert memory.ingest(Adapter(), _batch()).state == "APPLIED"
+    program = TypedCausalProgram("LOOKUP", CausalSelector("printer", "state"))
+    before = memory.query(program)
+    for index in range(64):
+        value = f"state-{index}"
+        declaration = StructuredCausalDeclaration(
+            1000 + index, "shop", f"unrelated-{index}", "state", value,
+            (0, len(value)), 1000 + index, 1000 + index,
+            event_id=f"unrelated-event-{index}")
+        batch = CausalAdapterBatch(
+            f"unrelated-source-{index}", value, "shop", (declaration,))
+        assert memory.ingest(Adapter(), batch).state == "APPLIED"
+    after = memory.query(program)
+    assert (before.state, before.value, before.fact_ids) == (
+        after.state, after.value, after.fact_ids) == ("resolved", "ready", (1,))

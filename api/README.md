@@ -86,17 +86,31 @@ Request body:
 ```
 
 - `question` (string, required)
-- `documents` (array of non-empty strings, required) -- the corpus for this one question.
+- `documents` (required) -- either the legacy array of non-empty strings or an array of
+  structured document objects. A structured object requires `fact_id`, `text`, `source`, `scope`,
+  `session`, and `version`; `sequence`, `event_time`, `role`, `speaker`, `span`, and
+  `text_sha256` are optional. A supplied digest must exactly match `text`; a span is preserved as
+  an out-of-band source coordinate. One
+  request cannot mix the two representations. Metadata remains out-of-band and is never prefixed
+  to source text.
   Each request is a fresh, ephemeral store; there is no persistent corpus across calls yet
   (see "Deferred" below).
-  This plain-string endpoint does not preserve speaker, session, turn or timestamp metadata and
-  therefore does not activate the Python API's structured `ConversationalRecallGenerator`. Do not
-  emulate that contract by prefixing metadata into document text: it would turn metadata into a
-  fabricated source span. A backward-compatible structured conversation payload is still deferred.
+- `context_intents` (optional array) -- observed turn/subquery records with required `intent_id`,
+  `text`, and non-empty `fact_ids`; optional `turn_index` and `session_id` preserve observed
+  topology. IDs must reference documents in the same request, and a supplied session must match
+  every referenced fact. Support labels, answers, rubrics and arbitrary fields are rejected.
+- Structured history enables same-scope cross-session verification. The consumed-development
+  `ConversationalRecallGenerator` remains opt-in via deploy-time
+  `HORIZON_CONVERSATIONAL_RECALL=true`; it is not silently enabled for legacy requests.
 - `include_sources` (bool, default `false`) -- when `true`, the response's `sources` field
   is populated with the full verified claim list (every sentence the engine actually
   routed, verified, and considered -- not just what made the compressed answer), each
   tagged with its originating document and relevance score.
+- A proof-closed `direct_answer` also returns `direct_answer_certificate` (hex). With
+  `include_sources: true`, `direct_answer_evidence` contains the exact typed source rows cited by
+  the proof, including FactId, scope/session/version/generation, span, parent digest, role,
+  speaker and clocks, so a consumer can reopen the public answer boundary without relying on
+  ranking scores. The compressed response keeps that array empty.
 - `polish` (bool, default `false`) -- when `true`, additionally rewrites the answer for
   fluency via an external OpenAI-compatible model (Groq, OpenAI, a local Ollama/llama.cpp/
   vLLM/LM Studio server -- anything speaking the `/chat/completions` shape). The external
@@ -136,6 +150,7 @@ Response (`201 Created`):
   "object": "answer",
   "created": 1755600000,
   "state": "resolved",
+  "action": "answer",
   "answer": "Meridian reduced compute cost by exactly 42 percent...\n...",
   "evidence": "Meridian reduced compute cost by exactly 42 percent...\n...",
   "direct_answer": null,
@@ -145,6 +160,7 @@ Response (`201 Created`):
   "direct_answer_proof_closed": false,
   "direct_answer_residual": [],
   "direct_answer_certificate": null,
+  "direct_answer_certificate_encoding": null,
   "answer_lines": [
     {"text": "Meridian reduced compute cost by exactly 42 percent...",
      "source": "doc:1:0:(0, 120)", "relevance_score": 0.97}
@@ -168,6 +184,7 @@ verified source IDs. A missing/unsupported direct readout never removes `evidenc
 Certified derived resolvers additionally return `direct_answer_certificate` as lowercase hexadecimal
 proof bytes. It is `null` for every non-resolved state. Clients may persist it for audit; its presence
 does not replace the `direct_answer_proof_closed=true` requirement.
+`direct_answer_certificate_encoding` is `"hex"` exactly when certificate bytes are present.
 
 `state` is `"resolved"` when an answer was composed, the lowercased name of a router
 abstain state (e.g. `"abstention"`) when the supplied documents did not verify against the

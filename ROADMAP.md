@@ -35,11 +35,17 @@ These are consumed-development retrieval figures, not answer accuracy or indepen
 That cascade now has an opt-in Python implementation in `src/horizon_memory/`. An all-question
 scorer-blind equivalence replay compared 1,986 rankings and found zero mismatches with the frozen lab
 implementation. LoCoMo adapters,
-scorers, categories and controls remain in `lab/`. The plain-string HTTP endpoint cannot yet preserve
-speaker/session/time and is not counted as supporting it. The immediate roadmap is to close remaining
+scorers, categories and controls remain in `lab/`. HTTP/MCP now preserve structured
+speaker/session/time and FactId-bound context intents while retaining the legacy string payload; the
+conversation generator remains deploy-time opt-in. The immediate roadmap is to close remaining
 event/paraphrase addressability, then action selection (`ANSWER`/`CLARIFY`/`ABSTAIN`) and exact answer
 rendering. Scaling paraphrases or returning more arbitrary context is not treated as solving the
 residual, and the result still requires independent multilingual confirmation.
+
+Structured conversations now also survive restart in `OpenTextHorizonMemory`: the existing durable
+sidecar attests route coordinates under a v2 fact domain and observed intent fibers under v3, while
+legacy metadata-free v1 facts remain byte-compatible. This is one materialized authority ledger, not
+a parallel session database, and neither metadata nor speaker identity is encoded into source text.
 
 The finite `proof-convergent` executor and its question-bound, source-reopening direct-answer
 certificate are also part of the core now. Its corrected LongMemEval final-output arm has a

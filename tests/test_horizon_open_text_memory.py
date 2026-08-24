@@ -1,9 +1,14 @@
 # Copyright (c) 2026 kyuubyN
 # SPDX-License-Identifier: AGPL-3.0-or-later
+import hashlib
+import json
+from pathlib import Path
 import pytest
 
 from horizon_memory import (
-    AnswerContextIntent, EngineProfile, OpenTextHorizonMemory, RouteDocument,
+    AnswerContextIntent, CausalAdapterBatch, DeclarativeSidecarAdapter,
+    DurableAuthorizedSidecarMemory, EngineProfile, OpenTextHorizonMemory, RouteDocument,
+    SidecarFactDeclaration, SidecarLifecycle, StructuredCausalDeclaration,
 )
 
 
@@ -102,6 +107,62 @@ def test_durable_open_text_reopens_and_accepts_an_incremental_bundle(tmp_path):
     assert result.resolved and "cache" in result.answer_text
 
 
+def test_attested_ingest_invalidates_prepared_answer_runtime():
+    memory = OpenTextHorizonMemory(scope_id=1)
+    memory.ingest_documents((_doc(1, "Meridian recorded a verified value of 42."),))
+    memory.answer("What value did Meridian record?")
+    prepared = memory._engine._prepared_runtime
+    assert prepared is not None
+    memory.ingest_documents((_doc(2, "Orion recorded a verified value of 17."),))
+    assert memory._engine._prepared_runtime is None
+    assert not Path(prepared.workdir).exists()
+
+
+def test_durable_open_text_reopens_exact_route_metadata_across_sessions(tmp_path):
+    path = tmp_path / "route-metadata.jsonl"
+    documents = (
+        RouteDocument(
+            11, "Alice remembered the blue bicycle after lunch.", 1, "session:alpha", 7,
+            "chat:alpha", generation_id=3, sequence=9, span=(0, 47), event_time=739100,
+            role="user", speaker="Alice"),
+        RouteDocument(
+            12, "Bob later repaired the bicycle in the garage.", 1, "session:beta", 8,
+            "chat:beta", generation_id=4, sequence=2, event_time=739200,
+            role="assistant", speaker="Bob"),
+    )
+    memory = OpenTextHorizonMemory(scope_id=1, session_id="current", ledger_path=path)
+    assert memory.ingest_documents(documents).state == "APPLIED"
+    before = memory.answer("What did Alice remember after lunch?")
+    reopened = OpenTextHorizonMemory(scope_id=1, session_id="current", ledger_path=path)
+    assert reopened._documents == documents
+    assert all(reopened._sidecar.verify_attestation(item.fact_id) for item in documents)
+    after = reopened.answer("What did Alice remember after lunch?")
+    assert (after.state, after.answer_text, after.direct_answer, after.resolver_evidence) == (
+        before.state, before.answer_text, before.direct_answer, before.resolver_evidence)
+
+
+def test_open_text_reopens_a_legacy_v1_fact_without_route_metadata(tmp_path):
+    path = tmp_path / "legacy-open-text-v1.jsonl"
+    template = OpenTextHorizonMemory(scope_id=1)
+    authority = template.authority
+    text = "The legacy ledger remembers a blue bicycle."
+    declaration = StructuredCausalDeclaration(
+        1, "1", "legacy:source", "surface_document", text, (0, len(text)),
+        5, 6, version=2, event_id="legacy:surface-document:1")
+    lifecycle = SidecarLifecycle(
+        5, None, authority.purpose, "open-text-host-ingest")
+    durable = DurableAuthorizedSidecarMemory("1", path, (authority,))
+    receipt = durable.ingest(
+        DeclarativeSidecarAdapter(authority),
+        CausalAdapterBatch(
+            "legacy-bundle", text, "1",
+            (SidecarFactDeclaration(declaration, lifecycle),)))
+    assert receipt.state == "APPLIED"
+    reopened = OpenTextHorizonMemory(scope_id=1, ledger_path=path)
+    assert reopened._documents == (RouteDocument(
+        1, text, 1, "s1", 2, "legacy:source", sequence=5, event_time=6),)
+
+
 def test_multiple_messages_from_one_session_are_distinct_event_orbits():
     memory = OpenTextHorizonMemory(scope_id=1)
     documents = (
@@ -131,3 +192,66 @@ def test_context_intents_preserve_causal_insertion_order_not_lexicographic_ident
     memory.ingest_documents(documents, context_intents=intents)
     assert tuple(item.intent_id for item in memory._context_intents) == tuple(
         item.intent_id for item in intents)
+
+
+def test_context_intents_survive_restart_with_exact_fiber_and_answer_proof(tmp_path):
+    path = tmp_path / "intent-restart.jsonl"
+    memory = OpenTextHorizonMemory(scope_id=1, session_id="current", ledger_path=path)
+    documents = (
+        RouteDocument(21, "The Big Sur trip lasted 3 days.", 1, "trip-session", 1,
+                      "chat:21", sequence=1, role="user", speaker="Alice"),
+        RouteDocument(22, "The Yosemite trip lasted 5 days.", 1, "trip-session", 1,
+                      "chat:22", sequence=2, role="user", speaker="Alice"),
+    )
+    intents = (AnswerContextIntent(
+        "turn:trips", "How long were the two trips?", (21, 22),
+        turn_index=0, session_id="trip-session"),)
+    assert memory.ingest_documents(documents, context_intents=intents).state == "APPLIED"
+    before = memory.answer("How many days did the trips last in total?")
+    record = json.loads(path.read_text(encoding="utf-8"))
+    attached = [fact["route_metadata"]["observed_intents"] for fact in record["facts"]]
+    assert all(rows == attached[0] for rows in attached)
+    assert attached[0][0]["fact_ids"] == [21, 22]
+
+    reopened = OpenTextHorizonMemory(scope_id=1, session_id="current", ledger_path=path)
+    assert reopened._context_intents == intents
+    after = reopened.answer("How many days did the trips last in total?")
+    assert (after.state, after.answer_text, after.direct_answer, after.resolver_evidence) == (
+        before.state, before.answer_text, before.direct_answer, before.resolver_evidence)
+
+
+def test_incremental_context_intent_order_survives_restart(tmp_path):
+    path = tmp_path / "intent-order.jsonl"
+    memory = OpenTextHorizonMemory(scope_id=1, session_id="current", ledger_path=path)
+    first = AnswerContextIntent(
+        "session:20", "What happened first?", (31,), 0, "history:20")
+    second = AnswerContextIntent(
+        "session:3", "What happened later?", (32,), 1, "history:3")
+    memory.ingest_documents((RouteDocument(
+        31, "The first remembered event occurred.", 1, "history:20", 1, "chat:31"),),
+        context_intents=(first,))
+    memory.ingest_documents((RouteDocument(
+        32, "The later remembered event occurred.", 1, "history:3", 1, "chat:32"),),
+        context_intents=(second,))
+    reopened = OpenTextHorizonMemory(scope_id=1, session_id="current", ledger_path=path)
+    assert reopened._context_intents == (first, second)
+
+
+def test_context_intent_rebinding_and_durable_corruption_fail_closed(tmp_path):
+    path = tmp_path / "intent-corruption.jsonl"
+    memory = OpenTextHorizonMemory(scope_id=1, ledger_path=path)
+    intent = AnswerContextIntent("stable-intent", "What was remembered?", (41,))
+    document = _doc(41, "The stable source remembers a blue bicycle.")
+    assert memory.ingest_documents((document,), context_intents=(intent,)).state == "APPLIED"
+    with pytest.raises(ValueError, match="cannot be rebound"):
+        memory.ingest_documents((document,), context_intents=(AnswerContextIntent(
+            "stable-intent", "A changed intent text", (41,)),))
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["facts"][0]["route_metadata"]["observed_intents"][0]["text"] = "forged"
+    record.pop("record_sha256")
+    from horizon_memory.durable_typed_sidecar import _canonical
+    record["record_sha256"] = hashlib.sha256(_canonical(record)).hexdigest()
+    path.write_bytes(_canonical(record) + b"\n")
+    with pytest.raises(ValueError, match="replay failed"):
+        OpenTextHorizonMemory(scope_id=1, ledger_path=path)
