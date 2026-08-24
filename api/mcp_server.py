@@ -68,8 +68,8 @@ mcp = MCPServer("horizon-memory")
 
 
 @mcp.tool()
-def horizon_ask(question: str, documents: list[str], include_sources: bool = False,
-                 polish: bool = False, polish_model: str | None = None) -> dict:
+async def horizon_ask(question: str, documents: list[str], include_sources: bool = False,
+                      polish: bool = False, polish_model: str | None = None) -> dict:
     """Ask Horizon a question over a caller-supplied document set. Call this when the
     conversation genuinely calls for recalling something previously established -- deciding
     whether this moment warrants it is the calling agent's own judgment call; this tool does not
@@ -81,6 +81,10 @@ def horizon_ask(question: str, documents: list[str], include_sources: bool = Fal
     server's own deployment config (HORIZON_POLISH_BASE_URL / HORIZON_POLISH_API_KEY_ENV), not
     caller-selectable -- letting a caller pick both let them redirect the server's outbound
     request and its stored credential to a host of their choosing."""
+    # MCPServer offloads synchronous tools through AnyIO's worker-thread portal.  On the pinned
+    # MCP/AnyIO + Python 3.14 combination that portal can wait forever even though the same plain
+    # implementation already completed.  The operation is local CPU work, so expose an async tool
+    # boundary and execute it directly on the server loop; stdio clients see the identical schema.
     return _horizon_ask_impl(question, documents, include_sources, polish, polish_model)
 
 

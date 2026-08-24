@@ -214,7 +214,7 @@ def serialize(answer_id: str, created: int, result: AnsweredResult | None, inclu
         "object": "answer",
         "created": created,
         "state": result.state.lower(),
-        "answer": result.answer_text,
+        "answer": result.final_answer_text,
         "evidence": result.evidence_text,
         "direct_answer": result.direct_answer.text or None,
         "direct_answer_state": result.direct_answer.state,
@@ -222,6 +222,8 @@ def serialize(answer_id: str, created: int, result: AnsweredResult | None, inclu
         "direct_answer_sources": list(result.direct_answer.source_ids),
         "direct_answer_proof_closed": result.direct_answer.proof_closed,
         "direct_answer_residual": list(result.direct_answer.residual),
+        "direct_answer_certificate": (result.direct_answer.certificate.hex()
+                                      if result.direct_answer.certificate else None),
         "answer_lines": [
             {"text": line.text, "source": line.source_id, "relevance_score": line.relevance_score}
             for line in result.answer_lines],
@@ -280,7 +282,7 @@ def run_polish(question: str, result: AnsweredResult, config: PolishConfig) -> t
     (polished_text_or_None, polish_state). A broken/erroring polish call never raises here -- the
     caller's own primary `answer` must never be taken down by an optional cosmetic step."""
     adapter = build_polish_adapter()
-    polish_result = adapter.polish(question, result.answer_text, config)
+    polish_result = adapter.polish(question, result.final_answer_text, config)
     if polish_result.state == "polished":
         return polish_result.text, "polished"
     return None, "error"

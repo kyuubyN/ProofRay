@@ -76,6 +76,50 @@ The full walkthrough (connecting your own database, adding a chat assistant, pic
 settings for a small personal memory versus a large company knowledge base) lives in
 [HorizonAI Engine](HorizonAI%20Engine/README.md), written as a step-by-step tutorial.
 
+For timestamped conversations, the Python API also has an opt-in recall route that keeps speaker,
+session, order and observation time as typed metadata instead of adding them to the remembered text:
+
+```python
+from datetime import date
+from horizon_memory import ConversationalRecallGenerator, HorizonAnswerEngine, RouteDocument
+
+history = (
+    RouteDocument(1, "I finally bought the cobalt bicycle.", 1, "summer-chat", 1, "chat:1",
+                  sequence=1, event_time=date(2025, 7, 12).toordinal(), speaker="Alice"),
+)
+engine = HorizonAnswerEngine(
+    scope_id=1,
+    session_id="current-chat",
+    candidate_generator=ConversationalRecallGenerator(),
+    allow_scope_fallback=True,
+)
+result = engine.answer("Which bicycle did Alice buy?", history)
+```
+
+This generator only transports candidate `FactId`s. The normal Horizon verifier still reopens and
+authorizes every source, and unsupported or conflicting readout still has to abstain. Cross-session
+fallback is explicitly enabled above and remains off by default. The current HTTP endpoint accepts
+only plain document strings, so structured conversational recall is presently a Python-only surface;
+it is not silently approximated by putting speaker or timestamps into document text.
+
+For finite questions that can be closed from exact measurements, counts, dates or relations, the
+default engine now attempts the proof-convergent resolver. It returns a short `direct_answer` only
+after Horizon reopens a question-bound certificate; otherwise the ordinary verified evidence remains
+unchanged. Pass `direct_answer_resolver=None` when an evidence-only integration is desired:
+
+```python
+from horizon_memory import HorizonAnswerEngine
+
+engine = HorizonAnswerEngine()
+result = engine.answer("How many days did the two trips take in total?", documents)
+print(result.final_answer_text)
+```
+
+This path is local and deterministic. A benchmark judge may score its frozen output, but no model,
+API response or relevance score participates in proof construction or authorization. The default
+activation follows the measured >90% final-output gate; it does not make unsupported operator worlds
+answerable, and explicit `None` retains the prior evidence-only behavior.
+
 ## What can you connect it to?
 
 Horizon never decides anything on its own behalf. Every connection below is something you turn on

@@ -18,6 +18,9 @@ _PERCENT = re.compile(r"(?<![\d.])(?P<value>\d{1,3}(?:\.\d+)?)\s*%")
 _ITEM = re.compile(r".+?(?:,|;|\band\s+(?=\d{1,3}(?:\.\d+)?\s*%)|(?<!\d)[.!?](?!\d)|$)", re.I)
 _TOKEN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+|\d+")
 _APPROX = re.compile(r"\b(?:about|around|approximately|roughly|nearly|over|under)\s*$", re.I)
+_NON_PARTITION_FRAME = re.compile(
+    r"\b(?:positive|negative) view\b|\bopinion\b|\bsurveyed countries\b|"
+    r"\bapproval rating\b", re.I)
 _STOP = frozenset({
     "a", "an", "any", "are", "from", "in", "of", "or", "people", "person",
     "the", "their", "was", "were", "who", "years", "year", "age", "population",
@@ -81,6 +84,12 @@ def _query_predicate(question: str) -> tuple[str, tuple[int, int]] | None:
         return None
     group = "predicate" if match.group("predicate") is not None else "predicate_not"
     text = match.group(group).strip()
+    # Bare ``18 and 24`` denotes a union of two named values, not the closed
+    # interval ``18 to 24``.  Without an explicit interval marker the universe
+    # needed by complement arithmetic is not identified.
+    if (re.search(r"\b\d+\s+and\s+\d+\b", text, re.I)
+            and not re.search(r"\bbetween\s+\d+\s+and\s+\d+\b", text, re.I)):
+        return None
     start = question.casefold().find(text.casefold())
     return text, (start, start + len(text))
 
@@ -122,6 +131,10 @@ def _derive(question: str, passage: str):
     if len(winners) != 1:
         return None
     fact = winners[0]
+    frame = passage[max(0, fact.context_span[0] - 180):
+                    min(len(passage), fact.context_span[1] + 180)]
+    if _NON_PARTITION_FRAME.search(frame):
+        return None
     result = _render(Decimal(100) - Decimal(fact.value))
     return predicate_span, tuple(sorted(anchors)), fact, result
 

@@ -81,6 +81,7 @@ class HorizonAPITests(unittest.TestCase):
         self.assertIsNone(body["direct_answer"])
         self.assertEqual(body["direct_answer_state"], "not_attempted")
         self.assertFalse(body["direct_answer_proof_closed"])
+        self.assertIsNone(body["direct_answer_certificate"])
         self.assertIsNone(body["sources"])
         self.assertGreater(len(body["answer_lines"]), 0)
         self.assertGreater(body["documents_considered"], 0)

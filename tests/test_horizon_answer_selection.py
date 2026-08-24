@@ -14,7 +14,7 @@ from __future__ import annotations
 import dataclasses
 import unittest
 
-from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, RouteDocument
+from horizon_memory import DEFAULT_PROFILE, HorizonAnswerEngine, PERSONAL_MEMORY_PROFILE, RouteDocument
 
 SCOPE = 1
 
@@ -184,6 +184,63 @@ class CompletenessBonusRegressionTests(unittest.TestCase):
         # Every named profile constant must default this field to None unless a deployment
         # explicitly opts in -- guards against a future edit accidentally flipping the default.
         self.assertIsNone(DEFAULT_PROFILE.answer_completeness_bonus)
+
+
+class ParagraphContextRegressionTests(unittest.TestCase):
+    def test_personal_profile_preserves_cross_line_attribution_in_one_exact_span(self):
+        documents = (
+            _doc(1, "A political and cultural history of\nmodern Europe. SEE Hayes,\n"
+                    "Carlton J. H.\n\nA separate catalogue record."),
+            _doc(2, "A modern municipal history describes cultural programs in Europe."),
+        )
+        result = HorizonAnswerEngine(
+            profile=PERSONAL_MEMORY_PROFILE, scope_id=SCOPE).answer(
+                "Who wrote the political and cultural history of modern Europe?", documents)
+        self.assertTrue(any(
+            "Carlton J. H." in line.text and line.fact_id == 1
+            for line in result.answer_lines))
+        ranked_surfaces = [claim.surface for claim in result.ranked_dossier.claims]
+        self.assertEqual(
+            len(ranked_surfaces), len(set(ranked_surfaces)),
+            "nested paragraph/sentence representations must not create duplicate evidence",
+        )
+
+    def test_default_profile_keeps_paragraph_context_opt_in(self):
+        self.assertFalse(DEFAULT_PROFILE.claim_paragraph_context)
+
+    def test_verified_paragraph_relevance_survives_modal_narrative_wording(self):
+        documents = (
+            _doc(1, "Written by the authors, the song tells of a man who didn't want to fall "
+                    "in love, only to learn that he was in love with his former girlfriend: "
+                    "if it isn't love, why does she stay on his mind?\n\n"
+                    "The later chorus repeats the dilemma."),
+            _doc(2, "The song has a memorable breakdown where the singer plainly admits a "
+                    "mistake, while the band answers in the background."),
+        )
+        result = HorizonAnswerEngine(
+            profile=PERSONAL_MEMORY_PROFILE, scope_id=SCOPE).answer(
+                "What is the story of the song If It Isn't Love?", documents)
+        self.assertTrue(any(
+            line.fact_id == 1 and "former girlfriend" in line.text
+            for line in result.answer_lines),
+            "routed paragraph relevance must participate in the dossier merge",
+        )
+
+    def test_sublexical_acronym_route_survives_empty_lexical_max_cover(self):
+        documents = (
+            _doc(1, "The Financial Services Authority of the UK performs the corresponding "
+                    "financial regulatory role for securities markets."),
+            _doc(2, "The municipal services authority publishes annual road maintenance data."),
+        )
+        result = HorizonAnswerEngine(
+            profile=PERSONAL_MEMORY_PROFILE, scope_id=SCOPE).answer(
+                "What is the UK equivalent of the SEC?", documents)
+        self.assertEqual(result.state, "RESOLVED")
+        self.assertTrue(any(
+            line.fact_id == 1 and "Financial Services Authority" in line.text
+            for line in result.answer_lines),
+            "verified sublexical evidence must survive an empty lexical max-cover core",
+        )
 
 
 if __name__ == "__main__":

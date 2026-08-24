@@ -25,7 +25,7 @@ import hashlib
 import re
 from typing import Iterable
 
-from .claim_routing import claim_spans
+from .claim_routing import claim_spans, paragraph_spans
 from .raw_causal_channels import RawCausalChannels, observe_raw_text
 
 
@@ -170,15 +170,21 @@ def compile_question_obligations(question: str, *,
     return tuple(obligations)
 
 
-def extract_authorized_claims(sources: Iterable[ClaimSource]) \
+def extract_authorized_claims(sources: Iterable[ClaimSource], *, include_paragraphs: bool = False,
+                              preserve_sources: bool = False) \
         -> tuple[AuthorizedClaim, ...]:
+    if include_paragraphs and preserve_sources:
+        raise ValueError("include_paragraphs and preserve_sources are mutually exclusive")
     source_map = {}
     claims = []
     for source in sources:
         if source.source_id in source_map or not source.verify():
             raise ValueError("claim sources must be unique and sealed")
         source_map[source.source_id] = source
-        for index, (start, end) in enumerate(claim_spans(source.content)):
+        spans = {(0, len(source.content))} if preserve_sources else set(claim_spans(source.content))
+        if include_paragraphs:
+            spans.update(paragraph_spans(source.content))
+        for index, (start, end) in enumerate(sorted(spans)):
             while start < end and source.content[start].isspace():
                 start += 1
             while end > start and source.content[end - 1].isspace():

@@ -5,6 +5,54 @@ claims a capability once it's been built and independently tested. See
 [Benchmarks](docs/BENCHMARKS.md) for what's actually validated today, and treat everything below
 as direction, not a promise or a release date.
 
+## Remembering people across conversations
+
+The primary product direction is personal, longitudinal memory: remembering what a person said or
+experienced across separate conversations, preserving who said it and when, and returning the exact
+source when asked later in ordinary language. Questions such as "do you remember that day?" require
+current conversational context, temporal and person binding, and an honest clarification when several
+past episodes still fit. A plausible guess is not a remembered fact.
+
+Development therefore prioritizes timestamped multi-session conversations, preference and knowledge
+updates, commitments, informal references, typos/slang, absent memories, ambiguity and strict user-scope
+isolation. Public long-memory benchmarks are useful parts of this portfolio, but no one dataset defines
+the product. Arithmetic reading-comprehension corpora remain regression tests for the proof executor;
+they are not the primary measure of whether Horizon works as a memory.
+
+The frozen research protocol is documented in
+[Horizon Personal Recall](lab/HORIZON_PERSONAL_RECALL_CHARTER.md). It reports each underlying memory
+need separately from its formal, informal, noisy and cross-language renderings, so adding paraphrases
+cannot inflate the number of independent facts solved.
+
+The current full personal-conversation audit covers all 1,986 LoCoMo questions. Among the 1,982 with
+evidence annotations, the promoted opt-in cascade reaches at least one annotated turn for
+**1,770/1,982 (89.30%)**, all annotated turns for **1,580/1,982 (79.72%)**, and
+**2,084/2,821 (73.87%)** turn recall at a 32-turn budget. The path combines only scorer-blind,
+controlled signals: reciprocal-rank fusion, exact speaker metadata, explicit calendar coordinates,
+same-session adjacency, an observable completeness gate and morphology that changes the proposal head.
+These are consumed-development retrieval figures, not answer accuracy or independent transfer.
+
+That cascade now has an opt-in Python implementation in `src/horizon_memory/`. An all-question
+scorer-blind equivalence replay compared 1,986 rankings and found zero mismatches with the frozen lab
+implementation. LoCoMo adapters,
+scorers, categories and controls remain in `lab/`. The plain-string HTTP endpoint cannot yet preserve
+speaker/session/time and is not counted as supporting it. The immediate roadmap is to close remaining
+event/paraphrase addressability, then action selection (`ANSWER`/`CLARIFY`/`ABSTAIN`) and exact answer
+rendering. Scaling paraphrases or returning more arbitrary context is not treated as solving the
+residual, and the result still requires independent multilingual confirmation.
+
+The finite `proof-convergent` executor and its question-bound, source-reopening direct-answer
+certificate are also part of the core now. Its corrected LongMemEval final-output arm has a
+byte-inherited worst-case lower bound of 90.83%, so it is enabled by default; callers can pass
+`direct_answer_resolver=None` for evidence-only behavior. MemGym can use it after verified acquisition and optional
+witness front-loading: closed operator worlds produce a concise direct answer; everything else keeps
+the deterministic evidence result. The current MemGym audit closes 0/120 proofs, so this integration
+is safe fallback infrastructure there, not the solution to its explanatory-composition residual.
+This improves composition without making arithmetic the product
+goal and without allowing an evaluator or language model to become runtime authority. Benchmark
+activation remains metric-specific: mechanisms that have not crossed 90% on their exact final-output
+arm stay opt-in rather than inheriting a score from older bytes.
+
 ## More languages
 
 Today, the parts of Horizon that read natural-language questions (not just store and retrieve raw

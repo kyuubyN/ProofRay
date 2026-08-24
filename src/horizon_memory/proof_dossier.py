@@ -215,6 +215,8 @@ def _submodular_greedy_select(
 def build_proof_dossier(*, sources: tuple[ClaimSource, ...],
                         intents: tuple[ContextIntent, ...], strategy: str,
                         per_fiber: int = 12, max_bytes: int = 8192,
+                        include_paragraphs: bool = False,
+                        preserve_sources: bool = False,
                         dedup_threshold: float | None = None,
                         source_priority: dict[str, float] | None = None,
                         global_sort_alpha: float | None = None,
@@ -279,7 +281,8 @@ def build_proof_dossier(*, sources: tuple[ClaimSource, ...],
     known = frozenset(item.source_id for item in sources)
     if any(not item.verify(known) for item in intents):
         raise ValueError("intent/source topology failed authority")
-    claims = extract_authorized_claims(sources)
+    claims = extract_authorized_claims(
+        sources, include_paragraphs=include_paragraphs, preserve_sources=preserve_sources)
     by_source = {source.source_id: tuple(
         item for item in claims if item.source_id == source.source_id)
                  for source in sources}

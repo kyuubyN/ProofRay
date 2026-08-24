@@ -89,6 +89,10 @@ Request body:
 - `documents` (array of non-empty strings, required) -- the corpus for this one question.
   Each request is a fresh, ephemeral store; there is no persistent corpus across calls yet
   (see "Deferred" below).
+  This plain-string endpoint does not preserve speaker, session, turn or timestamp metadata and
+  therefore does not activate the Python API's structured `ConversationalRecallGenerator`. Do not
+  emulate that contract by prefixing metadata into document text: it would turn metadata into a
+  fabricated source span. A backward-compatible structured conversation payload is still deferred.
 - `include_sources` (bool, default `false`) -- when `true`, the response's `sources` field
   is populated with the full verified claim list (every sentence the engine actually
   routed, verified, and considered -- not just what made the compressed answer), each
@@ -140,6 +144,7 @@ Response (`201 Created`):
   "direct_answer_sources": [],
   "direct_answer_proof_closed": false,
   "direct_answer_residual": [],
+  "direct_answer_certificate": null,
   "answer_lines": [
     {"text": "Meridian reduced compute cost by exactly 42 percent...",
      "source": "doc:1:0:(0, 120)", "relevance_score": 0.97}
@@ -153,11 +158,16 @@ Response (`201 Created`):
 }
 ```
 
-`answer` is retained as the backwards-compatible name of the verified evidence text;
-`evidence` is its explicit alias. `direct_answer` is a separate minimal-answer channel. It is
-non-null only when a configured readout supplies an extractive candidate or a proof-closed exact
+`evidence` is always the complete verified evidence render. `answer` is the proof-first product view:
+it equals a certified `direct_answer` when one closed, otherwise it falls back byte-for-byte to
+`evidence`. `direct_answer` is also exposed separately for audit. It is
+non-null when the default finite resolver (or a caller-configured readout) supplies a proof-closed exact
 result. `direct_answer_state="resolved"` always requires `direct_answer_proof_closed=true` and
 verified source IDs. A missing/unsupported direct readout never removes `evidence`.
+
+Certified derived resolvers additionally return `direct_answer_certificate` as lowercase hexadecimal
+proof bytes. It is `null` for every non-resolved state. Clients may persist it for audit; its presence
+does not replace the `direct_answer_proof_closed=true` requirement.
 
 `state` is `"resolved"` when an answer was composed, the lowercased name of a router
 abstain state (e.g. `"abstention"`) when the supplied documents did not verify against the

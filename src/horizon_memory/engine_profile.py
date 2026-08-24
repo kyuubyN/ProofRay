@@ -44,6 +44,8 @@ class EngineProfile:
     # observable, contradiction).
     claim_weights: tuple[float, ...] = CLAIM_GENERATOR_DEFAULT_WEIGHTS
     claim_specificity_bonus: float | None = None
+    # Optional exact blank-line-delimited binding windows; off on the stable scale path.
+    claim_paragraph_context: bool = False
     conformal_weights: tuple[float, ...] = LEXICAL_SUBLEXICAL_WEIGHTS
     bm25_k1: float = 1.2
     bm25_b: float = 0.75
@@ -161,6 +163,7 @@ class EngineProfile:
             "schema": self.schema, "name": self.name,
             "claim_weights": list(self.claim_weights),
             "claim_specificity_bonus": self.claim_specificity_bonus,
+            "claim_paragraph_context": self.claim_paragraph_context,
             "conformal_weights": list(self.conformal_weights),
             "bm25_k1": self.bm25_k1, "bm25_b": self.bm25_b,
             "lexical_bm25_delta": self.lexical_bm25_delta,
@@ -273,9 +276,16 @@ TEAM_MEMORY_PROFILE = EngineProfile(
 # the shape (raw text windowed into fixed-length records, so relevant spans are routinely
 # fragments) that exposed the bug in the first place. Zero regression on the five already-validated
 # MongoDB corpora (byte-identical answers). See `docs/BENCHMARKS.md` for the full numbers.
+#
+# `claim_paragraph_context=True` is a later, consumed-development follow-up on the same fiction
+# corpus. One remaining valid record split a title/author binding across hard-wrapped lines;
+# bounded exact paragraph spans recovered it (96/97 -> 97/97 valid-source attribution) while the
+# PT valid denominator remained 101/101. This is intentionally personal-profile-only and does not
+# modify the scale/default path or constitute an independent holdout result.
 PERSONAL_MEMORY_PROFILE = EngineProfile(
     name="personal-memory-v1", answer_relevance_gate_ratio=0.0,
-    answer_shortlist_size=500, answer_bytes=40_000, answer_completeness_bonus=0.5)
+    answer_shortlist_size=500, answer_bytes=40_000, answer_completeness_bonus=0.5,
+    claim_paragraph_context=True)
 
 __all__ = [
     "SCHEMA", "DEFAULT_PROFILE", "TEAM_MEMORY_PROFILE", "PERSONAL_MEMORY_PROFILE", "EngineProfile",

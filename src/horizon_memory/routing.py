@@ -67,6 +67,10 @@ class RouteDocument:
     # non-CSAM categories) to enable it for a specific document/deployment. CSAM is never
     # skippable, by construction of `screen_text` itself, whenever a non-`None` policy is passed.
     safety_policy: SafetyPolicy | None = None
+    # Conversational identity is independent from transport role.  A person's name must not be
+    # squeezed into ``role`` (a closed user/assistant/system/tool enum) or ``source`` (provenance).
+    # Kept at the end so every existing positional construction remains byte-for-byte compatible.
+    speaker: str | None = None
 
     def __post_init__(self):
         if self.fact_id < 0 or self.scope_id < 0 or self.version < 1:
@@ -83,6 +87,9 @@ class RouteDocument:
             raise ValueError("event_time must be non-negative")
         if self.role is not None and self.role not in ("user", "assistant", "system", "tool"):
             raise ValueError("invalid role")
+        if self.speaker is not None and (
+                not isinstance(self.speaker, str) or not self.speaker.strip()):
+            raise ValueError("speaker must be non-empty text when supplied")
 
 
 @dataclass(frozen=True)

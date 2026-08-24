@@ -56,8 +56,10 @@ from .raw_causal_channels import RawCausalDocument, is_cjk
 from .routing import CandidateGenerator, HorizonVerifier, QueryEnvelope, RouteDocument, RouteState, \
     RoutingIndex, SemanticRouter
 from .conformal_routing import document_priority_by_source
+from .witness_frontload import QueryWitnessFrontloadConfig, frontload_query_witnesses
 
 _TOKEN = re.compile(r"[^\W_]+")
+_DEFAULT_DIRECT_ANSWER_RESOLVER = object()
 
 
 def _content_words(text: str | None) -> frozenset[str]:
@@ -75,6 +77,8 @@ class AnsweredClaim:
     fact_id: int
     source_id: str
     relevance_score: float
+    role: str | None = None
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,7 @@ class DirectAnswer:
     source_ids: tuple[str, ...] = ()
     proof_closed: bool = False
     residual: tuple[str, ...] = ()
+    certificate: bytes = b""
 
     def __post_init__(self) -> None:
         allowed = {"not_attempted", "candidate", "resolved", "abstain", "unsupported",
@@ -116,10 +121,13 @@ class DirectAnswer:
             raise ValueError("direct-answer source IDs must be unique and canonical")
         if self.state in ("candidate", "resolved") and (not self.text or self.method == "none"):
             raise ValueError("candidate/resolved direct answer requires text and method")
-        if self.state == "resolved" and (not self.proof_closed or not self.source_ids):
+        if self.state == "resolved" and (not self.proof_closed or not self.source_ids
+                                         or not self.certificate):
             raise ValueError("resolved direct answer requires closed proof and verified sources")
         if self.state not in ("candidate", "resolved") and self.text:
             raise ValueError("non-answer direct state cannot carry answer text")
+        if self.state != "resolved" and self.certificate:
+            raise ValueError("only a resolved direct answer can carry a certificate")
 
 
 @dataclass(frozen=True)
@@ -140,6 +148,37 @@ class DirectAnswerProposal:
 class DirectAnswerReader(Protocol):
     def propose(self, question: str,
                 evidence: tuple[AnsweredClaim, ...]) -> DirectAnswerProposal | None: ...
+
+
+class DirectAnswerCertificate(Protocol):
+    """Compact proof object that the engine must reopen before admitting derived text."""
+    def compact(self) -> bytes: ...
+    def reopen(self, blob: bytes, question: str,
+               evidence: tuple[AnsweredClaim, ...]) -> bool: ...
+
+
+@dataclass(frozen=True)
+class DirectAnswerResolution:
+    text: str
+    method: str
+    source_ids: tuple[str, ...]
+    certificate: DirectAnswerCertificate
+
+    def __post_init__(self) -> None:
+        if not self.text or not self.method or self.method == "none" or not self.source_ids:
+            raise ValueError("direct-answer resolution requires text, method and sources")
+        if self.source_ids != tuple(dict.fromkeys(self.source_ids)):
+            raise ValueError("resolution source IDs must be unique and canonical")
+
+
+class DirectAnswerResolver(Protocol):
+    """Trusted finite executor over the complete verified authority-document pool.
+
+    Unlike a reader, it must supply a question-bound certificate that reopens against that same
+    pool. Presentation ranking and answer byte budgets cannot hide operands or contradictions.
+    """
+    def resolve(self, question: str,
+                evidence: tuple[AnsweredClaim, ...]) -> DirectAnswerResolution | None: ...
 
 
 @dataclass(frozen=True)
@@ -177,6 +216,13 @@ class AnsweredResult:
         """Explicit name for the backwards-compatible `answer_text` evidence channel."""
         return self.answer_text
 
+    @property
+    def final_answer_text(self) -> str:
+        """Proof-first product answer, with the conserved evidence render as exact fallback."""
+        if self.direct_answer.state == "resolved":
+            return self.direct_answer.text
+        return self.answer_text
+
 
 def _abstained(state_name: str, documents_considered: int) -> AnsweredResult:
     return AnsweredResult(state_name, (), (), (), None, None, documents_considered, 0, 0)
@@ -188,12 +234,33 @@ class HorizonAnswerEngine:
     def __init__(self, *, profile: EngineProfile = DEFAULT_PROFILE,
                  scope_id: int = 1, session_id: str = "s1",
                  direct_answer_reader: DirectAnswerReader | None = None,
-                 candidate_generator: CandidateGenerator | None = None):
+                 direct_answer_resolver: DirectAnswerResolver | None | object =
+                 _DEFAULT_DIRECT_ANSWER_RESOLVER,
+                 candidate_generator: CandidateGenerator | None = None,
+                 allow_scope_fallback: bool = False,
+                 witness_frontload: QueryWitnessFrontloadConfig | None = None):
+        if not isinstance(allow_scope_fallback, bool):
+            raise TypeError("allow_scope_fallback must be bool")
+        if witness_frontload is not None and not isinstance(
+                witness_frontload, QueryWitnessFrontloadConfig):
+            raise TypeError("witness_frontload must be QueryWitnessFrontloadConfig or None")
+        if direct_answer_resolver is _DEFAULT_DIRECT_ANSWER_RESOLVER:
+            # Imported lazily to avoid an answer_engine <-> resolver import cycle. The finite
+            # executor is the measured >90% default product path; callers can pass None to retain
+            # evidence-only behavior or supply another certificate-bearing resolver explicitly.
+            from .proof_convergent_resolver import ProofConvergentResolver
+            direct_answer_resolver = ProofConvergentResolver()
+        elif (direct_answer_resolver is not None and
+              not callable(getattr(direct_answer_resolver, "resolve", None))):
+            raise TypeError("direct_answer_resolver must implement resolve() or be None")
         self.profile = profile
         self.scope_id = scope_id
         self.session_id = session_id
         self.direct_answer_reader = direct_answer_reader
+        self.direct_answer_resolver = direct_answer_resolver
         self.candidate_generator = candidate_generator
+        self.allow_scope_fallback = allow_scope_fallback
+        self.witness_frontload = witness_frontload
 
     def answer(self, question: str, documents: tuple[RouteDocument, ...], *,
                context_intents: tuple[AnswerContextIntent, ...] = ()) -> AnsweredResult:
@@ -211,15 +278,33 @@ class HorizonAnswerEngine:
                 for document in documents:
                     memory.put(self.scope_id, document.fact_id, document.version, 1)
 
+                # A proof-first resolver needs the complete caller-declared authority boundary,
+                # not the later presentation shortlist.  Every document above has just been
+                # admitted under the active scope/version; keep exact text, role and session out
+                # of band so finite operators cannot mix conversations or promote an assistant
+                # utterance to world truth.  Source IDs remain unique even when callers reuse a
+                # human-facing ``source`` label across several FactIds.
+                resolver_fact_ids = (
+                    frozenset(fact_id for intent in context_intents for fact_id in intent.fact_ids)
+                    if context_intents else frozenset(document.fact_id for document in documents)
+                )
+                complete_resolver_evidence = tuple(AnsweredClaim(
+                    document.text, document.fact_id,
+                    f"{document.source}:{document.fact_id}:(0, {len(document.text)})",
+                    0.0, document.role or "document", document.session_id)
+                    for document in documents if document.fact_id in resolver_fact_ids)
+
                 query = QueryEnvelope("q", question, self.scope_id, self.session_id, 10)
                 verifier = HorizonVerifier(memory, index)
                 claim_generator = self.candidate_generator or ClaimGenerator(
                     profile.claim_weights, specificity_bonus=profile.claim_specificity_bonus,
+                    include_paragraphs=profile.claim_paragraph_context,
                     bm25_k1=profile.bm25_k1, bm25_b=profile.bm25_b,
                     lexical_bm25_delta=profile.lexical_bm25_delta,
                     sublexical_bm25_delta=profile.sublexical_bm25_delta)
                 result = SemanticRouter(index, claim_generator, verifier).route(
-                    query, profile.claim_limit, allow_scope_fallback=False)
+                    query, profile.claim_limit,
+                    allow_scope_fallback=self.allow_scope_fallback)
 
                 if result.state != RouteState.EVIDENCE:
                     return _abstained(result.state.name, len(documents))
@@ -251,7 +336,6 @@ class HorizonAnswerEngine:
                 sources = tuple(sources)
                 if not sources:
                     return _abstained(RouteState.ABSTENTION.name, len(documents))
-
                 if context_intents:
                     source_ids_by_fact: dict[int, list[str]] = {}
                     for source, fact_id in zip(sources, source_fact_ids):
@@ -276,16 +360,39 @@ class HorizonAnswerEngine:
                 # API-facing facade should abstain cleanly here, not propagate an internal
                 # exception to a caller.
                 try:
-                    core = build_proof_dossier(
-                        sources=sources, intents=intents, strategy="horizon",
-                        per_fiber=profile.per_fiber, max_bytes=profile.answer_bytes,
-                        submodular_budget_fill=True)
+                    try:
+                        core = build_proof_dossier(
+                            sources=sources, intents=intents, strategy="horizon",
+                            per_fiber=profile.per_fiber, max_bytes=profile.answer_bytes,
+                            submodular_budget_fill=True,
+                            preserve_sources=profile.claim_paragraph_context)
+                    except ValueError as exc:
+                        if str(exc) != "dossier contains no authorized claim":
+                            raise
+                        if not any(score > 0.0 for score in relevance.values()):
+                            # A ranked fill is admissible only after a real verified route signal.
+                            # Otherwise a generic question can turn an arbitrary zero-score document
+                            # into an answer merely because the exact max-cover set is empty.
+                            raise
+                        # Exact lexical max-cover can be empty after a verified acronym or
+                        # sublexical route. Fall back only for that selection state; source,
+                        # topology and proof failures still reach the outer abstention.
+                        core = build_proof_dossier(
+                            sources=sources, intents=intents, strategy="horizon",
+                            per_fiber=profile.per_fiber, max_bytes=profile.answer_bytes,
+                            global_sort_alpha=profile.global_sort_alpha,
+                            source_priority=(relevance if profile.claim_paragraph_context else None),
+                            anchor_bonus=profile.anchor_bonus,
+                            specificity_bonus=profile.specificity_bonus,
+                            preserve_sources=profile.claim_paragraph_context)
                     ranked = build_proof_dossier(
                         sources=sources, intents=intents, strategy="horizon",
                         per_fiber=profile.per_fiber, max_bytes=profile.acquisition_bytes,
                         global_sort_alpha=profile.global_sort_alpha,
+                        source_priority=relevance if profile.claim_paragraph_context else None,
                         anchor_bonus=profile.anchor_bonus,
-                        specificity_bonus=profile.specificity_bonus)
+                        specificity_bonus=profile.specificity_bonus,
+                        preserve_sources=profile.claim_paragraph_context)
                 except ValueError:
                     return _abstained(RouteState.ABSTENTION.name, len(documents))
 
@@ -325,9 +432,15 @@ class HorizonAnswerEngine:
                         chosen, relevance, origin, question, profile)
                 else:
                     answer_lines = _pick_clean_answer(chosen, relevance, origin, question, profile)
+                if self.witness_frontload is not None:
+                    answer_lines = frontload_query_witnesses(
+                        answer_lines, final_question=question,
+                        turn_queries=tuple(intent.text for intent in context_intents),
+                        text_of=lambda line: line.text, config=self.witness_frontload)
                 answer_bytes = sum(len(line.text.encode("utf-8")) for line in answer_lines)
                 direct_answer = _read_direct_answer(
-                    self.direct_answer_reader, question, answer_lines)
+                    self.direct_answer_reader, self.direct_answer_resolver,
+                    question, answer_lines, complete_resolver_evidence)
 
                 return AnsweredResult(
                     "RESOLVED", tuple(claims), answer_lines, sources, core, ranked,
@@ -521,8 +634,32 @@ def _pick_hpps_answer(chosen, relevance: dict, origin: dict, question: str,
     return lines, result.proof_closed, result.residual
 
 
-def _read_direct_answer(reader: DirectAnswerReader | None, question: str,
-                        evidence: tuple[AnsweredClaim, ...]) -> DirectAnswer:
+def _read_direct_answer(reader: DirectAnswerReader | None,
+                        resolver: DirectAnswerResolver | None, question: str,
+                        evidence: tuple[AnsweredClaim, ...],
+                        resolver_evidence: tuple[AnsweredClaim, ...] | None = None) -> DirectAnswer:
+    resolver_rows = resolver_evidence if resolver_evidence is not None else evidence
+    by_source = {item.source_id: item.text for item in resolver_rows}
+    if resolver is not None:
+        try:
+            resolution = resolver.resolve(question, resolver_rows)
+            if resolution is not None:
+                if any(source_id not in by_source for source_id in resolution.source_ids):
+                    return DirectAnswer("abstain", method="invalid_resolution_source",
+                                        residual=("unknown_source_id",))
+                blob = resolution.certificate.compact()
+                if not isinstance(blob, bytes) or not blob or len(blob) > 65_536:
+                    return DirectAnswer("abstain", method="invalid_resolution_certificate",
+                                        residual=("invalid_certificate_bytes",))
+                if not resolution.certificate.reopen(blob, question, resolver_rows):
+                    return DirectAnswer("abstain", method="invalid_resolution_certificate",
+                                        residual=("certificate_does_not_reopen",))
+                return DirectAnswer(
+                    "resolved", resolution.text, resolution.method, resolution.source_ids,
+                    True, (), blob)
+        except Exception as exc:
+            return DirectAnswer("abstain", method="resolver_error",
+                                residual=(type(exc).__name__,))
     if reader is None:
         return DirectAnswer()
     try:
@@ -544,5 +681,6 @@ def _read_direct_answer(reader: DirectAnswerReader | None, question: str,
                         False, proposal.residual)
 
 
-__all__ = ["AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer", "DirectAnswerProposal",
-           "DirectAnswerReader", "HorizonAnswerEngine"]
+__all__ = ["AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer",
+           "DirectAnswerCertificate", "DirectAnswerProposal", "DirectAnswerReader",
+           "DirectAnswerResolution", "DirectAnswerResolver", "HorizonAnswerEngine"]

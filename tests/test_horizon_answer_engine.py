@@ -6,7 +6,8 @@ from __future__ import annotations
 import unittest
 
 from horizon_memory import (
-    AnswerContextIntent, DEFAULT_PROFILE, DirectAnswer, DirectAnswerProposal, EngineProfile,
+    AnswerContextIntent, DEFAULT_PROFILE, DirectAnswer, DirectAnswerProposal,
+    DirectAnswerResolution, EngineProfile,
     HorizonAnswerEngine, RouteDocument,
 )
 
@@ -68,7 +69,10 @@ class ResolvedAnswerTests(unittest.TestCase):
             DirectAnswer("resolved", "42", "extractive", ("doc:1",), False)
         candidate = DirectAnswer("candidate", "42", "extractive", ("doc:1",), False)
         self.assertEqual(candidate.text, "42")
-        resolved = DirectAnswer("resolved", "42", "exact", ("doc:1",), True)
+        with self.assertRaises(ValueError):
+            DirectAnswer("resolved", "42", "exact", ("doc:1",), True)
+        resolved = DirectAnswer("resolved", "42", "exact", ("doc:1",), True,
+                                certificate=b"proof")
         self.assertTrue(resolved.proof_closed)
 
     def test_relevant_claim_outranks_unrelated_claim_in_answer(self):
@@ -77,6 +81,13 @@ class ResolvedAnswerTests(unittest.TestCase):
         answer_text = result.answer_text
         self.assertIn("42", answer_text)
         self.assertNotIn("pascals", answer_text)
+
+    def test_zero_score_ranked_fallback_abstains_instead_of_dumping_arbitrary_source(self):
+        result = self.engine.answer(
+            "What is the answer?",
+            (_doc(99, "Completely unrelated content about migratory bird patterns."),))
+        self.assertFalse(result.resolved)
+        self.assertEqual(result.answer_text, "")
 
 
 class VersionedDocumentTests(unittest.TestCase):
@@ -226,6 +237,30 @@ class ProfileIsRespectedTests(unittest.TestCase):
 
 
 class DirectAnswerReaderBoundaryTests(unittest.TestCase):
+    class SumCertificate:
+        def compact(self):
+            return b"test-sum:40+2=42"
+
+        def reopen(self, blob, question, evidence):
+            return (blob == b"test-sum:40+2=42" and "sum" in question.casefold()
+                    and any("40 plus 2" in item.text for item in evidence))
+
+    class ResolveSum:
+        def resolve(self, question, evidence):
+            return DirectAnswerResolution(
+                "42", "test_certified_sum", (evidence[0].source_id,),
+                DirectAnswerReaderBoundaryTests.SumCertificate())
+
+    class BadCertificate(SumCertificate):
+        def reopen(self, blob, question, evidence):
+            return False
+
+    class RejectBadSum:
+        def resolve(self, question, evidence):
+            return DirectAnswerResolution(
+                "42", "test_bad_sum", (evidence[0].source_id,),
+                DirectAnswerReaderBoundaryTests.BadCertificate())
+
     class Extract42:
         def propose(self, question, evidence):
             line = next(item for item in evidence if "42" in item.text)
@@ -238,6 +273,14 @@ class DirectAnswerReaderBoundaryTests(unittest.TestCase):
     class UnknownSource:
         def propose(self, question, evidence):
             return DirectAnswerProposal("42", "test_extractive", ("unknown",))
+
+    class CaptureResolverPool:
+        def __init__(self):
+            self.evidence = ()
+
+        def resolve(self, question, evidence):
+            self.evidence = evidence
+            return None
 
     def setUp(self):
         self.documents = (_doc(
@@ -266,6 +309,57 @@ class DirectAnswerReaderBoundaryTests(unittest.TestCase):
                 "What percent did Meridian reduce cost by?", self.documents)
         self.assertEqual(result.direct_answer.state, "abstain")
         self.assertEqual(result.direct_answer.residual, ("unknown_source_id",))
+
+    def test_certified_derived_answer_can_resolve_without_text_containment(self):
+        documents = (_doc(1, "The two independently witnessed operands are 40 plus 2."),)
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_resolver=self.ResolveSum()).answer(
+                "What is the sum of 40 plus 2?", documents)
+        self.assertEqual(result.direct_answer.state, "resolved")
+        self.assertEqual(result.direct_answer.text, "42")
+        self.assertTrue(result.direct_answer.proof_closed)
+        self.assertEqual(result.direct_answer.certificate, b"test-sum:40+2=42")
+        self.assertNotIn("42", result.evidence_text)
+
+    def test_unreopenable_derived_certificate_fails_closed(self):
+        documents = (_doc(1, "The two independently witnessed operands are 40 plus 2."),)
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_resolver=self.RejectBadSum()).answer(
+                "What is the sum of 40 plus 2?", documents)
+        self.assertEqual(result.direct_answer.state, "abstain")
+        self.assertEqual(result.direct_answer.residual, ("certificate_does_not_reopen",))
+        self.assertIn("40 plus 2", result.evidence_text)
+
+    def test_resolver_sees_verified_acquisition_pool_before_render_budget(self):
+        probe = self.CaptureResolverPool()
+        documents = tuple(_doc(index, (
+            f"Meridian observation {index} records a separately verified percentage fact "
+            "with enough explanatory material to exceed the deliberately tiny answer budget."
+        )) for index in range(1, 5))
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE,
+            profile=EngineProfile(acquisition_bytes=4096, answer_bytes=256),
+            direct_answer_resolver=probe).answer(
+                "What percentage facts did Meridian record?", documents)
+        self.assertGreater(len(result.sources), len(result.claims))
+        self.assertEqual(len(probe.evidence), len(result.sources))
+        self.assertEqual({item.source_id for item in probe.evidence},
+                         {item.source_id for item in result.sources})
+
+    def test_explicit_context_intent_scopes_resolver_authority(self):
+        probe = self.CaptureResolverPool()
+        documents = (
+            _doc(1, "The authorized Meridian game had a verified 48-yard field goal."),
+            _doc(2, "A different Meridian game had a verified 54-yard field goal."),
+        )
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_resolver=probe).answer(
+                "How long was the Meridian field goal?", documents,
+                context_intents=(AnswerContextIntent("authorized-game", "Meridian field goal", (1,)),))
+        self.assertTrue(probe.evidence)
+        self.assertTrue(all(item.fact_id == 1 for item in probe.evidence))
+        self.assertTrue(all("48-yard" in item.text for item in probe.evidence))
+        self.assertFalse(any("54-yard" in item.text for item in probe.evidence))
 
 
 if __name__ == "__main__":

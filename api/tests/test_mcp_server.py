@@ -5,10 +5,10 @@ the real MCP server's list_tools()/call_tool() (no subprocess/stdio round-trip n
 mcp SDK's MCPServer exposes both as directly-awaitable coroutines)."""
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 import unittest
+import anyio
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -84,7 +84,7 @@ class MCPToolTests(unittest.TestCase):
     def test_horizon_ask_is_registered(self):
         async def run():
             return await mcp.list_tools()
-        tools = asyncio.run(run())
+        tools = anyio.run(run)
         names = [t.name for t in tools]
         self.assertIn("horizon_ask", names)
 
@@ -92,7 +92,7 @@ class MCPToolTests(unittest.TestCase):
         async def run():
             return await mcp.call_tool(
                 "horizon_ask", {"question": QUESTION, "documents": DOCUMENTS})
-        result = asyncio.run(run())
+        result = anyio.run(run)
         self.assertFalse(result.is_error)
         body = json.loads(result.content[0].text)
         self.assertEqual(body["state"], "resolved")
