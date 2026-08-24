@@ -19,16 +19,45 @@ with. If it can't find a real answer, it tells you honestly instead of making on
 It runs entirely on your own machine. No AI model is required to get an answer, and no data ever
 leaves your computer unless you choose to connect one yourself.
 
-> **Status:** this is an early, actively-developed version. Things may still be rough around the
-> edges. Read on to see how it works today.
+> **Status — Public Alpha:** Horizon is ready for experimentation and real integrations, but it
+> does not yet map every possible question, domain or language into a closed proof. APIs and
+> behavior may still evolve before the first stable release.
 
-The parts of Horizon that read and understand natural-language questions have so far been
-carefully tested in **English and Portuguese** only. Other languages, starting with Chinese, are
-planned but not validated yet; see [Roadmap](ROADMAP.md).
+> **The Horizon contract:** no proof, no asserted direct answer. When Horizon cannot establish an
+> answer from authorized memory, it returns the verified evidence it does have or abstains instead
+> of filling the gap with a plausible invention. This fail-closed design substantially reduces
+> false memories; it is not a claim that alpha software can never contain an ingestion, routing or
+> interpretation bug.
+
+The core has also been successfully run by early testers on **Windows**. Automated release CI
+currently covers Ubuntu with Python 3.10–3.13, so Windows support should still be considered
+early-user validated rather than part of the automated compatibility matrix.
+
+The current limitation is semantic coverage, not an attempt to hide uncertainty: Horizon does not
+yet provide universal natural-language mapping. The parts that read and understand questions have
+so far been carefully tested in **English and Portuguese** only. Other languages, starting with
+Chinese, are planned but not validated yet; see [Roadmap](ROADMAP.md).
 
 Horizon grew out of a multi-year research project that tried many different approaches to AI
 memory and kept only the ones that survived real testing. If you're curious about that history,
 it's written up in [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md).
+
+## How Horizon answers
+
+Horizon uses a proof-first cascade instead of guessing:
+
+1. **Precise answer:** it first checks whether the question can be answered exactly from authorized
+   memory. A direct answer is released only when its proof closes and can be reopened against the
+   original sources.
+2. **Verified evidence:** if an exact answer cannot be proved, Horizon returns the highest-ranked
+   verified excerpts related to the question. These excerpts are useful context, but Horizon does
+   not pretend that they form a complete direct answer.
+3. **Abstention:** if no trustworthy evidence supports the question, or the available memories
+   conflict, Horizon abstains instead of inventing a recollection.
+
+In short: **proved answer → verified excerpts → abstention**. Relevance can choose what Horizon
+examines first, but only source authority and a reopenable proof can turn evidence into an asserted
+direct answer.
 
 ## Try it in two minutes
 
