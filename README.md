@@ -59,6 +59,74 @@ In short: **proved answer → verified excerpts → abstention**. Relevance can 
 examines first, but only source authority and a reopenable proof can turn evidence into an asserted
 direct answer.
 
+## Connect Gemini without giving it memory authority
+
+An LLM can sit after Horizon as a presentation layer, or it can call Horizon as a tool. In both
+designs, MongoDB stays local and Gemini receives only Horizon's result — never the complete database
+corpus. The runnable tutorial is
+[`gemini_horizon_tool_call.py`](HorizonAI%20Engine/examples/gemini_horizon_tool_call.py).
+
+Install the example dependencies and provide credentials through the environment:
+
+```bash
+pip install pymongo mongomock
+export GEMINI_API_KEY="your-key"
+# Optional: without this, the tutorial uses a safe in-process mongomock fixture.
+export MONGODB_URI="mongodb://localhost:27017"
+```
+
+PowerShell uses the same variables:
+
+```powershell
+$env:GEMINI_API_KEY = "your-key"
+$env:MONGODB_URI = "mongodb://localhost:27017"  # optional
+```
+
+### 1. Horizon first, Gemini only rewrites
+
+```bash
+python3 "HorizonAI Engine/examples/gemini_horizon_tool_call.py" --mode polish
+```
+
+The application queries MongoDB, lets Horizon route and verify the memory, and sends Gemini only a
+small object containing `question`, `horizon_state`, `horizon_authority`, and `horizon_answer`.
+Gemini may make the wording shorter or friendlier, but the system instruction forbids adding,
+calculating or changing facts and numbers.
+
+### 2. Gemini calls Horizon as a native tool
+
+```bash
+python3 "HorizonAI Engine/examples/gemini_horizon_tool_call.py" --mode tool
+```
+
+This uses Gemini's native function-calling protocol:
+
+```text
+user question
+→ Gemini requests query_horizon_memory(question)
+→ the application queries MongoDB and executes Horizon locally
+→ only {state, authority, answer, backend, source_count} returns to Gemini
+→ Gemini presents that verified result
+```
+
+The first Gemini request is forced to call `query_horizon_memory`; after the local result is
+available, the second request disables further tool calls and permits presentation only. If Horizon
+returns `state=abstain`, Gemini is instructed to report that there is not enough verified memory.
+
+Run both patterns together with:
+
+```bash
+python3 "HorizonAI Engine/examples/gemini_horizon_tool_call.py" --mode both
+```
+
+`both` uses three `generateContent` calls: one polish request and one two-call tool cycle. In the
+frozen five-call smoke test that motivated this tutorial (one polish request plus two repeated tool
+cycles), `gemini-3.1-flash-lite` preserved the unique value `42` in all three final outputs, issued
+both tool requests with the original question unchanged, and produced byte-identical answers across
+the repeated tool cycles. The run used `mongomock`, 979 input tokens, 110 output tokens and 18.27 s
+of accumulated provider latency. This is an integration and authority-boundary smoke test, not an
+answer-accuracy benchmark.
+
 ## Try it in two minutes
 
 ```bash
