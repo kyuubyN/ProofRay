@@ -26,6 +26,7 @@ from .typed_causal_ingest import StructuredCausalDeclaration
 from .typed_sidecar import (
     AuthorizedSidecarMemory, DeclarativeSidecarAdapter, SidecarAuthority,
     SidecarFactDeclaration, SidecarIngestReceipt, SidecarLifecycle,
+    SidecarObservedIntent, SidecarRouteMetadata,
 )
 from .durable_typed_sidecar import DurableAuthorizedSidecarMemory
 from .english_atomic_relations import (
@@ -99,8 +100,7 @@ class OpenTextHorizonMemory:
                          if ledger_path is None else
                          DurableAuthorizedSidecarMemory(
                              self.scope, Path(ledger_path), (self.authority,)))
-        self._documents = self._documents_from_sidecar()
-        self._context_intents: tuple[AnswerContextIntent, ...] = ()
+        self._documents, self._context_intents = self._state_from_sidecar()
         self._evidence_index = None
         self._turn_index = None
         self._english_atomic_compiler = None
@@ -108,18 +108,61 @@ class OpenTextHorizonMemory:
         self._engine = HorizonAnswerEngine(
             profile=profile or EngineProfile(name="open-text-default-v1"),
             scope_id=scope_id, session_id=session_id,
-            candidate_generator=candidate_generator)
+            candidate_generator=candidate_generator, allow_scope_fallback=True,
+            reuse_prepared_runtime=True)
 
-    def _documents_from_sidecar(self) -> tuple[RouteDocument, ...]:
+    def _state_from_sidecar(self) \
+            -> tuple[tuple[RouteDocument, ...], tuple[AnswerContextIntent, ...]]:
         documents = []
+        intent_by_id: dict[str, SidecarObservedIntent] = {}
+        occurrences: dict[str, set[int]] = {}
         for item in self._sidecar.attested_facts():
             fact = item.fact
             if fact.predicate != "surface_document" or fact.scope != self.scope:
                 raise RuntimeError("open-text ledger contains a non-document fact")
-            documents.append(RouteDocument(
-                fact.fact_id, fact.value, self.scope_id, self.session_id, fact.version,
-                fact.subject, sequence=fact.observed_at, event_time=fact.event_time))
-        return tuple(documents)
+            metadata = item.route_metadata
+            if metadata is None:  # Legacy v1 ledger: preserve the historical reconstruction.
+                documents.append(RouteDocument(
+                    fact.fact_id, fact.value, self.scope_id, self.session_id, fact.version,
+                    fact.subject, sequence=fact.observed_at, event_time=fact.event_time))
+            else:
+                if (metadata.scope_id != self.scope_id or metadata.version != fact.version
+                        or (metadata.sequence is not None
+                            and metadata.sequence != fact.observed_at)
+                        or (metadata.event_time is not None
+                            and metadata.event_time != fact.event_time)):
+                    raise RuntimeError("open-text route metadata disagrees with attested fact")
+                documents.append(RouteDocument(
+                    fact.fact_id, fact.value, metadata.scope_id, metadata.session_id,
+                    metadata.version, fact.subject, generation_id=metadata.generation_id,
+                    sequence=metadata.sequence, span=metadata.span, role=metadata.role,
+                    event_time=metadata.event_time, speaker=metadata.speaker))
+                for intent in metadata.observed_intents:
+                    if fact.fact_id not in intent.fact_ids:
+                        raise RuntimeError("open-text intent is outside its FactId fiber")
+                    prior = intent_by_id.get(intent.intent_id)
+                    if prior is not None and prior != intent:
+                        raise RuntimeError("open-text intent identity was rebound")
+                    intent_by_id[intent.intent_id] = intent
+                    occurrences.setdefault(intent.intent_id, set()).add(fact.fact_id)
+        frozen_documents = tuple(documents)
+        document_ids = {document.fact_id for document in frozen_documents}
+        for intent_id, intent in intent_by_id.items():
+            if (occurrences[intent_id] != set(intent.fact_ids)
+                    or not set(intent.fact_ids) <= document_ids):
+                raise RuntimeError("open-text intent fiber coverage is incomplete")
+            sessions = {document.session_id for document in frozen_documents
+                        if document.fact_id in intent.fact_ids}
+            if len(sessions) != 1 or (
+                    intent.session_id is not None and sessions != {intent.session_id}):
+                raise RuntimeError("open-text intent session disagrees with its FactIds")
+        ordered = tuple(sorted(intent_by_id.values(), key=lambda item: item.insertion_order))
+        if tuple(item.insertion_order for item in ordered) != tuple(range(len(ordered))):
+            raise RuntimeError("open-text intent insertion order is not canonical")
+        intents = tuple(AnswerContextIntent(
+            item.intent_id, item.text, item.fact_ids, item.turn_index, item.session_id)
+                        for item in ordered)
+        return frozen_documents, intents
 
     def ingest_documents(self, documents: tuple[RouteDocument, ...], *,
                          context_intents: tuple[AnswerContextIntent, ...] = (),
@@ -127,9 +170,8 @@ class OpenTextHorizonMemory:
         if (not documents or tuple(document.fact_id for document in documents) !=
                 tuple(sorted({document.fact_id for document in documents}))):
             raise ValueError("open-text documents must be non-empty and FactId-canonical")
-        if any(document.scope_id != self.scope_id or document.session_id != self.session_id
-               for document in documents):
-            raise ValueError("open-text document scope/session differs from memory")
+        if any(document.scope_id != self.scope_id for document in documents):
+            raise ValueError("open-text document scope differs from memory")
         known = {document.fact_id for document in documents}
         existing = {document.fact_id for document in self._documents}
         if known & existing:
@@ -139,6 +181,30 @@ class OpenTextHorizonMemory:
                 raise ValueError("open-text FactId collision is not an update")
         if any(set(intent.fact_ids) - known for intent in context_intents):
             raise ValueError("open-text intent references an unknown document")
+        documents_by_id = {document.fact_id: document for document in documents}
+        for intent in context_intents:
+            sessions = {documents_by_id[fact_id].session_id for fact_id in intent.fact_ids}
+            if len(sessions) != 1 or (
+                    intent.session_id is not None and sessions != {intent.session_id}):
+                raise ValueError("open-text intent session differs from its documents")
+        if len({intent.intent_id for intent in context_intents}) != len(context_intents):
+            raise ValueError("open-text intent IDs must be unique per bundle")
+        prior_intents = {intent.intent_id: intent for intent in self._context_intents}
+        if any(intent.intent_id in prior_intents and prior_intents[intent.intent_id] != intent
+               for intent in context_intents):
+            raise ValueError("open-text intent identity cannot be rebound")
+        existing_order = {intent.intent_id: index
+                          for index, intent in enumerate(self._context_intents)}
+        next_order = len(existing_order)
+        observed: dict[str, SidecarObservedIntent] = {}
+        for intent in context_intents:
+            order = existing_order.get(intent.intent_id)
+            if order is None:
+                order = next_order
+                next_order += 1
+            observed[intent.intent_id] = SidecarObservedIntent(
+                intent.intent_id, intent.text, intent.fact_ids, order,
+                intent.turn_index, intent.session_id)
 
         chunks = []
         declarations = []
@@ -159,7 +225,15 @@ class OpenTextHorizonMemory:
                 event_id=f"{document.source}:surface-document:{document.fact_id}")
             lifecycle = SidecarLifecycle(
                 clock, None, self.authority.purpose, "open-text-host-ingest")
-            declarations.append(SidecarFactDeclaration(declaration, lifecycle))
+            metadata = SidecarRouteMetadata(
+                document.scope_id, document.session_id, document.version,
+                generation_id=document.generation_id, sequence=document.sequence,
+                event_time=document.event_time, role=document.role, speaker=document.speaker,
+                span=document.span, observed_intents=tuple(sorted(
+                    (observed[intent.intent_id] for intent in context_intents
+                     if document.fact_id in intent.fact_ids),
+                    key=lambda item: item.intent_id)))
+            declarations.append(SidecarFactDeclaration(declaration, lifecycle, metadata))
         content = "".join(chunks)
         if bundle_id is None:
             bundle_id = "open-text:" + hashlib.sha256(content.encode()).hexdigest()
@@ -170,6 +244,10 @@ class OpenTextHorizonMemory:
             return receipt
         if any(not self._sidecar.verify_attestation(document.fact_id) for document in documents):
             raise RuntimeError("open-text sidecar publication failed post-commit verification")
+        # The engine cache is a disposable projection of the exact prior document snapshot.
+        # Invalidate immediately after an attested publication; the sidecar remains the sole
+        # authority and the next query rebuilds from the newly verified snapshot.
+        self._engine.invalidate_prepared_runtime()
         merged = {document.fact_id: document for document in self._documents}
         merged.update({document.fact_id: document for document in documents})
         self._documents = tuple(merged[fact_id] for fact_id in sorted(merged))
@@ -309,13 +387,14 @@ class OpenTextHorizonMemory:
             for document in self._documents:
                 if not self._sidecar.verify_attestation(document.fact_id):
                     raise RuntimeError("open-text source authority failed revalidation")
-                session = document.source
+                session = document.session_id
                 session_index = session_ordinals.setdefault(session, len(session_ordinals))
-                turn = turn_positions.get(session, 0)
-                turn_positions[session] = turn + 1
+                turn = (document.sequence if document.sequence is not None
+                        else turn_positions.get(session, 0))
+                turn_positions[session] = max(turn_positions.get(session, 0), turn + 1)
                 raw.append(RawCausalDocument(
                     document.fact_id, document.text, session_index, turn,
-                    speaker=document.role or ""))
+                    speaker=document.speaker or ""))
             self._turn_index = HorizonSearchEngine(
                 tuple(raw), core_width=core_width, frontier_width=max(32, max_results))
         engine = self._turn_index

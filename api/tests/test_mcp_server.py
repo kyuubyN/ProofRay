@@ -5,10 +5,10 @@ the real MCP server's list_tools()/call_tool() (no subprocess/stdio round-trip n
 mcp SDK's MCPServer exposes both as directly-awaitable coroutines)."""
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 import unittest
+import anyio
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -24,6 +24,10 @@ DOCUMENTS = [
     "redundant recomputation across adjacent pipeline stages.",
 ]
 QUESTION = "What percent did the Meridian project reduce cost by?"
+STRUCTURED = [{
+    "fact_id": 41, "text": "My camping trip to Big Sur lasted 3 days.", "source": "chat:41",
+    "scope": 1, "session": "history", "version": 1, "role": "user", "speaker": "Ana",
+}]
 
 
 class FakeTransport:
@@ -64,6 +68,15 @@ class HorizonAskImplTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _horizon_ask_impl(QUESTION, [])
 
+    def test_context_intents_are_supported_by_plain_mcp_implementation(self):
+        body = _horizon_ask_impl(
+            "How many days did I spend camping in total?", STRUCTURED,
+            context_intents=[{
+                "intent_id": "turn:0", "text": "How long was the Big Sur camping trip?",
+                "fact_ids": [41]}])
+        self.assertEqual(body["direct_answer_state"], "resolved")
+        self.assertEqual(body["answer"], "3 days")
+
     def test_polish_true_populates_polished_answer(self):
         transport = FakeTransport([TransportResponse(200, {}, json.dumps({
             "choices": [{"message": {"content": "Meridian cut costs by 42 percent."}}],
@@ -84,7 +97,7 @@ class MCPToolTests(unittest.TestCase):
     def test_horizon_ask_is_registered(self):
         async def run():
             return await mcp.list_tools()
-        tools = asyncio.run(run())
+        tools = anyio.run(run)
         names = [t.name for t in tools]
         self.assertIn("horizon_ask", names)
 
@@ -92,7 +105,7 @@ class MCPToolTests(unittest.TestCase):
         async def run():
             return await mcp.call_tool(
                 "horizon_ask", {"question": QUESTION, "documents": DOCUMENTS})
-        result = asyncio.run(run())
+        result = anyio.run(run)
         self.assertFalse(result.is_error)
         body = json.loads(result.content[0].text)
         self.assertEqual(body["state"], "resolved")

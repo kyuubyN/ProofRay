@@ -149,6 +149,29 @@ document can contain one claim that answers a query and several that don't;
 claim-level generation lets those compete independently for budget instead
 of the whole document winning or losing as one unit.
 
+For small personal-memory corpora, `PERSONAL_MEMORY_PROFILE` additionally enables a bounded
+paragraph context channel. It proposes exact non-empty paragraph spans of at most 2,048 characters
+alongside the ordinary sentence spans, and carries the same option through proof-dossier extraction.
+This preserves relations split by hard line wrapping or compact records such as `title → SEE author`
+without a domain dictionary. Blank lines are the only grouping rule; every returned paragraph is
+still an exact substring of its verified parent source. The scale/default profile leaves this off,
+so the published large-corpus path is unchanged.
+
+Paragraph candidates are already verified spans, so paragraph mode preserves each routed span as a
+single dossier atom. It does not split the paragraph back into sentences inside the dossier: doing so
+would recreate an independently routed sentence under a second derived identity, incorrectly letting
+one representation consume budget twice. This identity-conservation rule was added after an
+independent QED gate exposed exactly that failure; the first QED result remains rejected and the
+post-repair rerun is development-only (see Benchmarks).
+
+Two selection laws complete that path. First, the already-computed relevance of each verified routed
+span is supplied to the dossier's existing `source_priority` channel; otherwise paragraph candidates
+would be reordered using claim affinity alone. Second, if exact-lexical submodular max-cover is empty
+but verified acronym/sublexical evidence exists, the engine falls back to the same bounded ranked
+dossier. Only the explicit empty-selection error takes this route; source, topology and proof failures
+still abstain. A subsequently frozen SQuAD 2.0 evaluation confirmed 256/256 target answer-span
+transport with zero paired regressions (see Benchmarks).
+
 Claim/sentence boundaries and the lexical/sublexical channels above are script-aware, not
 English-only: Chinese text (which has no whitespace word boundaries) is segmented with a small,
 self-built maximum-matching word dictionary rather than character bigrams, after an earlier
@@ -196,6 +219,114 @@ None of this changes what counts as authoritative. However a candidate is
 scored, ranked or admitted, it only ever proposes; `HorizonVerifier` is
 still what decides whether a result is trustworthy, per the boundary above.
 
+### Structured conversational recall (opt-in Python surface)
+
+`ConversationalRecallGenerator` is the promoted candidate-transport path for small, longitudinal
+conversation histories. It consumes ordinary `RouteDocument` authority plus four independent
+coordinates: `speaker`, `session_id`, `sequence` and `event_time`. Speaker is not a transport role;
+observation time is not an event assertion; neither is encoded into `source` or `text`. Duplicate text
+under distinct `FactId`s remains distinct evidence.
+
+Its finite cascade is deliberately legible: RRF60 joins lexical and proof-pressure rankings; a stable
+exact-speaker partition protects person-addressed candidates; session-level weave and explicit
+Gregorian dates address episodes; bounded same-session neighbors preserve local dialogue causality;
+an HSSD/productive-plural observation reserves wider person-scoped evidence when completeness is
+requested; and morphology is admitted only when its bounded proposal head differs from the plain
+surface control. Every stage only reorders `FactId`s. Scores, topology and metadata cannot authorize
+an answer, and `HorizonVerifier` still rejects invalid scope, version, generation or source identity.
+
+All internal budgets live in frozen `ConversationalRecallConfig`, so consumed-development values are
+visible configuration rather than hidden package defaults. `CONVERSATIONAL_HIGH_RECALL_PROFILE`
+freezes the independently observed consumer cut at 64 without retuning those internal stages. At
+that cut the consumed LoCoMo replay reaches 1,799/1,982 annotated questions (90.77% hit), 1,611/1,982
+all-hit and 2,188/2,821 evidence IDs. Those are reachability metrics, not answer accuracy. The full
+scorer-blind equivalence replay compares the laboratory and core FactId prefixes before opening gold.
+That replay found zero mismatches across all 1,986 questions through prefix 96
+(`result_sha256=6fa00695...b3e2`).
+The generator itself is opt-in, and
+`HorizonAnswerEngine.allow_scope_fallback` is also `False` by default. A real cross-session call must
+construct structured documents, pass the generator and explicitly enable fallback. The optional
+person/topic reserve exists as a separately measurable configuration field but remains disabled in the
+frozen default because its gain has not yet been ablated after the morphology stage. Experimental
+question-response transport remains in `lab/`. MemGym witness front-loading has been promoted as the
+separate opt-in primitive below; its benchmark-specific adapter, controls and scores remain in `lab/`.
+
+The HTTP/MCP bridge now exposes a backward-compatible structured document contract carrying FactId,
+source, scope, session, version, sequence, observation time, role, speaker, optional source span
+and a caller-verifiable text digest. It also accepts
+FactId-bound observed context intents. Mixed legacy/structured arrays, unknown fields and cross-scope
+documents fail closed; metadata is never encoded into source text. The conversational generator is
+still disabled by default and requires deploy-time `HORIZON_CONVERSATIONAL_RECALL=true`. That flag
+also selects `CONVERSATIONAL_HIGH_RECALL_PROFILE`, so deployment uses the measured cut rather than
+the unrelated scale-memory limit. Consumed development alone still does not authorize a universal
+default.
+
+`QueryWitnessFrontloadConfig` is a separate opt-in final-ordering mechanism for multi-turn evidence.
+It ranks already-verified `AnsweredClaim` objects against the final question and caller-supplied
+`AnswerContextIntent.text` queries, protects a small round-robin prefix, and then appends every
+untouched object in its original order. Object identity, multiplicity, source IDs and text bytes are
+conserved. It cannot repair composition or prove truth. The MemGym consumed-development prefix proxy
+motivating it improved strongly, but reordered bytes have not yet received a fresh paired judge score;
+therefore no built-in profile enables it and it does not inherit the historical 0.950 result.
+The promoted implementation is byte-identical to the frozen lab winner on all 120 consumed-development
+episodes. The real final render budget remains **24,576 bytes**. A separate 4 KiB prefix-only
+diagnostic moves from 0.551764 to 0.787985 while coverage over the complete 24 KiB render stays exactly
+0.910626; the 4 KiB window is not a runtime truncation or replacement budget. This validates
+conservation and ordering, not semantic answer correctness.
+The answer facade enforces that budget on the physical UTF-8 render, including newline separators;
+historical accounting that summed only claim surfaces could exceed the declared limit by `N-1`
+bytes and is retained only as a documented pre-fix artifact.
+
+`ProofConvergentResolver` is the public finite answer-execution layer. It projects the complete
+verified acquisition pool into `AttestedScalarLedger`, runs every applicable operator world, and
+releases a direct answer only if those worlds converge. Its `HCR2` certificate binds the question,
+rendered answer, method, cited source IDs, compact scalar proof and every proof-participating
+authority coordinate (scope, session, version, generation, role, speaker, clocks, exact spans and
+parent digests). Closed-corpus nonmembership binds the complete authorized population; positive
+proofs bind cited rows so appending irrelevant history does not perturb proof bytes. The engine
+reopens the certificate before
+returning `DirectAnswer(state="resolved")`. A disagreement, unsupported construction, incomplete
+closure or modified source returns no direct answer, leaving the deterministic evidence cascade
+available. The executor and resolver have no model, network, scorer or dataset dependency. Benchmark
+judges measure product utility after outputs are frozen; they never authorize a proof.
+
+The resolver is enabled by default after the corrected LongMemEval arm cleared a conservative
+full-denominator lower bound of 0.908333 using exact-byte score inheritance and zero assigned to every
+changed, unjudged row. `direct_answer_resolver=None` is the explicit evidence-only switch. This default
+does not turn a proof miss into a guess: `final_answer_text` falls back to the conserved evidence bytes.
+
+For multi-turn finite executors, `ContextualDirectAnswerResolver` adds `resolve_contextual` without
+breaking the existing `resolve` protocol. The engine passes the same FactId-bound
+`AnswerContextIntent`s to resolution and certificate reopening, and preserves speaker, sequence and
+observation time in the verified authority rows. A contextual certificate that changes or ignores
+those coordinates fails closed before `DirectAnswer(state="resolved")` is admitted.
+
+`ExplanatoryProofResolver` implements that contextual protocol over the promoted EOP kernel. Each
+visible turn intent defines one exact FactId fiber; `ObligationNode`s compile the turn queries and
+final query into a DAG; `WitnessBinding`s bind exact source spans and roles; witnessed bridges join
+adjacent fibers; Sigma-PBA keeps alternative environments separate; and `JoinClosure` records reuse
+or final composition. Missing witnesses return unsupported, divergent complete worlds return
+contested, and budget or bridge exhaustion abstains. Its compact contextual certificate binds the
+question, authority coordinates, intents, bindings, bridges, closures and output, then reruns the
+finite kernel during reopening. The current MemGym runtime-only result is monotonic but sparse
+(6/120 closed proof dossiers), so this resolver is public and opt-in rather than the engine default.
+`ProofCascadeResolver` composes the existing scalar resolver before EOP without introducing another
+authority envelope; both return the canonical `DirectAnswerResolution` and the engine performs the
+same certificate-reopening gate.
+A 120-episode runtime-only lab/core audit found zero differences in proof state or certificate bytes
+(`result_sha256=3666855d...1dad`).
+
+The resolver also preserves each verified claim's `role` and `session_id`. By default, user assertions
+and role-less knowledge-base documents may participate as world authority; assistant utterances are
+observations only unless a caller explicitly declares that role authoritative. Session IDs are mapped
+to opaque local proof groups so causal binding can cross adjacent facts in one episode without silently
+joining unrelated conversations. Neither coordinate is encoded into source text.
+
+This makes the MemGym composition order explicit: verified acquisition -> optional witness
+front-loading for readable evidence -> proof-convergent direct answer when closed -> conserved
+deterministic evidence otherwise. Witness ordering and proof execution are independent: changing line
+position cannot change a proof's source authority, while a proof miss cannot erase the evidence result.
+
 `horizon_memory.content_safety` adds a separate, narrower, **opt-in** gate on
 the content itself: a deterministic, zero-LLM keyword/pattern screen for
 physical-harm instructions, malware, sensitive PII/credentials and CSAM
@@ -216,7 +347,8 @@ declines instead), `answer_text`/`evidence_text` (the composed, verified evidenc
 under two names, `answer_text` kept for backwards compatibility), `direct_answer` (the separate,
 optional minimal-answer channel described above), and telemetry (`documents_considered`,
 `verified_candidates`, `answer_bytes`, `chosen_size`) a caller can use to reason about how close a
-corpus is to the engine's own internal budgets.
+corpus is to the engine's own internal budgets. `final_answer_text` is the proof-first product view:
+it returns the certified direct answer when one closed and otherwise returns `answer_text` byte-for-byte.
 
 Every tunable value the engine consumes (claim-routing channel weights, acquisition/answer byte
 budgets, the shortlist size and relevance gate the final answer is picked from, the answer
@@ -326,6 +458,28 @@ backwards-compatible alias). `direct_answer` is an optional minimal result with 
 method, sources, closure flag and residual obligations. Failure to derive a direct answer never
 erases or weakens the evidence channel.
 
+There are two deliberately unequal direct-answer extension points. `DirectAnswerReader` remains
+untrusted and source-extractive: even an exact reopened span is only `candidate`. The opt-in
+`DirectAnswerResolver` may emit derived text not literally present in one source, but only with a
+compact certificate that the engine immediately reopens against the question and the complete
+verified caller-document authority pool. Unknown sources, oversized or empty proof bytes,
+recomputation failure and
+resolver exceptions fail closed while evidence survives. A successful resolution carries the proof
+bytes through `DirectAnswer`; `resolved` without a non-empty certificate is structurally invalid.
+
+The resolver sees every caller document admitted under the active scope/version, before candidate
+ranking or proof-dossier packing, so conflicting operands cannot disappear at either the acquisition
+or final rendering cut. The reader still receives only the
+compact evidence packet. Operator compilation comes
+first: derived `DIFF`/`DURATION`/closed `COUNT` programs go to typed execution; only lookup-shaped or
+explicitly measure-bound questions may enter extractive span readout.
+
+An explicit `AnswerContextIntent` is source authority, not a ranking hint. When present, it narrows the
+resolver pool to the verified document FactIds named by the intent; without it, every verified caller
+document remains eligible and conflicting results abstain. This separates source-given execution from
+source-free retrieval. A generic question shared by several documents cannot be made identifiable by
+letting a relevance score silently choose which arithmetic result is true.
+
 ### Promoted deterministic EN atomic relation pack
 
 `english_atomic_relations.py` is a bounded source reader, not a new truth authority. The query is
@@ -383,6 +537,18 @@ atomic-relation packs' `answer_atomic_relation_en`/`_pt` entry points, and the C
 delivery transfer results in [Benchmarks](BENCHMARKS.md), all run through this facade. It is
 deliberately not sold as text understanding: it makes exactly one claim (this span exists,
 unmodified, in this source) and lets everything downstream stay proof-carrying on top of that.
+When a durable ledger is configured, optional conversational route coordinates are attested inside
+the same sidecar fact under `HORIZON-SIDECAR-FACT-v2`. Restart preserves scope, session, version,
+generation, sequence, event time, role, speaker and source span exactly. Metadata-free historical
+facts retain their v1 attestation and JSON representation. FactId-bound observed intents use a v3
+attestation and must reopen with complete, identical fiber membership. No parallel metadata database
+and no text/source prefix encoding are introduced.
+`OpenTextHorizonMemory` opts into reuse of the disposable `RoutingIndex` and Horizon admission store
+for repeated questions over the exact same attested document tuple. A successful ingest invalidates
+and closes that projection immediately. Plain `HorizonAnswerEngine` and HTTP requests remain
+ephemeral by default (`reuse_prepared_runtime=False`), and a per-engine lock prevents one concurrent
+snapshot replacement from closing another request's store. Cached and ephemeral answers/proofs are
+required to be byte-identical; the sidecar remains the sole durable authority.
 
 **The authorized typed sidecar** (`docs/TYPED_SIDECAR.md`) is for the opposite shape: a caller who
 already has structured facts (a database row, a tool result, an event stream) and wants them bound

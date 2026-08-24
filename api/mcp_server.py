@@ -28,30 +28,32 @@ development (ships with the `mcp[cli]` extra).
 from __future__ import annotations
 
 from _engine_bridge import (
-    build_documents, build_polish_config, maybe_answer, new_answer_id_and_timestamp, run_polish,
-    serialize, validate_question_length, MAX_DOCUMENTS,
+    build_context_intents, build_documents, build_polish_config, maybe_answer,
+    new_answer_id_and_timestamp, run_polish, serialize, validate_question_length, MAX_DOCUMENTS,
 )
 from mcp.server.mcpserver import MCPServer
 
 
-def _horizon_ask_impl(question: str, documents: list[str], include_sources: bool = False,
-                       polish: bool = False, polish_model: str | None = None) -> dict:
+def _horizon_ask_impl(question: str, documents: list[str | dict], include_sources: bool = False,
+                       polish: bool = False, polish_model: str | None = None,
+                       context_intents: list[dict] | None = None) -> dict:
     """The plain-Python implementation behind the `horizon_ask` tool -- kept separate from the
     `@mcp.tool()` decoration so it can be unit-tested directly, without any MCP transport."""
     if not question or not question.strip():
         raise ValueError("`question` is required")
     validate_question_length(question)
     if not documents:
-        raise ValueError("`documents` must be a non-empty array of strings")
+        raise ValueError("`documents` must be a non-empty array of strings or structured objects")
     if len(documents) > MAX_DOCUMENTS:
         raise ValueError(f"`documents` exceeds the {MAX_DOCUMENTS}-document limit")
 
     doc_tuple = build_documents(documents)
+    intent_tuple = build_context_intents(context_intents, doc_tuple)
 
     body = {"polish": polish, "polish_model": polish_model}
     polish_config = build_polish_config(body)
 
-    result = maybe_answer(question, doc_tuple)
+    result = maybe_answer(question, doc_tuple, context_intents=intent_tuple)
 
     polished_answer, polish_state = None, None
     if result is not None and polish_config is not None:
@@ -68,8 +70,9 @@ mcp = MCPServer("horizon-memory")
 
 
 @mcp.tool()
-def horizon_ask(question: str, documents: list[str], include_sources: bool = False,
-                 polish: bool = False, polish_model: str | None = None) -> dict:
+async def horizon_ask(question: str, documents: list[str | dict], include_sources: bool = False,
+                      polish: bool = False, polish_model: str | None = None,
+                      context_intents: list[dict] | None = None) -> dict:
     """Ask Horizon a question over a caller-supplied document set. Call this when the
     conversation genuinely calls for recalling something previously established -- deciding
     whether this moment warrants it is the calling agent's own judgment call; this tool does not
@@ -81,7 +84,12 @@ def horizon_ask(question: str, documents: list[str], include_sources: bool = Fal
     server's own deployment config (HORIZON_POLISH_BASE_URL / HORIZON_POLISH_API_KEY_ENV), not
     caller-selectable -- letting a caller pick both let them redirect the server's outbound
     request and its stored credential to a host of their choosing."""
-    return _horizon_ask_impl(question, documents, include_sources, polish, polish_model)
+    # MCPServer offloads synchronous tools through AnyIO's worker-thread portal.  On the pinned
+    # MCP/AnyIO + Python 3.14 combination that portal can wait forever even though the same plain
+    # implementation already completed.  The operation is local CPU work, so expose an async tool
+    # boundary and execute it directly on the server loop; stdio clients see the identical schema.
+    return _horizon_ask_impl(
+        question, documents, include_sources, polish, polish_model, context_intents)
 
 
 if __name__ == "__main__":

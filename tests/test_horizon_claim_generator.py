@@ -11,6 +11,7 @@ from horizon_memory import (
     ClaimGenerator, HorizonConfig, HorizonMemory, HorizonVerifier, QueryEnvelope, RouteDocument,
     RouteState, RoutingIndex, SemanticRouter, claim_spans,
 )
+from horizon_memory.claim_routing import paragraph_spans
 
 KEY = b"claim-generator-contract-key-32!"
 SCOPE = 11
@@ -86,6 +87,19 @@ class ClaimSpansTests(unittest.TestCase):
         surfaces = [text[start:end] for start, end in spans]
         self.assertEqual(len(surfaces), 2)
         self.assertIn("3.8x", surfaces[0])
+
+    def test_paragraph_spans_preserve_a_bounded_hard_wrapped_binding_window(self):
+        text = ("A political and cultural history of\nmodern Europe. SEE Hayes,\nCarlton J. H."
+                "\n\nA separate record starts here.")
+        spans = paragraph_spans(text)
+        surfaces = [text[start:end] for start, end in spans]
+        self.assertEqual(surfaces, [
+            "A political and cultural history of\nmodern Europe. SEE Hayes,\nCarlton J. H.",
+            "A separate record starts here.",
+        ])
+
+    def test_paragraph_spans_reject_unbounded_blocks(self):
+        self.assertEqual(paragraph_spans("x" * 100, max_chars=32), ())
 
 
 class ClaimGeneratorScoringTests(unittest.TestCase):

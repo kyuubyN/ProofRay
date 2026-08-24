@@ -7,12 +7,12 @@ trigger-phrase list -- HORIZON_ACTIVATION_MODE / HORIZON_ACTIVATION_KEYWORDS). B
 so both are exercised here to confirm neither transport drifts from the other."""
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sys
 import tempfile
 import unittest
+import anyio
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -84,6 +84,8 @@ class KeywordModeHttpTests(_KeywordModeTestCase):
 
         self.assertEqual(body["state"], "not_activated")
         self.assertIsNone(body["answer"])
+        self.assertEqual(body["action"], "not_activated")
+        self.assertIsNone(body["direct_answer_certificate"])
         self.assertIsNone(body["evidence"])
         self.assertEqual(body["documents_considered"], 0)
         self.assertEqual(call_count["n"], 0)  # the engine must never have been invoked
@@ -120,7 +122,7 @@ class KeywordModeMcpTests(_KeywordModeTestCase):
         async def run():
             return await mcp.call_tool(
                 "horizon_ask", {"question": question, "documents": DOCUMENTS})
-        result = asyncio.run(run())
+        result = anyio.run(run)
         self.assertFalse(result.is_error)
         return json.loads(result.content[0].text)
 

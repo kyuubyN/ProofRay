@@ -10,10 +10,15 @@ from __future__ import annotations
 from .api import HorizonMemory
 from .config import HorizonConfig, VALUE_MAX, VALUE_MIN
 from .engine_profile import (
-    DEFAULT_PROFILE, PERSONAL_MEMORY_PROFILE, TEAM_MEMORY_PROFILE, EngineProfile,
+    CONVERSATIONAL_HIGH_RECALL_PROFILE, DEFAULT_PROFILE, PERSONAL_MEMORY_PROFILE,
+    TEAM_MEMORY_PROFILE, EngineProfile,
 )
-from .answer_engine import (AnswerContextIntent, AnsweredClaim, AnsweredResult, DirectAnswer,
-                            DirectAnswerProposal, DirectAnswerReader, HorizonAnswerEngine)
+from .answer_engine import (
+    AnswerContextIntent, AnsweredClaim, AnsweredResult, ContextualDirectAnswerCertificate,
+    ContextualDirectAnswerResolver, DirectAnswer, DirectAnswerCertificate,
+    DirectAnswerProposal, DirectAnswerReader, DirectAnswerResolution, DirectAnswerResolver,
+    HorizonAnswerEngine,
+)
 from .partition import (
     CausalPartitioner, PartitionContext, PartitionIndex, PartitionResult, PartitionStrategy,
 )
@@ -21,6 +26,34 @@ from .routing import (
     Candidate, CandidateList, CausalWeaveGenerator, DenseGenerator, HorizonVerifier, HybridGenerator, LexicalGenerator,
     BM25Generator, QueryEnvelope, RouteDocument, RoutedResult, RouteState, RouteTrace, RoutingIndex,
     SemanticRouter, TemporalCausalWeaveGenerator,
+)
+from .conversational_recall import (
+    CalendarInterval, ConversationalRecallConfig, ConversationalRecallGenerator,
+    ConversationalRecallTrace, compile_explicit_calendar_interval,
+    expand_session_neighbors, observe_exhaustive_recall, protected_rank_merge,
+    reciprocal_rank_fusion, stable_speaker_partition,
+)
+from .witness_frontload import (
+    QueryWitnessFrontloadConfig, frontload_query_witnesses, frontload_text_lines,
+    utf8_line_prefix,
+)
+from .proof_convergent_executor import (
+    AttestedScalarLedger, ConvergentScalarAnswer, IntegratedConvergentAnswer,
+    compact_scalar_answer, integrate_with_deterministic_fallback,
+    open_compact_scalar_answer, render_convergent_answer,
+)
+from .proof_convergent_resolver import (
+    ProofConvergentCertificate, ProofConvergentResolver,
+)
+from .explanatory_obligation_proof import (
+    ExplanatoryIntent, ExplanatoryProofCertificate, ExplanatoryProofConfig,
+    ExplanatoryProofResult, ExplanatorySource, JoinClosure, ObligationGraph,
+    ObligationNode, WitnessBinding, WitnessedBridge, compile_obligation_graph,
+    solve_explanatory_obligations,
+)
+from .explanatory_proof_resolver import (
+    ExplanatoryDirectAnswerCertificate, ExplanatoryProofResolver,
+    ProofCascadeResolver,
 )
 from .claim_routing import ClaimGenerator, DEFAULT_WEIGHTS as CLAIM_GENERATOR_DEFAULT_WEIGHTS, claim_spans
 from .conformal_routing import (
@@ -50,6 +83,8 @@ from .typed_sidecar import (
     AuthorizedAdapterBridge, DeclarativeSidecarAdapter, SidecarCompletenessDeclaration,
     SidecarFactDeclaration,
     SidecarLifecycle,
+    SidecarObservedIntent,
+    SidecarRouteMetadata,
     SidecarIngestReceipt,
     SidecarLimits,
 )
@@ -74,6 +109,21 @@ from .fiber_coherent_search import FiberCoherentSufficientStatisticSearch
 from .authorized_fiber_search import AuthorizedFiberRoute, AuthorizedFiberSearchEngine
 from .hssd_query_compiler import HSSDQueryLattice, StructuralHSSDQueryCompiler
 from .standalone_hssd_engine import StandaloneHSSDEngine, StandaloneHSSDResult
+from .passage_difference_proof import (
+    BoundDifferenceOperand, PassageHomogeneousDifferenceProof,
+    compile_passage_homogeneous_difference,
+)
+from .event_date_interval import (
+    EventDateAlignment, EventDateIntervalProof, compile_event_date_interval,
+)
+from .field_goal_extremum_proof import (
+    FieldGoalDistance, FieldGoalExtremumProof, compile_field_goal_extremum,
+)
+from .field_goal_count_proof import FieldGoalCountProof, compile_field_goal_count
+from .final_score_sum_proof import (
+    FinalScoreMarginProof, FinalScoreSumProof, compile_final_score_margin,
+    compile_final_score_sum,
+)
 from .sufficient_statistic_search import SufficientStatisticPack
 from .typed_hssd_adapter import TypedCausalHSSDEvidenceAdapter
 from .types import (
@@ -84,9 +134,12 @@ from .types import (
 
 __all__ = [
     "HorizonMemory", "HorizonConfig", "VALUE_MAX", "VALUE_MIN",
-    "DEFAULT_PROFILE", "PERSONAL_MEMORY_PROFILE", "TEAM_MEMORY_PROFILE", "EngineProfile",
+    "CONVERSATIONAL_HIGH_RECALL_PROFILE", "DEFAULT_PROFILE", "PERSONAL_MEMORY_PROFILE",
+    "TEAM_MEMORY_PROFILE", "EngineProfile",
     "AnswerContextIntent", "AnsweredClaim", "AnsweredResult", "DirectAnswer",
-    "DirectAnswerProposal", "DirectAnswerReader", "HorizonAnswerEngine",
+    "ContextualDirectAnswerCertificate", "ContextualDirectAnswerResolver",
+    "DirectAnswerCertificate", "DirectAnswerProposal", "DirectAnswerReader",
+    "DirectAnswerResolution", "DirectAnswerResolver", "HorizonAnswerEngine",
     "WriteResult", "WriteState", "ReadResult", "ReadState", "ReadViewHandle",
     "QueryResult", "QueryState", "Provenance", "CompactResult", "CompactState",
     "RecoverResult", "RecoverState", "ExportResult", "ExportedFact", "AuditReport",
@@ -95,6 +148,21 @@ __all__ = [
     "QueryEnvelope", "RouteDocument", "Candidate", "CandidateList", "RoutingIndex", "BM25Generator",
     "LexicalGenerator", "DenseGenerator", "HybridGenerator", "CausalWeaveGenerator",
     "TemporalCausalWeaveGenerator", "ClaimGenerator", "CLAIM_GENERATOR_DEFAULT_WEIGHTS", "claim_spans",
+    "CalendarInterval", "ConversationalRecallConfig", "ConversationalRecallGenerator",
+    "ConversationalRecallTrace", "compile_explicit_calendar_interval",
+    "expand_session_neighbors", "observe_exhaustive_recall", "protected_rank_merge",
+    "reciprocal_rank_fusion", "stable_speaker_partition",
+    "QueryWitnessFrontloadConfig", "frontload_query_witnesses", "frontload_text_lines",
+    "utf8_line_prefix",
+    "AttestedScalarLedger", "ConvergentScalarAnswer", "IntegratedConvergentAnswer",
+    "compact_scalar_answer", "integrate_with_deterministic_fallback",
+    "open_compact_scalar_answer", "render_convergent_answer",
+    "ProofConvergentCertificate", "ProofConvergentResolver",
+    "ExplanatoryIntent", "ExplanatoryProofCertificate", "ExplanatoryProofConfig",
+    "ExplanatoryProofResult", "ExplanatorySource", "JoinClosure", "ObligationGraph",
+    "ObligationNode", "WitnessBinding", "WitnessedBridge", "compile_obligation_graph",
+    "solve_explanatory_obligations", "ExplanatoryDirectAnswerCertificate",
+    "ExplanatoryProofResolver", "ProofCascadeResolver",
     "ConformalCalibrator", "ConformalClaimGenerator", "ConformalDocumentGenerator",
     "LEXICAL_SUBLEXICAL_WEIGHTS", "collect_conformal_calibration_scores",
     "document_priority_by_source", "conformal_score_documents",
@@ -112,6 +180,8 @@ __all__ = [
     "SidecarAuthority", "AttestedSidecarFact", "SidecarIngestAdapter",
     "AttestedCompletenessClaim", "SidecarCompilation", "CompletenessCertificate",
     "SidecarLifecycle",
+    "SidecarObservedIntent",
+    "SidecarRouteMetadata",
     "SidecarFactDeclaration", "SidecarCompletenessDeclaration", "DeclarativeSidecarAdapter",
     "AuthorizedAdapterBridge",
     "SidecarIngestReceipt", "AuthorizedSidecarMemory",
@@ -129,6 +199,13 @@ __all__ = [
     "FiberCoherentSufficientStatisticSearch", "SufficientStatisticPack",
     "AuthorizedFiberRoute", "AuthorizedFiberSearchEngine",
     "StandaloneHSSDEngine", "StandaloneHSSDResult",
+    "BoundDifferenceOperand", "PassageHomogeneousDifferenceProof",
+    "compile_passage_homogeneous_difference",
+    "EventDateAlignment", "EventDateIntervalProof", "compile_event_date_interval",
+    "FieldGoalDistance", "FieldGoalExtremumProof", "compile_field_goal_extremum",
+    "FieldGoalCountProof", "compile_field_goal_count",
+    "FinalScoreMarginProof", "FinalScoreSumProof", "compile_final_score_margin",
+    "compile_final_score_sum",
     "classify_trial", "assert_paired_query_ids",
 ]
 

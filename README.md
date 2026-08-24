@@ -19,16 +19,113 @@ with. If it can't find a real answer, it tells you honestly instead of making on
 It runs entirely on your own machine. No AI model is required to get an answer, and no data ever
 leaves your computer unless you choose to connect one yourself.
 
-> **Status:** this is an early, actively-developed version. Things may still be rough around the
-> edges. Read on to see how it works today.
+> **Status — Public Alpha:** Horizon is ready for experimentation and real integrations, but it
+> does not yet map every possible question, domain or language into a closed proof. APIs and
+> behavior may still evolve before the first stable release.
 
-The parts of Horizon that read and understand natural-language questions have so far been
-carefully tested in **English and Portuguese** only. Other languages, starting with Chinese, are
-planned but not validated yet; see [Roadmap](ROADMAP.md).
+> **The Horizon contract:** no proof, no asserted direct answer. When Horizon cannot establish an
+> answer from authorized memory, it returns the verified evidence it does have or abstains instead
+> of filling the gap with a plausible invention. This fail-closed design substantially reduces
+> false memories; it is not a claim that alpha software can never contain an ingestion, routing or
+> interpretation bug.
+
+The core has also been successfully run by early testers on **Windows**. Automated release CI
+currently covers Ubuntu with Python 3.10–3.13, so Windows support should still be considered
+early-user validated rather than part of the automated compatibility matrix.
+
+The current limitation is semantic coverage, not an attempt to hide uncertainty: Horizon does not
+yet provide universal natural-language mapping. The parts that read and understand questions have
+so far been carefully tested in **English and Portuguese** only. Other languages, starting with
+Chinese, are planned but not validated yet; see [Roadmap](ROADMAP.md).
 
 Horizon grew out of a multi-year research project that tried many different approaches to AI
 memory and kept only the ones that survived real testing. If you're curious about that history,
 it's written up in [Origin and design lineage](docs/ORIGIN_AND_DESIGN.md).
+
+## How Horizon answers
+
+Horizon uses a proof-first cascade instead of guessing:
+
+1. **Precise answer:** it first checks whether the question can be answered exactly from authorized
+   memory. A direct answer is released only when its proof closes and can be reopened against the
+   original sources.
+2. **Verified evidence:** if an exact answer cannot be proved, Horizon returns the highest-ranked
+   verified excerpts related to the question. These excerpts are useful context, but Horizon does
+   not pretend that they form a complete direct answer.
+3. **Abstention:** if no trustworthy evidence supports the question, or the available memories
+   conflict, Horizon abstains instead of inventing a recollection.
+
+In short: **proved answer → verified excerpts → abstention**. Relevance can choose what Horizon
+examines first, but only source authority and a reopenable proof can turn evidence into an asserted
+direct answer.
+
+## Connect Gemini without giving it memory authority
+
+An LLM can sit after Horizon as a presentation layer, or it can call Horizon as a tool. In both
+designs, MongoDB stays local and Gemini receives only Horizon's result — never the complete database
+corpus. The runnable tutorial is
+[`gemini_horizon_tool_call.py`](HorizonAI%20Engine/examples/gemini_horizon_tool_call.py).
+
+Install the example dependencies and provide credentials through the environment:
+
+```bash
+pip install pymongo mongomock
+export GEMINI_API_KEY="your-key"
+# Optional: without this, the tutorial uses a safe in-process mongomock fixture.
+export MONGODB_URI="mongodb://localhost:27017"
+```
+
+PowerShell uses the same variables:
+
+```powershell
+$env:GEMINI_API_KEY = "your-key"
+$env:MONGODB_URI = "mongodb://localhost:27017"  # optional
+```
+
+### 1. Horizon first, Gemini only rewrites
+
+```bash
+python3 "HorizonAI Engine/examples/gemini_horizon_tool_call.py" --mode polish
+```
+
+The application queries MongoDB, lets Horizon route and verify the memory, and sends Gemini only a
+small object containing `question`, `horizon_state`, `horizon_authority`, and `horizon_answer`.
+Gemini may make the wording shorter or friendlier, but the system instruction forbids adding,
+calculating or changing facts and numbers.
+
+### 2. Gemini calls Horizon as a native tool
+
+```bash
+python3 "HorizonAI Engine/examples/gemini_horizon_tool_call.py" --mode tool
+```
+
+This uses Gemini's native function-calling protocol:
+
+```text
+user question
+→ Gemini requests query_horizon_memory(question)
+→ the application queries MongoDB and executes Horizon locally
+→ only {state, authority, answer, backend, source_count} returns to Gemini
+→ Gemini presents that verified result
+```
+
+The first Gemini request is forced to call `query_horizon_memory`; after the local result is
+available, the second request disables further tool calls and permits presentation only. If Horizon
+returns `state=abstain`, Gemini is instructed to report that there is not enough verified memory.
+
+Run both patterns together with:
+
+```bash
+python3 "HorizonAI Engine/examples/gemini_horizon_tool_call.py" --mode both
+```
+
+`both` uses three `generateContent` calls: one polish request and one two-call tool cycle. In the
+frozen five-call smoke test that motivated this tutorial (one polish request plus two repeated tool
+cycles), `gemini-3.1-flash-lite` preserved the unique value `42` in all three final outputs, issued
+both tool requests with the original question unchanged, and produced byte-identical answers across
+the repeated tool cycles. The run used `mongomock`, 979 input tokens, 110 output tokens and 18.27 s
+of accumulated provider latency. This is an integration and authority-boundary smoke test, not an
+answer-accuracy benchmark.
 
 ## Try it in two minutes
 
@@ -75,6 +172,73 @@ print(result.answer_text)
 The full walkthrough (connecting your own database, adding a chat assistant, picking the right
 settings for a small personal memory versus a large company knowledge base) lives in
 [HorizonAI Engine](HorizonAI%20Engine/README.md), written as a step-by-step tutorial.
+
+For timestamped conversations, the Python API also has an opt-in recall route that keeps speaker,
+session, order and observation time as typed metadata instead of adding them to the remembered text:
+
+```python
+from datetime import date
+from horizon_memory import (
+    CONVERSATIONAL_HIGH_RECALL_PROFILE, ConversationalRecallGenerator,
+    HorizonAnswerEngine, RouteDocument,
+)
+
+history = (
+    RouteDocument(1, "I finally bought the cobalt bicycle.", 1, "summer-chat", 1, "chat:1",
+                  sequence=1, event_time=date(2025, 7, 12).toordinal(), speaker="Alice"),
+)
+engine = HorizonAnswerEngine(
+    profile=CONVERSATIONAL_HIGH_RECALL_PROFILE,
+    scope_id=1,
+    session_id="current-chat",
+    candidate_generator=ConversationalRecallGenerator(),
+    allow_scope_fallback=True,
+)
+result = engine.answer("Which bicycle did Alice buy?", history)
+```
+
+This generator only transports candidate `FactId`s. The normal Horizon verifier still reopens and
+authorizes every source, and unsupported or conflicting readout still has to abstain. Cross-session
+fallback is explicitly enabled above and remains off by default in the Python engine. HTTP and MCP
+also accept a backward-compatible structured document shape that preserves these coordinates without
+putting them into document text. The measured 64-candidate profile reaches 90.77% annotated-turn hit
+on consumed-development LoCoMo, but that is retrieval reachability rather than answer accuracy. It
+remains a deploy-time opt-in (`HORIZON_CONVERSATIONAL_RECALL=true`) until an independently manifested
+personal-conversation cohort confirms the result. Enabling the flag selects the exact
+`CONVERSATIONAL_HIGH_RECALL_PROFILE`, not the unevaluated 800-claim scale profile.
+
+`OpenTextHorizonMemory(..., ledger_path=...)` persists those route coordinates in the same attested
+sidecar record. Reopening the ledger reconstructs multi-session `RouteDocument`s exactly; legacy
+metadata-free ledgers continue to reopen under their original v1 attestations. FactId-bound observed
+context intents are also restored with exact fiber membership and insertion order.
+Repeated questions over an unchanged open-text snapshot reuse only disposable derived routing state;
+ingest invalidates it. Direct `HorizonAnswerEngine` calls remain request-ephemeral unless a persistent
+facade explicitly passes `reuse_prepared_runtime=True`.
+
+For finite questions that can be closed from exact measurements, counts, dates or relations, the
+default engine now attempts the proof-convergent resolver. It returns a short `direct_answer` only
+after Horizon reopens a question-bound certificate; otherwise the ordinary verified evidence remains
+unchanged. Pass `direct_answer_resolver=None` when an evidence-only integration is desired:
+
+```python
+from horizon_memory import HorizonAnswerEngine
+
+engine = HorizonAnswerEngine()
+result = engine.answer("How many days did the two trips take in total?", documents)
+print(result.final_answer_text)
+```
+
+This path is local and deterministic. A benchmark judge may score its frozen output, but no model,
+API response or relevance score participates in proof construction or authorization. The default
+activation follows the measured >90% final-output gate; it does not make unsupported operator worlds
+answerable, and explicit `None` retains the prior evidence-only behavior.
+
+For visible multi-turn subqueries, `ExplanatoryProofResolver` is an additional opt-in contextual
+resolver. It closes a DAG of exact source obligations and witnessed bridges, rejects incomplete or
+contested worlds, and reopens a certificate bound to every context intent and authority coordinate.
+Its current MemGym consumed-development proof coverage is 6/120, so it is not enabled by default and
+is not advertised as MemGym answer accuracy. `ProofCascadeResolver` is the ready-made opt-in order:
+scalar proof first, explanatory proof second, ordinary engine evidence fallback last.
 
 ## What can you connect it to?
 

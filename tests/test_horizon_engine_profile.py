@@ -8,7 +8,8 @@ import unittest
 from pathlib import Path
 
 from horizon_memory import (
-    DEFAULT_PROFILE, PERSONAL_MEMORY_PROFILE, TEAM_MEMORY_PROFILE, EngineProfile,
+    CONVERSATIONAL_HIGH_RECALL_PROFILE, DEFAULT_PROFILE, PERSONAL_MEMORY_PROFILE,
+    TEAM_MEMORY_PROFILE, EngineProfile,
 )
 from horizon_memory.claim_routing import DEFAULT_WEIGHTS as CLAIM_GENERATOR_DEFAULT_WEIGHTS
 from horizon_memory.conformal_routing import LEXICAL_SUBLEXICAL_WEIGHTS
@@ -171,8 +172,15 @@ class NamedPresetTests(unittest.TestCase):
     episode's) -- both are deliberate, named choices a deployment picks for itself."""
 
     def test_presets_are_valid(self):
+        EngineProfile(**{**CONVERSATIONAL_HIGH_RECALL_PROFILE.to_dict()})
         EngineProfile(**{**TEAM_MEMORY_PROFILE.to_dict()})  # must not raise
         EngineProfile(**{**PERSONAL_MEMORY_PROFILE.to_dict()})  # must not raise
+
+    def test_conversational_high_recall_preserves_24k_and_freezes_cut_64(self):
+        self.assertEqual(CONVERSATIONAL_HIGH_RECALL_PROFILE.claim_limit, 64)
+        self.assertEqual(CONVERSATIONAL_HIGH_RECALL_PROFILE.answer_bytes, 24_576)
+        self.assertEqual(CONVERSATIONAL_HIGH_RECALL_PROFILE.acquisition_bytes, 65_536)
+        self.assertEqual(DEFAULT_PROFILE.claim_limit, 800)
 
     def test_team_memory_is_a_real_middle_ground_not_default_or_personal(self):
         self.assertLess(TEAM_MEMORY_PROFILE.answer_relevance_gate_ratio,

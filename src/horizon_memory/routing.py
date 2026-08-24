@@ -19,6 +19,8 @@ from .types import ReadState
 
 
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
+_U32_MAX = (1 << 32) - 1
+_MAX_FACT_ID = 1 << 62  # horizon_wal.py's frozen identity domain is [0, 2^62)
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -67,22 +69,48 @@ class RouteDocument:
     # non-CSAM categories) to enable it for a specific document/deployment. CSAM is never
     # skippable, by construction of `screen_text` itself, whenever a non-`None` policy is passed.
     safety_policy: SafetyPolicy | None = None
+    # Conversational identity is independent from transport role.  A person's name must not be
+    # squeezed into ``role`` (a closed user/assistant/system/tool enum) or ``source`` (provenance).
+    # Kept at the end so every existing positional construction remains byte-for-byte compatible.
+    speaker: str | None = None
 
     def __post_init__(self):
-        if self.fact_id < 0 or self.scope_id < 0 or self.version < 1:
+        if (isinstance(self.fact_id, bool) or not isinstance(self.fact_id, int)
+                or not 0 <= self.fact_id < _MAX_FACT_ID
+                or isinstance(self.scope_id, bool) or not isinstance(self.scope_id, int)
+                or not 0 <= self.scope_id <= _U32_MAX
+                or isinstance(self.version, bool) or not isinstance(self.version, int)
+                or not 1 <= self.version <= _U32_MAX
+                or (self.generation_id is not None and
+                    (isinstance(self.generation_id, bool)
+                     or not isinstance(self.generation_id, int)
+                     or self.generation_id < 0))):
             raise ValueError("invalid fact identity")
         if not self.text.strip() or not self.session_id or not self.source:
             raise ValueError("text, session_id and source are required")
-        if self.sequence is not None and self.sequence < 0:
+        if self.sequence is not None and (
+                isinstance(self.sequence, bool) or not isinstance(self.sequence, int)
+                or self.sequence < 0):
             raise ValueError("sequence must be non-negative")
+        if self.span is not None and (
+                not isinstance(self.span, tuple) or len(self.span) != 2
+                or any(isinstance(item, bool) or not isinstance(item, int)
+                       for item in self.span)
+                or self.span[0] < 0 or self.span[1] <= self.span[0]):
+            raise ValueError("span must be a non-empty integer interval")
         if self.safety_policy is not None:
             verdict = screen_text(self.text, self.safety_policy)
             if not verdict.safe:
                 raise UnsafeContentError(verdict.category, verdict.reason)
-        if self.event_time is not None and self.event_time < 0:
+        if self.event_time is not None and (
+                isinstance(self.event_time, bool) or not isinstance(self.event_time, int)
+                or self.event_time < 0):
             raise ValueError("event_time must be non-negative")
         if self.role is not None and self.role not in ("user", "assistant", "system", "tool"):
             raise ValueError("invalid role")
+        if self.speaker is not None and (
+                not isinstance(self.speaker, str) or not self.speaker.strip()):
+            raise ValueError("speaker must be non-empty text when supplied")
 
 
 @dataclass(frozen=True)

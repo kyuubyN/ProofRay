@@ -1,5 +1,58 @@
 # Benchmarks and claim boundaries
 
+## LoCoMo personal-recall transport (consumed development)
+
+The scorer-blind cascade at its historical 32-candidate cut reaches at least one annotated turn on
+**1,770/1,982 (89.30%)** questions with non-empty evidence annotations, all annotated turns on
+**1,580/1,982 (79.72%)**, and **2,084/2,821 (73.87%)** annotated turn IDs. The frozen high-recall
+consumer cut at 64 reaches **1,799/1,982 (90.77%)** hit, **1,611/1,982 (81.28%)** all-hit and
+**2,188/2,821 (77.56%)** turn recall, with mean 44.49 returned candidates. These are retrieval
+figures, not answer accuracy. Four questions have empty evidence lists and three annotated source
+IDs are absent from the runtime conversation, so the raw physical ceilings are 1,979/1,982 all-hit
+and 2,818/2,821 turn recall.
+
+The exact cascade is an opt-in core `ConversationalRecallGenerator`, and
+`CONVERSATIONAL_HIGH_RECALL_PROFILE` binds its consumer to the measured 64 cut while preserving the
+24,576-byte final-answer ceiling. The dataset is consumed development and the 90.77% value is
+candidate hit rather than final answer correctness, so it does not override the roadmap requirement
+for an independently manifested personal cohort. Structured HTTP/MCP preserves speaker, session and
+observation-time metadata, but the generator remains deploy-time opt-in; enabling it selects the
+measured profile instead of silently using the unrelated scale-memory limit.
+
+The final two-path replay recomputed all **1,986/1,986** questions and compared the independent lab
+construction with the packaged core through prefix 96 before opening evidence annotations: **0
+ranking mismatches**. It reproduced the 32/64/96 cuts exactly, used 281,820 KiB peak RSS and took
+1,453.31 s while computing both paths (`result_sha256=6fa00695...b3e2`, artifact SHA-256
+`3923b600...bc2d`).
+
+## LongMemEval proof-first final output (consumed development)
+
+A fresh same-checkout paired run recomposed both arms before evaluation and sent 240 frozen verdict
+requests to `gemini-3.1-flash-lite`: 120 current plain outputs and 120 proof-first outputs. The plain
+mean was **0.7750** and the integrated mean was **0.9375**, with 21 improvements, three regressions,
+96 ties and all 120 pairs on the same backend/model. Mean paired delta was **+0.1625**, bootstrap 95%
+CI **[+0.09833, +0.23167]**. Runtime composition itself made zero model/API calls: 33 questions
+closed through finite proofs and all 87 proof misses reused the current plain bytes exactly. Artifact
+SHA-256: `30655b5e...9be0`; scientific result SHA-256: `a5b26549...4f24`.
+
+The three regressions and two other partial proof answers shared one source-loss defect in rendering:
+a measured distributive suffix (`each way`), the question-bound subject of a relative-value relation,
+or the attested contrast behind a closed absence was omitted. The core correction conserves those
+coordinates in the certificate. A full deterministic replay changed exactly the five formerly 0.7
+proof answers (ordinals 1, 30, 65, 67 and 68); the other **115/120** integrated answer hashes and all
+120 plain hashes remained identical. Scores are inherited only for those exact 115 hashes. Assigning
+the five changed outputs a worst-case score of zero still gives a full-denominator lower bound of
+**109/120 = 0.908333**, strictly above the owner's 90% default-activation gate. No new judge score is
+invented for the changed bytes. Bound artifact SHA-256: `18d87426...3398`; result SHA-256:
+`d1f70978...4062`.
+
+Accordingly, `HorizonAnswerEngine()` now enables `ProofConvergentResolver` by default and exposes
+`final_answer_text` as certified direct answer first, byte-identical deterministic evidence fallback
+otherwise. `direct_answer_resolver=None` explicitly restores evidence-only behavior. The external
+judge is evaluation infrastructure only; no model, network, gold answer or scorer participates in
+runtime acquisition, operator convergence, rendering or certificate reopening. This remains consumed
+development evidence, not independent universal LongMemEval accuracy.
+
 ## Proof-convergent execution development audit
 
 On the consumed first 120 LongMemEval-S episodes, the single zero-model laboratory executor now
@@ -10,8 +63,27 @@ failures, so the deterministic policy “proof-convergent answer when resolved, 
 composer” projects 119/120 = 0.9917 without an oracle at runtime. This remains a **counterfactual on
 consumed development data**; no new frozen independent protocol has confirmed the post-holdout
 operators. See `lab/results/proof-convergent-integrated-dev-audit-v6.json`; v1–v5 are retained as
-history. Nothing here is a universal ≥90% claim or a core promotion. The one remaining row abstains
-on a real corpus/annotation ambiguity.
+history. Nothing here is a universal ≥90% claim; the mechanism's later core promotion does not
+retroactively validate this counterfactual. The one remaining row abstains on a real
+corpus/annotation ambiguity.
+
+The scalar executor and its question-bound certificate are packaged in the core, but benchmark
+adapters, labels and judges are not. The original scorer-blind MemGym-DR scalar audit gave **0/120
+resolved proofs**, confirming that more arithmetic is not the identified gate. The subsequent
+Explanatory Obligation Proof kernel compiles visible turn subqueries and the final query into a
+source-bounded DAG, closes exact witnesses and bridges through Sigma-PBA, and records reuse/join
+closures. Its monotonic v6 runtime-only replay closes **6/120** proof dossiers, leaving 86 unsupported,
+16 contested and 12 abstaining; it preserves all earlier closed rows and uses no scorer, gold, model
+or API (`result_sha256=084a7362...e92`). This is proof coverage, not judge-scored answer accuracy.
+`ExplanatoryProofResolver` is therefore packaged as an opt-in contextual resolver with a reopenable
+certificate; `ProofCascadeResolver` provides scalar-first then EOP ordering, but it is not the
+default MemGym answer path. The remaining gate is multi-claim
+COMPARE/QUANTIFY/EXPLAIN composition, not retrieval or scalar arithmetic.
+
+A separate runtime-only promotion audit recomputed all 120 rows through the packaged core and found
+**0 mismatches** across state, graph, bindings, bridges, closures, certificate and diagnostics. It
+reproduced 86 unsupported / 16 contested / 12 abstain / 6 resolved exactly
+(`result_sha256=3666855d...1dad`, artifact SHA-256 `89949ee6...66b`).
 
 ### Untouched post-calibration holdout v3: 119/120 did not transfer end-to-end
 
@@ -344,16 +416,16 @@ MemGym-DR was scored in the same session under the same condition.
 | Dataset | N | Mean judge score | Paired control | Delta |
 |---|---:|---:|---:|---|
 | MemGym-DR (frozen dev split) | 120 | **0.950** | 0.726 (LLM reader, same evidence budget) | **+0.224**, 95% CI [0.171, 0.277] |
-| LongMemEval-S | 120 | **0.767** | — (no clean paired control exists yet) | — |
+| LongMemEval-S (historical D145 snapshot) | 120 | **0.767** | — | superseded below |
 
 MemGym-DR's confidence interval excludes zero: a real, decisive win over a
-paired LLM-reader control on an actual semantic judge, not a proxy — and
-the largest judge-scored margin in this document. LongMemEval-S has no
-established paired control under this un-contaminated methodology yet (an
-earlier internal LongMemEval judge number scored raw, un-composed evidence
-directly and is now understood to be inflated the same way the MemGym-DR
-evidence-only pilot above was), so its score is reported alone rather than
-against a possibly-misleading baseline.
+paired LLM-reader control on an actual semantic judge, not a proxy. The
+LongMemEval-S row is retained only as historical D145 evidence. It has now been
+superseded by the fresh same-checkout, 240-call paired evaluation reported in
+[LongMemEval proof-first final output](#longmemeval-proof-first-final-output):
+0.7750 plain versus 0.9375 proof-first, followed by a corrected-byte lower
+bound of 0.908333. Scores from the historical bytes are not transferred to the
+five corrected outputs.
 
 The same 120 frozen LongMemEval-S deterministic answers now pass through the public
 `OpenTextHorizonMemory` facade **120/120 byte-exact**. This permits score inheritance without another
@@ -367,15 +439,14 @@ four) in 2.34 s at 75,600 KiB RSS. This is not 99% answer accuracy: no evidence 
 candidate was declared true. It measures that the correct operator family can now remain representable
 without prematurely guessing between COUNT/SUM or LOOKUP/SUM.
 
-The existing D145 error ledger contains 28/120 failures: 10 single-session scalar/entity/duration
-readouts and 18 multi-session COUNT/SUM/duration aggregations. With its binary judge, at least 16 of
-those 28 must be repaired without regressions to reach 0.90. This is exactly what the
-proof-convergent execution line at the top of this document targets (typed operands and
-completeness, not another retrieval reranker); see
-[Proof-convergent execution development audit](#proof-convergent-execution-development-audit)
-for that attempt's own result: a real, measured improvement on the same consumed-development
-episodes, but one that has not yet transferred to an untouched holdout (see the "Untouched
-post-calibration holdout v3" subsection there), so this specific 0.90 gate remains open.
+The historical D145 error ledger contained 28/120 failures: 10 single-session
+scalar/entity/duration readouts and 18 multi-session COUNT/SUM/duration aggregations. The later
+same-checkout paired run closed this consumed-development product gate: 0.9375 was observed for the
+judged proof-first bytes, and the five-output rendering repair retains a worst-case full-denominator
+lower bound of 0.908333 by assigning every changed output zero. That is sufficient for default
+activation under the owner's benchmark-specific rule, but it does **not** reverse the independent
+holdout failures above or establish universal LongMemEval accuracy. A new untouched protocol is
+still required for an external generalization claim.
 
 ## Authorized typed-sidecar contract gate
 
@@ -405,6 +476,16 @@ Horizon executes and rejects these already-typed cases correctly; it does not pr
 can be converted into those facts. Independently authored schemas/adapters are the next transfer gate.
 
 ### MemGym open-text sidecar port
+
+The later opt-in query-witness ordering primitive was replayed on the same 120 episodes. Core and
+frozen-lab winner bytes matched in **120/120** cases. The production/final composer budget remains
+**24,576 bytes**. At a separate 4 KiB complete-line diagnostic prefix, gold-anchor
+coverage changed from **0.551764** to **0.787985**; the inverted control scored 0.521990. Full-text
+coverage across the 24 KiB render remained **0.910626** in all arms, proving that the mechanism
+reorders rather than invents or
+deletes evidence. This is an offline proxy, not a new judge score, so reordered outputs do not inherit
+D144's 0.950. Artifact SHA-256: `d76a05f5...0650`; scientific result SHA-256:
+`bfc33fcc...e8a0`.
 
 `OpenTextHorizonMemory` records each arbitrary input document under the weakest universally valid
 typed assertion: a sealed source contains this exact `surface_document` span. It invents no entity or
@@ -915,6 +996,167 @@ right-source attribution, zero abstentions introduced in any cell:
 | `DEFAULT_PROFILE`, after fix | **100/101 (99.0%)** | **88/97 (90.7%)** |
 | `PERSONAL_MEMORY_PROFILE`, before fix | 99/101 (98.0%) | 5/97 (5.2%) |
 | `PERSONAL_MEMORY_PROFILE`, after fix | **101/101 (100%)** | **96/97 (99.0%)** |
+
+**Bounded paragraph-context follow-up (consumed development only).** The remaining valid EN miss
+was a bibliographic record whose relation crossed hard line and sentence boundaries: the queried
+title ended in one fragment and `SEE Hayes, Carlton J. H.` occupied the next lines. Sentence-only
+routing found the title at rank 1 but could not preserve the author binding in the rendered answer.
+An opt-in paragraph channel now adds exact blank-line-delimited spans up to 2,048 characters beside
+the sentence candidates; the same spans remain exact and reopenable through dossier construction.
+With `PERSONAL_MEMORY_PROFILE`, valid-corpus attribution becomes **101/101 PT and 97/97 EN
+(198/198 total)**, and the recovered EN line contains the literal source span `Carlton J. H.`.
+The scale/default profile is unchanged.
+
+This is a fix developed on an already-consumed corpus, not a new holdout result and not unrestricted
+natural-language answer accuracy. The full 120-pair reruns also omitted the assigned source for 17 PT
+and 5 EN rows; direct inspection confirmed every one belongs to the previously-audited
+question/source mismatch set, so they are not regressions on the 101/97 valid denominators. A fresh
+independent corpus is still required before generalizing the paragraph mechanism.
+
+**Independent QED multi-sentence gate: first run rejected; repaired mechanism remains
+development-only.** After freezing the code, source URL, cohort rule, distractor construction and
+metrics, the official Google Research QED dev file was acquired locally (SHA-256
+`2ea322b7...5c429`). The frozen cohort is all 183 rows labeled `multi_sentence`; every question ran
+against its target paragraph and 31 deterministically selected distractor paragraphs. Runtime saw
+only question and paragraphs. Gold spans and QED metadata were scorer-only.
+
+The independent v1 did find a real benefit: target-line answer-span presence moved **175/183 →
+180/183**, while mean output fell 19,581 → 15,771 bytes. It nevertheless **failed its gate**:
+target-source rendering regressed 182/183 → 181/183 and one row returned distractors without the
+target. Post-score isolation found a representation-identity bug, not a ranking-weight problem.
+The paragraph candidate was split back into sentences inside the dossier, duplicating an already
+routed sentence under as many as three derived IDs; those copies consumed budget as if they were new
+evidence and displaced the target. The general repair preserves each already-verified routed span as
+one atom in paragraph mode. Repeated representation therefore creates no new evidence.
+
+Because that repair was derived after viewing v1, every QED rerun is **consumed development**, not a
+second independent confirmation. Two further general defects were found and fixed there: verified
+span relevance was not connected to the dossier's existing `source_priority` input, and an empty
+exact-lexical max-cover discarded an otherwise valid sublexical/acronym route. With those corrections,
+QED dev reaches **183/183 raw span presence** and a disjoint 256-row QED-train sample reaches
+**256/256**, both with zero regression, wrong-only output or reopen failure. The raw dev denominator
+still contains one invalid pair: a question about domestic goats is attached to a paragraph only about
+sheep and labels `Iran`. Rendering that assigned paragraph transports the labeled span but does not
+make the goat question semantically answered; the valid denominator remains **182/182**. The
+independent QED v1 remains rejected, exactly as frozen.
+
+**Fresh SQuAD 2.0 confirmation passes at 256/256.** After the final QED-derived mechanism was frozen,
+the official SQuAD 2.0 dev file was downloaded from Stanford (SHA-256 `80a5225e...182d8`, CC BY-SA
+4.0). From all 5,928 answerable questions, the protocol chose the 256 lowest SHA-256 question IDs,
+keeping only the first question per distinct context; each ran with 31 deterministic distractor
+contexts. Gold answers were scorer-only. Sentence-only target-line answer presence was **253/256**.
+Paragraph context reached **256/256**, with 3 paired improvements, zero regressions, target candidate
+hit and target rendering **256/256**, and all **256/256** sources/dossiers reopening. Mean output was
+22,685 bytes and maximum 25,807, below the 40,000-byte profile bound. No model, embedding, API or gold
+field participated in inference.
+
+This independently confirms exact extractive answer-span transport and correct-source attribution for
+the frozen protocol. It does **not** establish concise direct-answer exact match or unrestricted QA:
+the rendered surface remains a bounded evidence answer, and that distinction is part of the claimed
+denominator rather than hidden behind the 100% number.
+
+**Concise direct-answer follow-up failed independent confirmation.** On the consumed dev cohort, an
+all-span residual reader proved exact answer reachability at 256/256 but selected poorly (7.03% EM,
+15.10% F1 after its strongest structural variant). A narrower zero-model time/quantity fiber then
+appeared to reach 21/23 exact candidates with 100% target-source attribution after dev fixes. That
+apparent win did not transfer. A protocol frozen before acquiring official SQuAD 2.0 train selected
+256 distinct answerable contexts whose questions began with `When` or `How many`, each with 31
+distractors. The untouched run emitted 233 candidates but reached only **48.50% selective EM,
+61.69% selective F1 and 93.99% target-source attribution**, failing every quality gate. The reader
+remains lab-only and train is now consumed. This refutes any inference from the earlier 256/256 span
+transport result to concise standalone QA: candidate reachability and source-preserving evidence are
+not answer selection.
+
+The failed readers were then composed as a conservative cascade instead of discarded. Fiber+cloze
+agreement improved the now-consumed train cohort to 65.96% selective EM / 75.24% F1 / 98.40%
+target-source attribution at 188/256 coverage. Adding an independent official-WordNet-3.0 POS and
+predicate-binding vote further moved precision to 72.18% EM / 81.96% F1 / 98.50% target source, but
+reduced coverage to 133/256. These are development results after the failed gate, not confirmation.
+They validate the cascade as a useful architecture while falsifying agreement among correlated
+lexical/proximity readers as a sufficient closure certificate. The remaining mechanism gap is
+finite constituent and valence resolution.
+
+**DROP direct-cascade attempt failed and is not valid independent confirmation.** A later syntax
+cascade was frozen and run on 256 DROP-dev `When`/`How many` questions, but only after execution was a
+pre-existing V84 manifest rediscovered that had already designated DROP dev as a quarantined one-shot
+holdout. Opening it consumed that historical holdout despite V84's failed training entry gate; the run
+must not be cited as independent evidence. Its capability result is still retained as negative
+development evidence: 5 candidates, 100% assigned-source attribution, but 0/5 overlap/EM/F1. All five
+were derived `DIFF`/`DURATION`/`COUNT_DISTINCT` questions, not extractive lookups. The required cascade
+order is typed operator execution first, extractive readout only for `LOOKUP`, otherwise abstention.
+
+**Certified-operator repair on consumed DROP.** Core now has a separate opt-in
+`DirectAnswerResolver`: derived text is admitted as `resolved` only when compact proof bytes reopen
+against the question and complete verified acquisition pool. The reader remains extractive/candidate-only. A lab
+adapter reconnects the frozen V84-D11 1.0-precision proof union; an operator firewall prevents
+`DIFF`/`DURATION` from reaching span readout, and Link-Grammar numeric connectors must bind a value to
+the requested measurement head. On the already-consumed 256-row DROP cohort, the strict union resolved
+three year differences, all three exact, proof-closed and assigned-source-correct. A remaining explicit
+“points difference” form is now blocked by the operator firewall.
+
+A second certified family binds homogeneous passage quantities to named question conditions or binds
+one passage quantity to an explicit question baseline. Its proof records exact operand spans, origin,
+measure type, comparison condition, approximation class, question hash and passage hash, then recompiles
+all bindings when reopened. The first full consumed-cohort run correctly exposed an over-broad grammar:
+it emitted 7 answers at 6/7 EM because the compound measure “white men and boys” needs aggregation, not
+direct subtraction. That v4 result is retained as rejected evidence (SHA-256
+`13ee2110...63f1`). After restricting this family to simple measure phrases, the full v5 run emitted
+**6/256 resolved answers (2.34% coverage), 6/6 EM, 6/6 F1, 6/6 target-source attribution and zero
+zero-overlap output** (SHA-256 `1081d62a...ced3`). The three added exact cases cover two independently
+source-bound conditions and one explicit-baseline/source-fact subtraction. These are post-failure,
+already-consumed development results: they improve certified selective coverage but are neither restored
+holdout evidence nor a 100% end-to-end result.
+
+An independent operator family then added exact Gregorian elapsed-day execution. It requires exactly
+two complete day-month-year observations in the routed source, uniquely aligns both question events to
+disjoint local date contexts, checks the `after` direction, and recomputes calendar arithmetic during
+certificate reopening. Partial dates, a third complete date, tied event alignment and reverse chronology
+all abstain. On the same consumed cohort this adds the Giannitsa-to-Thessaloniki duration without another
+emission: v6 resolves **7/256 (2.73%), 7/7 EM, 7/7 F1, 7/7 target source, zero zero-overlap** (artifact
+SHA-256 `8846ef31...581c`). This remains consumed development and selective operator coverage only.
+
+**Consumed-train batching and deterministic ceiling audit.** The already-consumed DROP train split is
+now partitioned by `sha256(passage_id + ':' + query_id)` into 185 frozen batches over 47,143 eligible
+`When`/`How many` rows (256 rows per batch except the last). Batch membership is bound to the original
+dataset digest; a 4,096-row superbatch executes in about two seconds and the complete 47,143-row
+source-given operator scan in under ten seconds on the development machine. This changes iteration
+throughput, not epistemic status: every repair remains in-sample consumed development.
+
+The complete scan also falsified raw 100% as a satisfiable target for these annotations. Grouping by
+the deterministic input identity `(passage_id, normalized question)` and treating numeric yard/unit
+surface variants as equivalent finds **121 groups with mutually disjoint accepted labels, 305 affected
+rows and at least 122 unavoidable errors**. Thus even an oracle deterministic function has maximum raw
+accuracy **47,021/47,143 = 99.7412129%**. Artifact SHA-256
+`af29744a6fdef117088d0208d47dd8c0db5358c0b418fcf231b07aecb61bb374`. Rows are not deleted or
+relabeled: raw accuracy remains reported, while completion must separately report the satisfiable
+unique-input denominator and the contradictory annotation set.
+
+The same scan is a promotion gate for new operators, not just a speed test. The broadened experimental
+field-goal extrema/count families reopened every emitted certificate but matched only 828/901 and
+174/195 annotations respectively after unit normalization. Many inspected disagreements are plainly
+source/gold contradictions (for example two literal third-quarter field goals labeled `1`, or a
+literal 52-yard maximum labeled `51`), while others exposed real enumeration/scope gaps. Because proof
+reopening alone does not establish semantic correctness, these broad sports families remain
+development hypotheses. The older lab `universal_event_ledger` was also evaluated as an independent
+vote; its 1,280 resolutions matched 1,072 annotations, and agreement with the new ledger remained below
+the promotion threshold. Agreement among incomplete ledgers is therefore not authority.
+
+The validation denominator is now the complete frozen consumed cohort, not an arbitrary 256-row
+window. The 256-row units are addresses for deterministic replay and diagnosis only. Stable v14 ran
+all **47,143** eligible rows and produced **981 resolved: 972 annotation matches, 9 mismatches and
+46,162 abstentions** (2.0809% coverage, 99.0826% selective semantic exact, 981/981 proof reopenings).
+On the 44,799 unique deterministic inputs it produced **632 resolved: 628 matches and 4 mismatches**
+(99.3671% selective semantic exact). Its canonical result digest is
+`7e537e32e79a4a83d3700cb220ab92512946f7b51ce5ab7f896820483f3eae88`. These figures must remain
+separate: selective precision is not end-to-end accuracy, and every abstention remains unresolved.
+
+A full-cohort transfer test also rejected the general `AttestedScalarLedger` as a DROP cascade stage:
+**403 resolved, 5 annotation matches, 398 mismatches and 46,740 abstentions** (1.2407% selective
+accuracy). Convergent scalar worlds without correct question-to-observation binding are not semantic
+authority. The frozen negative result is
+`lab/results/drop-consumed-scalar-transfer-v1.json`, canonical result digest
+`28f92c07aaefb47698349875f1c3b905de9030e4c53e1564218890373d4bb871`. Do not compose it into the
+stable resolver without a materially different acquisition premise and a new full-denominator gate.
 
 **The originally-reported "10-13% topical routing confusion, still open" finding is retracted as
 stated.** Re-checked after the mismatch audit: of the cases that looked like retrieval confusion,

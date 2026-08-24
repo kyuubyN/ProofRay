@@ -38,7 +38,8 @@ from __future__ import annotations
 from flask import Flask, jsonify, request
 
 from _engine_bridge import (  # STORE is unused here but re-exported for tests (`from server import STORE`)
-    DEFAULT_PROFILE, ENGINE, MAX_DOCUMENTS, STORE, build_documents, build_polish_config,  # noqa: F401
+    CONVERSATIONAL_RECALL_ENABLED, DEFAULT_PROFILE, ENGINE, MAX_DOCUMENTS, STORE,
+    build_context_intents, build_documents, build_polish_config,  # noqa: F401
     json_bool, load_answer, maybe_answer, new_answer_id_and_timestamp, run_polish, serialize,
     store_answer, validate_question_length,
 )
@@ -81,7 +82,8 @@ def _bad_request(message: str):
 @app.route("/v1/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "engine_profile": DEFAULT_PROFILE.name,
-                     "schema": DEFAULT_PROFILE.schema})
+                     "schema": DEFAULT_PROFILE.schema,
+                     "conversational_recall": CONVERSATIONAL_RECALL_ENABLED})
 
 
 @app.route("/v1/answers", methods=["POST"])
@@ -100,12 +102,14 @@ def create_answer():
     except ValueError as exc:
         return _bad_request(str(exc))
     if not isinstance(raw_documents, list) or not raw_documents:
-        return _bad_request("`documents` must be a non-empty array of strings")
+        return _bad_request(
+            "`documents` must be a non-empty array of strings or structured objects")
     if len(raw_documents) > MAX_DOCUMENTS:
         return _bad_request(f"`documents` exceeds the {MAX_DOCUMENTS}-document limit")
 
     try:
         documents = build_documents(raw_documents)
+        context_intents = build_context_intents(body.get("context_intents"), documents)
     except ValueError as exc:
         return _bad_request(str(exc))
 
@@ -114,7 +118,7 @@ def create_answer():
     except ValueError as exc:
         return _bad_request(str(exc))
 
-    result = maybe_answer(question, documents)
+    result = maybe_answer(question, documents, context_intents=context_intents)
 
     polished_answer, polish_state = None, None
     if result is not None and polish_config is not None:

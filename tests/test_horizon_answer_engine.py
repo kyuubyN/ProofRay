@@ -3,12 +3,16 @@
 """HorizonAnswerEngine: the model-shaped facade over route -> verify -> compose."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 import unittest
 
 from horizon_memory import (
-    AnswerContextIntent, DEFAULT_PROFILE, DirectAnswer, DirectAnswerProposal, EngineProfile,
+    AnswerContextIntent, DEFAULT_PROFILE, DirectAnswer, DirectAnswerProposal,
+    DirectAnswerResolution, EngineProfile,
     HorizonAnswerEngine, RouteDocument,
 )
+from horizon_memory.answer_engine import _fit_rendered_answer_budget
 
 SCOPE = 1
 
@@ -63,12 +67,23 @@ class ResolvedAnswerTests(unittest.TestCase):
         self.assertEqual(result.direct_answer.state, "not_attempted")
         self.assertEqual(result.direct_answer.text, "")
 
+    def test_physical_render_budget_counts_newline_separators(self):
+        lines = (
+            self._line("alpha"), self._line("bravo"), self._line("c"),
+        )
+        fitted = _fit_rendered_answer_budget(lines, 11)
+        self.assertEqual(tuple(line.text for line in fitted), ("alpha", "bravo"))
+        self.assertEqual(len("\n".join(line.text for line in fitted).encode()), 11)
+
     def test_direct_answer_contract_rejects_unproven_resolution(self):
         with self.assertRaises(ValueError):
             DirectAnswer("resolved", "42", "extractive", ("doc:1",), False)
         candidate = DirectAnswer("candidate", "42", "extractive", ("doc:1",), False)
         self.assertEqual(candidate.text, "42")
-        resolved = DirectAnswer("resolved", "42", "exact", ("doc:1",), True)
+        with self.assertRaises(ValueError):
+            DirectAnswer("resolved", "42", "exact", ("doc:1",), True)
+        resolved = DirectAnswer("resolved", "42", "exact", ("doc:1",), True,
+                                certificate=b"proof")
         self.assertTrue(resolved.proof_closed)
 
     def test_relevant_claim_outranks_unrelated_claim_in_answer(self):
@@ -77,6 +92,18 @@ class ResolvedAnswerTests(unittest.TestCase):
         answer_text = result.answer_text
         self.assertIn("42", answer_text)
         self.assertNotIn("pascals", answer_text)
+
+    @staticmethod
+    def _line(text: str):
+        from horizon_memory import AnsweredClaim
+        return AnsweredClaim(text, 1, f"source:{text}", 0.0)
+
+    def test_zero_score_ranked_fallback_abstains_instead_of_dumping_arbitrary_source(self):
+        result = self.engine.answer(
+            "What is the answer?",
+            (_doc(99, "Completely unrelated content about migratory bird patterns."),))
+        self.assertFalse(result.resolved)
+        self.assertEqual(result.answer_text, "")
 
 
 class VersionedDocumentTests(unittest.TestCase):
@@ -94,6 +121,75 @@ class VersionedDocumentTests(unittest.TestCase):
         result = engine.answer("What percent did the Meridian project reduce cost by?", documents)
         self.assertEqual(result.state, "RESOLVED")
         self.assertIn("42", result.answer_text)
+
+
+class PreparedRuntimeCacheTests(unittest.TestCase):
+    def test_default_engine_keeps_request_runtime_ephemeral(self):
+        engine = HorizonAnswerEngine(scope_id=SCOPE)
+        engine.answer("What reduction did Meridian record?", (
+            _doc(1, "Meridian recorded a verified reduction of 42 percent."),))
+        self.assertIsNone(engine._prepared_runtime)
+        with self.assertRaises(TypeError):
+            HorizonAnswerEngine(reuse_prepared_runtime=1)  # type: ignore[arg-type]
+
+    def test_exact_document_snapshot_reuses_runtime_and_changed_snapshot_closes_old_store(self):
+        engine = HorizonAnswerEngine(scope_id=SCOPE, reuse_prepared_runtime=True)
+        first = (_doc(1, "Meridian recorded a verified reduction of 42 percent."),)
+        engine.answer("What reduction did Meridian record?", first)
+        initial = engine._prepared_runtime
+        self.assertIsNotNone(initial)
+        initial_path = Path(initial.workdir)
+        engine.answer("What did Meridian record?", first)
+        self.assertIs(engine._prepared_runtime, initial)
+        second = (_doc(2, "Orion recorded a verified reduction of 17 percent."),)
+        engine.answer("What reduction did Orion record?", second)
+        self.assertIsNot(engine._prepared_runtime, initial)
+        self.assertFalse(initial_path.exists())
+        engine.close()
+        self.assertIsNone(engine._prepared_runtime)
+
+    def test_shared_engine_serializes_concurrent_snapshot_replacement(self):
+        engine = HorizonAnswerEngine(scope_id=SCOPE, reuse_prepared_runtime=True)
+        meridian = (_doc(1, "Meridian recorded a verified reduction of 42 percent."),)
+        orion = (_doc(2, "Orion recorded a verified reduction of 17 percent."),)
+
+        def answer(index):
+            if index % 2:
+                result = engine.answer("What reduction did Meridian record?", meridian)
+                return "42" in result.final_answer_text
+            result = engine.answer("What reduction did Orion record?", orion)
+            return "17" in result.final_answer_text
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            self.assertTrue(all(pool.map(answer, range(24))))
+        engine.close()
+
+    def test_opt_in_reuse_is_byte_and_proof_equivalent_to_ephemeral_engine(self):
+        documents = (
+            RouteDocument(1, "My camping trip lasted 3 days.", SCOPE, "trip:a", 1,
+                          "chat:1", role="user"),
+            RouteDocument(2, "My second camping trip lasted 5 days.", SCOPE, "trip:b", 1,
+                          "chat:2", role="user"),
+        )
+        ephemeral = HorizonAnswerEngine(scope_id=SCOPE, allow_scope_fallback=True)
+        reused = HorizonAnswerEngine(
+            scope_id=SCOPE, allow_scope_fallback=True, reuse_prepared_runtime=True)
+        for question in (
+                "How many days did I spend camping in total?",
+                "How long were my camping trips altogether?"):
+            expected = ephemeral.answer(question, documents)
+            actual = reused.answer(question, documents)
+            self.assertEqual(actual, expected)
+        self.assertIsNotNone(reused._prepared_runtime)
+        reused.close()
+
+    def test_failed_answer_never_reuses_prepared_runtime(self):
+        engine = HorizonAnswerEngine(scope_id=SCOPE, reuse_prepared_runtime=True)
+        documents = (_doc(1, "Meridian recorded a verified value of 42."),)
+        with self.assertRaises(ValueError):
+            engine.answer("What value?", documents, context_intents=(
+                AnswerContextIntent("bad", "Unknown fact", (99,)),))
+        self.assertIsNone(engine._prepared_runtime)
 
 
 class ChineseQuestionTests(unittest.TestCase):
@@ -224,8 +320,133 @@ class ProfileIsRespectedTests(unittest.TestCase):
             engine.answer("Summarize the result", documents, context_intents=(
                 AnswerContextIntent("bad", "Unknown", (99,)),))
 
+    def test_duplicate_document_fact_ids_fail_before_routing_or_resolution(self):
+        engine = HorizonAnswerEngine(scope_id=SCOPE)
+        documents = (
+            _doc(1, "The first source records a verified value of 40."),
+            _doc(1, "A conflicting source reuses the identity with a value of 99."),
+        )
+        with self.assertRaisesRegex(ValueError, "unique FactIds"):
+            engine.answer("What value was recorded?", documents)
+
+    def test_duplicate_context_intent_ids_fail_in_python_core(self):
+        engine = HorizonAnswerEngine(scope_id=SCOPE)
+        documents = (_doc(1, "The source records a verified value of 42."),)
+        with self.assertRaisesRegex(ValueError, "unique intent IDs"):
+            engine.answer("What value was recorded?", documents, context_intents=(
+                AnswerContextIntent("turn:0", "First observation", (1,)),
+                AnswerContextIntent("turn:0", "Second observation", (1,)),
+            ))
+
+    def test_context_intent_rejects_boolean_identity_and_clock(self):
+        with self.assertRaises(ValueError):
+            AnswerContextIntent("turn:0", "Observed", (True,))
+        with self.assertRaises(ValueError):
+            AnswerContextIntent("turn:0", "Observed", (1,), turn_index=True)
+
+    def test_route_document_version_is_bounded_by_storage_u32_domain(self):
+        accepted = RouteDocument(
+            1, "The maximum version remains representable.", SCOPE, "s1",
+            (1 << 32) - 1, "doc:max-version")
+        self.assertEqual(accepted.version, (1 << 32) - 1)
+        with self.assertRaisesRegex(ValueError, "invalid fact identity"):
+            RouteDocument(
+                2, "This version cannot be persisted.", SCOPE, "s1", 1 << 32,
+                "doc:overflow-version")
+        with self.assertRaisesRegex(ValueError, "invalid fact identity"):
+            RouteDocument(
+                1 << 62, "This FactId cannot be persisted.", SCOPE, "s1", 1,
+                "doc:overflow-fact")
+        with self.assertRaisesRegex(ValueError, "invalid fact identity"):
+            RouteDocument(
+                3, "This scope cannot be persisted.", 1 << 32, "s1", 1,
+                "doc:overflow-scope")
+        for field_values in ((True, SCOPE, 1), (1, True, 1), (1, SCOPE, True)):
+            with self.subTest(field_values=field_values), self.assertRaisesRegex(
+                    ValueError, "invalid fact identity"):
+                RouteDocument(
+                    field_values[0], "Boolean identity is invalid.", field_values[1],
+                    "s1", field_values[2], "doc:boolean")
+        with self.assertRaisesRegex(ValueError, "span"):
+            RouteDocument(
+                4, "An invalid source interval.", SCOPE, "s1", 1, "doc:span",
+                span=(7, 7))
+
+    def test_context_intent_cannot_cross_sessions(self):
+        engine = HorizonAnswerEngine(scope_id=SCOPE, allow_scope_fallback=True)
+        documents = (
+            RouteDocument(1, "Alice recorded one observation.", SCOPE, "session:1", 1,
+                          "chat:1"),
+            RouteDocument(2, "Bob recorded another observation.", SCOPE, "session:2", 1,
+                          "chat:2"),
+        )
+        with self.assertRaisesRegex(ValueError, "crosses document sessions"):
+            engine.answer("What was observed?", documents, context_intents=(
+                AnswerContextIntent("mixed", "Observed facts", (1, 2)),))
+
+    def test_context_intent_session_must_match_its_documents(self):
+        engine = HorizonAnswerEngine(scope_id=SCOPE, allow_scope_fallback=True)
+        documents = (RouteDocument(
+            1, "Alice recorded one observation.", SCOPE, "session:1", 1, "chat:1"),)
+        with self.assertRaisesRegex(ValueError, "session does not match"):
+            engine.answer("What was observed?", documents, context_intents=(
+                AnswerContextIntent(
+                    "wrong-session", "Observed fact", (1,), session_id="session:2"),))
+
 
 class DirectAnswerReaderBoundaryTests(unittest.TestCase):
+    class SumCertificate:
+        def compact(self):
+            return b"test-sum:40+2=42"
+
+        def reopen(self, blob, question, evidence):
+            return (blob == b"test-sum:40+2=42" and "sum" in question.casefold()
+                    and any("40 plus 2" in item.text for item in evidence))
+
+        def reopen_resolution(self, blob, question, evidence, *, text, method, source_ids):
+            return (self.reopen(blob, question, evidence) and text == "42"
+                    and method == "test_certified_sum"
+                    and source_ids == (evidence[0].source_id,))
+
+    class ResolveSum:
+        def resolve(self, question, evidence):
+            return DirectAnswerResolution(
+                "42", "test_certified_sum", (evidence[0].source_id,),
+                DirectAnswerReaderBoundaryTests.SumCertificate())
+
+    class BadCertificate(SumCertificate):
+        def reopen(self, blob, question, evidence):
+            return False
+
+    class RejectBadSum:
+        def resolve(self, question, evidence):
+            return DirectAnswerResolution(
+                "42", "test_bad_sum", (evidence[0].source_id,),
+                DirectAnswerReaderBoundaryTests.BadCertificate())
+
+    class LegacyCertificate:
+        def compact(self):
+            return b"legacy-proof"
+
+        def reopen(self, blob, question, evidence):
+            return True
+
+    class ResolveWithLegacyCertificate:
+        def resolve(self, question, evidence):
+            return DirectAnswerResolution(
+                "42", "legacy", (evidence[0].source_id,),
+                DirectAnswerReaderBoundaryTests.LegacyCertificate())
+
+    class MutateResolution:
+        def __init__(self, *, text="42", method="test_certified_sum"):
+            self.text = text
+            self.method = method
+
+        def resolve(self, question, evidence):
+            return DirectAnswerResolution(
+                self.text, self.method, (evidence[0].source_id,),
+                DirectAnswerReaderBoundaryTests.SumCertificate())
+
     class Extract42:
         def propose(self, question, evidence):
             line = next(item for item in evidence if "42" in item.text)
@@ -238,6 +459,52 @@ class DirectAnswerReaderBoundaryTests(unittest.TestCase):
     class UnknownSource:
         def propose(self, question, evidence):
             return DirectAnswerProposal("42", "test_extractive", ("unknown",))
+
+    class CaptureResolverPool:
+        def __init__(self):
+            self.evidence = ()
+
+        def resolve(self, question, evidence):
+            self.evidence = evidence
+            return None
+
+    class ContextCertificate:
+        def compact(self):
+            return b"context-proof-v1"
+
+        def reopen(self, blob, question, evidence):
+            return False
+
+        def reopen_contextual(self, blob, question, evidence, context_intents):
+            return (blob == b"context-proof-v1" and question == "Summarize the observed turn"
+                    and tuple(item.intent_id for item in context_intents) == ("turn:0",)
+                    and tuple(item.fact_ids for item in context_intents) == ((1,),)
+                    and len(evidence) == 1 and evidence[0].fact_id == 1
+                    and evidence[0].speaker == "Alice" and evidence[0].sequence == 7
+                    and evidence[0].event_time == 739000 and evidence[0].scope_id == SCOPE
+                    and evidence[0].version == 1 and evidence[0].source_span == (0, 52)
+                    and evidence[0].parent_sha256 is not None
+                    and context_intents[0].turn_index == 0
+                    and context_intents[0].session_id == "session:7")
+
+        def reopen_contextual_resolution(
+                self, blob, question, evidence, context_intents, *, text, method, source_ids):
+            return (self.reopen_contextual(
+                blob, question, evidence, context_intents)
+                    and text == "The observed turn is certified."
+                    and method == "test_contextual"
+                    and source_ids == (evidence[0].source_id,))
+
+    class ContextOnlyResolver:
+        def __init__(self):
+            self.context_intents = ()
+
+        def resolve_contextual(self, question, evidence, context_intents):
+            self.context_intents = context_intents
+            return DirectAnswerResolution(
+                "The observed turn is certified.", "test_contextual",
+                (evidence[0].source_id,),
+                DirectAnswerReaderBoundaryTests.ContextCertificate())
 
     def setUp(self):
         self.documents = (_doc(
@@ -266,6 +533,124 @@ class DirectAnswerReaderBoundaryTests(unittest.TestCase):
                 "What percent did Meridian reduce cost by?", self.documents)
         self.assertEqual(result.direct_answer.state, "abstain")
         self.assertEqual(result.direct_answer.residual, ("unknown_source_id",))
+
+    def test_certified_derived_answer_can_resolve_without_text_containment(self):
+        documents = (_doc(1, "The two independently witnessed operands are 40 plus 2."),)
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_resolver=self.ResolveSum()).answer(
+                "What is the sum of 40 plus 2?", documents)
+        self.assertEqual(result.direct_answer.state, "resolved")
+        self.assertEqual(result.direct_answer.text, "42")
+        self.assertTrue(result.direct_answer.proof_closed)
+        self.assertEqual(result.direct_answer.certificate, b"test-sum:40+2=42")
+        self.assertNotIn("42", result.evidence_text)
+
+    def test_unreopenable_derived_certificate_fails_closed(self):
+        documents = (_doc(1, "The two independently witnessed operands are 40 plus 2."),)
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_resolver=self.RejectBadSum()).answer(
+                "What is the sum of 40 plus 2?", documents)
+        self.assertEqual(result.direct_answer.state, "abstain")
+        self.assertEqual(result.direct_answer.residual, ("certificate_does_not_reopen",))
+        self.assertIn("40 plus 2", result.evidence_text)
+
+    def test_legacy_certificate_cannot_authorize_a_resolution(self):
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE,
+            direct_answer_resolver=self.ResolveWithLegacyCertificate()).answer(
+                "What is the sum of 40 plus 2?", (
+                    _doc(1, "The two independently witnessed operands are 40 plus 2."),))
+        self.assertEqual(result.direct_answer.state, "abstain")
+        self.assertEqual(
+            result.direct_answer.residual, ("certificate_does_not_bind_resolution",))
+
+    def test_certificate_rejects_changed_answer_or_method(self):
+        for resolver in (
+                self.MutateResolution(text="43"),
+                self.MutateResolution(method="changed_method")):
+            with self.subTest(resolver=resolver):
+                result = HorizonAnswerEngine(
+                    scope_id=SCOPE, direct_answer_resolver=resolver).answer(
+                        "What is the sum of 40 plus 2?", (
+                            _doc(1, "The two independently witnessed operands are 40 plus 2."),))
+                self.assertEqual(result.direct_answer.state, "abstain")
+                self.assertEqual(
+                    result.direct_answer.residual, ("certificate_does_not_reopen",))
+
+    def test_resolver_sees_verified_acquisition_pool_before_render_budget(self):
+        probe = self.CaptureResolverPool()
+        documents = tuple(_doc(index, (
+            f"Meridian observation {index} records a separately verified percentage fact "
+            "with enough explanatory material to exceed the deliberately tiny answer budget."
+        )) for index in range(1, 5))
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE,
+            profile=EngineProfile(acquisition_bytes=4096, answer_bytes=256),
+            direct_answer_resolver=probe).answer(
+                "What percentage facts did Meridian record?", documents)
+        self.assertGreater(len(result.sources), len(result.claims))
+        self.assertEqual(len(probe.evidence), len(result.sources))
+        self.assertEqual({item.source_id for item in probe.evidence},
+                         {item.source_id for item in result.sources})
+
+    def test_explicit_context_intent_does_not_hide_other_authorized_evidence(self):
+        probe = self.CaptureResolverPool()
+        documents = (
+            _doc(1, "The authorized Meridian game had a verified 48-yard field goal."),
+            _doc(2, "A different Meridian game had a verified 54-yard field goal."),
+        )
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_resolver=probe).answer(
+                "How long was the Meridian field goal?", documents,
+                context_intents=(AnswerContextIntent("authorized-game", "Meridian field goal", (1,)),))
+        self.assertTrue(probe.evidence)
+        self.assertEqual({item.fact_id for item in probe.evidence}, {1, 2})
+        self.assertTrue(any("48-yard" in item.text for item in probe.evidence))
+        self.assertTrue(any("54-yard" in item.text for item in probe.evidence))
+
+    def test_context_intent_abstains_if_any_declared_fact_fails_verification(self):
+        probe = self.CaptureResolverPool()
+        documents = (
+            _doc(1, "The valid source records the value 42."),
+            RouteDocument(
+                2, "The foreign-scope source claims the value 99.", SCOPE + 1, "s1", 1,
+                "foreign:2"),
+        )
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, direct_answer_resolver=probe).answer(
+                "What value was recorded?", documents,
+                context_intents=(AnswerContextIntent(
+                    "declared-authority", "What value was recorded?", (1, 2)),))
+        self.assertEqual(result.state, "ABSTAIN_CONTEXT_AUTHORITY")
+        self.assertEqual(probe.evidence, ())
+        self.assertEqual(result.direct_answer.state, "not_attempted")
+
+    def test_contextual_resolver_receives_intents_and_typed_document_coordinates(self):
+        resolver = self.ContextOnlyResolver()
+        documents = (RouteDocument(
+            1, "Alice recorded a certified observation in this turn.", SCOPE, "session:7", 1,
+            "chat:7", sequence=7, event_time=739000, role="user", speaker="Alice"),)
+        intent = AnswerContextIntent(
+            "turn:0", "What did Alice observe?", (1,),
+            turn_index=0, session_id="session:7")
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, session_id="session:7", direct_answer_resolver=resolver).answer(
+                "Summarize the observed turn", documents, context_intents=(intent,))
+        self.assertEqual(result.direct_answer.state, "resolved")
+        self.assertEqual(result.direct_answer.method, "test_contextual")
+        self.assertEqual(resolver.context_intents, (intent,))
+
+    def test_contextual_certificate_cannot_reopen_under_changed_intent(self):
+        resolver = self.ContextOnlyResolver()
+        documents = (RouteDocument(
+            1, "Alice recorded a certified observation in this turn.", SCOPE, "session:7", 1,
+            "chat:7", sequence=7, event_time=739000, role="user", speaker="Alice"),)
+        result = HorizonAnswerEngine(
+            scope_id=SCOPE, session_id="session:7", direct_answer_resolver=resolver).answer(
+                "Summarize the observed turn", documents,
+                context_intents=(AnswerContextIntent("turn:changed", "Different", (1,)),))
+        self.assertEqual(result.direct_answer.state, "abstain")
+        self.assertEqual(result.direct_answer.residual, ("certificate_does_not_reopen",))
 
 
 if __name__ == "__main__":

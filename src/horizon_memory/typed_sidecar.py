@@ -114,6 +114,84 @@ class SidecarLifecycle:
 
 
 @dataclass(frozen=True)
+class SidecarObservedIntent:
+    """One observed intent, replicated in every FactId belonging to its fiber."""
+
+    intent_id: str
+    text: str
+    fact_ids: tuple[int, ...]
+    insertion_order: int
+    turn_index: int | None = None
+    session_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if (not self.intent_id or not self.text or not self.fact_ids
+                or self.fact_ids != tuple(sorted(set(self.fact_ids)))
+                or any(isinstance(item, bool) or not isinstance(item, int) or item < 0
+                       for item in self.fact_ids)
+                or isinstance(self.insertion_order, bool)
+                or not isinstance(self.insertion_order, int) or self.insertion_order < 0
+                or (self.turn_index is not None and
+                    (isinstance(self.turn_index, bool)
+                     or not isinstance(self.turn_index, int) or self.turn_index < 0))
+                or (self.session_id is not None and
+                    (not isinstance(self.session_id, str) or not self.session_id))):
+            raise ValueError("invalid sidecar observed intent")
+
+
+@dataclass(frozen=True)
+class SidecarRouteMetadata:
+    """Optional, attested routing coordinates for lossless document reconstruction."""
+
+    scope_id: int
+    session_id: str
+    version: int
+    generation_id: int | None = None
+    sequence: int | None = None
+    event_time: int | None = None
+    role: str | None = None
+    speaker: str | None = None
+    span: tuple[int, int] | None = None
+    observed_intents: tuple[SidecarObservedIntent, ...] = ()
+
+    def __post_init__(self) -> None:
+        if (isinstance(self.scope_id, bool) or not isinstance(self.scope_id, int)
+                or not 0 <= self.scope_id < (1 << 32) or not isinstance(self.session_id, str)
+                or not self.session_id or isinstance(self.version, bool)
+                or not isinstance(self.version, int) or not 1 <= self.version < (1 << 32)
+                or (self.generation_id is not None and
+                    (isinstance(self.generation_id, bool)
+                     or not isinstance(self.generation_id, int) or self.generation_id < 0))
+                or (self.sequence is not None and
+                    (isinstance(self.sequence, bool)
+                     or not isinstance(self.sequence, int) or self.sequence < 0))
+                or (self.event_time is not None and
+                    (isinstance(self.event_time, bool)
+                     or not isinstance(self.event_time, int) or self.event_time < 0))
+                or self.role not in (None, "user", "assistant", "system", "tool")
+                or (self.speaker is not None and
+                    (not isinstance(self.speaker, str) or not self.speaker.strip()))
+                or (self.span is not None and
+                    (not isinstance(self.span, tuple) or len(self.span) != 2
+                     or isinstance(self.span[0], bool) or isinstance(self.span[1], bool)
+                     or not isinstance(self.span[0], int) or not isinstance(self.span[1], int)
+                     or self.span[0] < 0 or self.span[1] <= self.span[0]))
+                or not isinstance(self.observed_intents, tuple)
+                or any(not isinstance(item, SidecarObservedIntent)
+                       for item in self.observed_intents)
+                or tuple(item.intent_id for item in self.observed_intents) != tuple(sorted(
+                    {item.intent_id for item in self.observed_intents}))):
+            raise ValueError("invalid sidecar route metadata")
+
+
+def _route_metadata_payload(metadata: SidecarRouteMetadata) -> dict[str, object]:
+    payload = asdict(metadata)
+    if not metadata.observed_intents:
+        payload.pop("observed_intents")
+    return payload
+
+
+@dataclass(frozen=True)
 class AttestedSidecarFact:
     """A fact whose entire semantic declaration is bound to one authority manifest."""
 
@@ -121,31 +199,51 @@ class AttestedSidecarFact:
     lifecycle: SidecarLifecycle
     authority_sha256: str
     attestation_sha256: str
+    route_metadata: SidecarRouteMetadata | None = None
+
+    def __post_init__(self) -> None:
+        if (not isinstance(self.fact, TypedCausalFact)
+                or not isinstance(self.lifecycle, SidecarLifecycle)
+                or not _SHA256.fullmatch(self.authority_sha256)
+                or not _SHA256.fullmatch(self.attestation_sha256)
+                or (self.route_metadata is not None
+                    and not isinstance(self.route_metadata, SidecarRouteMetadata))):
+            raise ValueError("invalid attested sidecar fact")
 
     @classmethod
     def seal(cls, fact: TypedCausalFact,
              authority: SidecarAuthority,
-             lifecycle: SidecarLifecycle | None = None) -> "AttestedSidecarFact":
+             lifecycle: SidecarLifecycle | None = None,
+             route_metadata: SidecarRouteMetadata | None = None) -> "AttestedSidecarFact":
         if lifecycle is None:
             lifecycle = SidecarLifecycle(
                 fact.observed_at, None, authority.purpose,
                 f"authority-manifest:{authority.authority_sha256}")
         if lifecycle.purpose != authority.purpose or fact.fact_id in lifecycle.supersedes:
             raise ValueError("fact lifecycle is outside its authority or self-superseding")
+        if route_metadata is not None and fact.version != route_metadata.version:
+            raise ValueError("route metadata disagrees with its typed fact")
         authority_sha256 = authority.authority_sha256
-        attestation = _digest(b"HORIZON-SIDECAR-FACT-v1", {
+        payload = {
             "authority_sha256": authority_sha256,
             "fact": _fact_payload(fact),
             "lifecycle": asdict(lifecycle),
-        })
-        return cls(fact, lifecycle, authority_sha256, attestation)
+        }
+        domain = b"HORIZON-SIDECAR-FACT-v1"
+        if route_metadata is not None:
+            payload["route_metadata"] = _route_metadata_payload(route_metadata)
+            domain = (b"HORIZON-SIDECAR-FACT-v3" if route_metadata.observed_intents
+                      else b"HORIZON-SIDECAR-FACT-v2")
+        attestation = _digest(domain, payload)
+        return cls(fact, lifecycle, authority_sha256, attestation, route_metadata)
 
     def verify(self, authority: SidecarAuthority,
                source: CausalSourceEnvelope) -> bool:
         if self.authority_sha256 != authority.authority_sha256:
             return False
         try:
-            expected = AttestedSidecarFact.seal(self.fact, authority, self.lifecycle)
+            expected = AttestedSidecarFact.seal(
+                self.fact, authority, self.lifecycle, self.route_metadata)
         except ValueError:
             return False
         return (self.attestation_sha256 == expected.attestation_sha256 and
@@ -229,6 +327,7 @@ class CompletenessCertificate:
 class SidecarFactDeclaration:
     declaration: StructuredCausalDeclaration
     lifecycle: SidecarLifecycle | None = None
+    route_metadata: SidecarRouteMetadata | None = None
 
 
 @dataclass(frozen=True)
@@ -253,7 +352,8 @@ class DeclarativeSidecarAdapter:
                 item = SidecarFactDeclaration(item)
             if isinstance(item, SidecarFactDeclaration):
                 fact = DeterministicCausalCompiler.compile(source, item.declaration)
-                facts.append(AttestedSidecarFact.seal(fact, self.authority, item.lifecycle))
+                facts.append(AttestedSidecarFact.seal(
+                    fact, self.authority, item.lifecycle, item.route_metadata))
             elif isinstance(item, SidecarCompletenessDeclaration):
                 closure_specs.append(item)
             else:

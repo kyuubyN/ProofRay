@@ -21,9 +21,13 @@ see `../LICENSE_COMMERCIAL_PLACEHOLDER.md`.
 
 Run: python3 "HorizonAI Engine/examples/mongodb_documents_example.py"
 Requires: pip install pymongo mongomock
+
+Mongo `_id` values are mapped to Horizon's frozen 62-bit FactId domain with SHA-256. Python's
+process-randomized built-in `hash()` must never be used for durable source identity.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -72,7 +76,12 @@ def _documents_from_mongo(collection) -> tuple[RouteDocument, ...]:
     documents = []
     for row in collection.find({}, {"_id": 1, "body": 1}).sort("_id", 1):
         documents.append(RouteDocument(
-            fact_id=hash(str(row["_id"])) & 0x7FFFFFFF,
+            # Python's built-in string hash is intentionally randomized between processes and
+            # cannot be a durable FactId.  Mongo identity is projected through a stable u64
+            # digest instead; the original `_id` remains visible in the source citation.
+            fact_id=int.from_bytes(
+                hashlib.sha256(str(row["_id"]).encode("utf-8")).digest()[:8], "big")
+            & ((1 << 62) - 1),
             text=row["body"],
             scope_id=SCOPE_ID,
             session_id=SESSION_ID,

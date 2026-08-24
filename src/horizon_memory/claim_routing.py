@@ -67,6 +67,8 @@ from .routing import Candidate, CandidateGenerator, CandidateList
 # precedent for the identical ASCII trade-off.
 _SENTENCE = re.compile(
     r"(?:[^\n.!?。！？…]|[.!?](?!\s|\Z))+(?:[.!?]+(?=\s|\Z)|[。！？…]+|(?=\n|\Z))", re.UNICODE)
+_PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n+")
+_MAX_PARAGRAPH_CHARS = 2048
 
 # (lexical, sublexical, entity, relation, observable, contradiction)
 DEFAULT_WEIGHTS: tuple[float, float, float, float, float, float] = (0.6, 0.4, 0.0, 0.0, 0.0, 0.5)
@@ -82,12 +84,37 @@ def claim_spans(text: str) -> tuple[tuple[int, int], ...]:
     return tuple(spans)
 
 
+def paragraph_spans(text: str, *, max_chars: int = _MAX_PARAGRAPH_CHARS) \
+        -> tuple[tuple[int, int], ...]:
+    """Exact non-empty paragraph spans, bounded so context never becomes an evidence dump.
+
+    Sentence spans are the default retrieval unit.  This optional companion preserves a small
+    source-local binding window for hard-wrapped prose, tables and bibliographic records where a
+    relation and its value can occupy adjacent lines or sentences in the same attested paragraph.
+    Blank lines are the only boundary; no vocabulary or model decides what belongs together.
+    """
+    if max_chars < 12:
+        raise ValueError("max_chars must be at least 12")
+    spans = []
+    boundaries = [0, *(match.end() for match in _PARAGRAPH_BREAK.finditer(text)), len(text)]
+    ends = [*(match.start() for match in _PARAGRAPH_BREAK.finditer(text)), len(text)]
+    for start, end in zip(boundaries, ends):
+        while start < end and text[start].isspace():
+            start += 1
+        while end > start and text[end - 1].isspace():
+            end -= 1
+        if 12 <= end - start <= max_chars:
+            spans.append((start, end))
+    return tuple(spans)
+
+
 class ClaimGenerator(CandidateGenerator):
-    """FH-06.1: proposes one candidate per sentence-level claim span instead of per document."""
+    """FH-06.1 sentence candidates, plus bounded paragraph candidates when explicitly enabled."""
     channel = "claim"
 
     def __init__(self, weights: tuple[float, float, float, float, float, float] = DEFAULT_WEIGHTS,
                  *, specificity_bonus: float | None = None,
+                 include_paragraphs: bool = False,
                  bm25_k1: float = 1.2, bm25_b: float = 0.75,
                  lexical_bm25_delta: float = 0.0,
                  sublexical_bm25_delta: float = 0.0):
@@ -109,6 +136,7 @@ class ClaimGenerator(CandidateGenerator):
         # signal was already tested); exposed as opt-in so a caller can test it without changing
         # default behavior for anything else that constructs `ClaimGenerator`.
         self.specificity_bonus = specificity_bonus
+        self.include_paragraphs = include_paragraphs
 
     def generate(self, query, index, limit, same_session=True):
         eligible = index.eligible(query, same_session)
@@ -116,7 +144,10 @@ class ClaimGenerator(CandidateGenerator):
             return CandidateList(())
         claims: list[tuple[int, tuple[int, int], str]] = []
         for document in eligible:
-            for span in claim_spans(document.text):
+            spans = set(claim_spans(document.text))
+            if self.include_paragraphs:
+                spans.update(paragraph_spans(document.text))
+            for span in sorted(spans):
                 start, end = span
                 claims.append((document.fact_id, span, document.text[start:end]))
         if not claims:
@@ -139,4 +170,4 @@ class ClaimGenerator(CandidateGenerator):
         return CandidateList(tuple(candidates))
 
 
-__all__ = ["ClaimGenerator", "DEFAULT_WEIGHTS", "claim_spans"]
+__all__ = ["ClaimGenerator", "DEFAULT_WEIGHTS", "claim_spans", "paragraph_spans"]
