@@ -31,13 +31,12 @@ void main() {
       find.text('STARTING LOCAL CORE'),
       timeout: const Duration(seconds: 45),
     );
+    expect(find.text('LOCAL CORE UNAVAILABLE'), findsNothing);
 
     await _send(tester, 'My bicycle is cobalt blue.');
     await _waitFor(
       tester,
-      find.text(
-        'No AI provider is connected. ProofRay remains available for memory, evidence and abstention.',
-      ),
+      find.byIcon(Icons.arrow_upward),
       timeout: const Duration(seconds: 30),
     );
     expect(

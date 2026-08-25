@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "io.proofray.proofray_app"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_secure_storage 11 requires the Android 37 API surface. This is
+    // compile-time only; the v1 runtime floor remains Android 10 (API 29).
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

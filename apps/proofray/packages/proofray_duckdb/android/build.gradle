@@ -7,7 +7,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath("com.android.tools.build:gradle:9.1.0")
+        classpath("com.android.tools.build:gradle:9.1.1")
     }
 }
 
@@ -22,7 +22,7 @@ apply plugin: "com.android.library"
 
 android {
     namespace = "io.proofray.proofray_duckdb"
-    compileSdk = 36
+    compileSdk = 37
     ndkVersion = "28.2.13676358"
     defaultConfig {
         minSdk = 29

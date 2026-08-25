@@ -30,7 +30,7 @@
     "ndk_version": "28.2.13676358",
     "cmake_version": "3.22.1",
     "min_sdk": 29,
-    "compile_sdk": 36
+    "compile_sdk": 37
   },
   "targets": ["Android-arm64", "Linux-x86_64", "Windows-x86_64"]
 }

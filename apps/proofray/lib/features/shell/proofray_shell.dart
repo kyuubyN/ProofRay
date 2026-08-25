@@ -225,23 +225,26 @@ class _DesktopHistory extends StatelessWidget {
                     children: <Widget>[
                       for (final ConversationSummary row
                           in snapshot.data ?? const <ConversationSummary>[])
-                        ListTile(
-                          dense: true,
-                          selected: row.id == activeConversationId,
-                          selectedColor: ProofRayColors.ink,
-                          title: Text(
-                            row.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            row.memoryMode.name,
-                            style: const TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 9,
+                        Material(
+                          color: Colors.transparent,
+                          child: ListTile(
+                            dense: true,
+                            selected: row.id == activeConversationId,
+                            selectedColor: ProofRayColors.ink,
+                            title: Text(
+                              row.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
+                            subtitle: Text(
+                              row.memoryMode.name,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 9,
+                              ),
+                            ),
+                            onTap: () => onOpen(row),
                           ),
-                          onTap: () => onOpen(row),
                         ),
                     ],
                   ),
