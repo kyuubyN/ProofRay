@@ -1,0 +1,26 @@
+{
+  "schema": "proofray.app.embedded-equivalence-cases.v1",
+  "desktop_result_sha256": "11ba3aa0ae2f96fe27d28dbaa664c1b0300d611c212d624766edddba0922a043",
+  "cases": [
+    {"id":"pt-bike","profile":"Kaue","timezone":"America/Sao_Paulo","documents":[["t1","m1","Minha bicicleta é azul cobalto.",0,"2026-08-01T12:00:00+00:00"],["t1","m2","Meu jantar favorito é sopa de abóbora.",1,"2026-08-02T12:00:00+00:00"]],"question":"Você lembra qual é a cor da minha bicicleta?"},
+    {"id":"pt-cat","profile":"Lia","timezone":"America/Sao_Paulo","documents":[["t2","m1","Minha gata se chama Nori.",0,"2026-08-03T12:00:00+00:00"]],"question":"Você lembra como minha gata se chama?"},
+    {"id":"pt-trip","profile":"Rui","timezone":"America/Sao_Paulo","documents":[["t3","m1","Eu viajei para Paraty nas férias.",0,"2026-08-04T12:00:00+00:00"]],"question":"Lembra para onde eu viajei nas férias?"},
+    {"id":"pt-meeting","profile":"Bia","timezone":"America/Sao_Paulo","documents":[["t4","m1","A reunião com a equipe ficou para terça-feira.",0,"2026-08-05T12:00:00+00:00"]],"question":"Você lembra quando ficou a reunião com a equipe?"},
+    {"id":"pt-allergy","profile":"Caio","timezone":"America/Sao_Paulo","documents":[["t5","m1","Eu tenho alergia a amendoim.",0,"2026-08-06T12:00:00+00:00"]],"question":"Lembra a que eu tenho alergia?"},
+    {"id":"pt-phone","profile":"Nina","timezone":"America/Sao_Paulo","documents":[["t6","m1","Meu celular novo é preto fosco.",0,"2026-08-07T12:00:00+00:00"]],"question":"Você lembra a cor do meu celular novo?"},
+    {"id":"pt-coffee","profile":"Ivo","timezone":"America/Sao_Paulo","documents":[["t7","m1","Meu café favorito é coado sem açúcar.",0,"2026-08-08T12:00:00+00:00"]],"question":"Lembra qual é meu café favorito?"},
+    {"id":"pt-sister","profile":"Leo","timezone":"America/Sao_Paulo","documents":[["t8","m1","Minha irmã Ana mora em Recife.",0,"2026-08-09T12:00:00+00:00"]],"question":"Você lembra onde minha irmã Ana mora?"},
+    {"id":"pt-repair","profile":"Mia","timezone":"America/Sao_Paulo","documents":[["t9","m1","Eu consertei a câmera em 12 de agosto de 2026.",0,"2026-08-12T12:00:00+00:00"]],"question":"Lembra quando consertei a câmera?"},
+    {"id":"pt-concert","profile":"Tom","timezone":"America/Sao_Paulo","documents":[["t10","m1","O show do Aurora foi no Teatro Municipal.",0,"2026-08-13T12:00:00+00:00"]],"question":"Você lembra onde foi o show do Aurora?"},
+    {"id":"en-address","profile":"Ava","timezone":"UTC","documents":[["t11","m1","My studio is on Cedar Street.",0,"2026-08-14T12:00:00+00:00"]],"question":"Do you remember where my studio is?"},
+    {"id":"en-dog","profile":"Sam","timezone":"UTC","documents":[["t12","m1","My dog Pixel is seven years old.",0,"2026-08-15T12:00:00+00:00"]],"question":"Do you remember how old Pixel is?"},
+    {"id":"en-laptop","profile":"Eli","timezone":"UTC","documents":[["t13","m1","My work laptop is a ThinkPad T14.",0,"2026-08-16T12:00:00+00:00"]],"question":"Do you remember my work laptop model?"},
+    {"id":"en-cost","profile":"Zoe","timezone":"UTC","documents":[["t14","m1","Project Meridian reduced the cost by 42 percent.",0,"2026-08-17T12:00:00+00:00"]],"question":"Do you remember how much Meridian reduced the cost?"},
+    {"id":"en-birthday","profile":"Max","timezone":"UTC","documents":[["t15","m1","Nora's birthday dinner is on September 3.",0,"2026-08-18T12:00:00+00:00"]],"question":"Do you remember when Nora's birthday dinner is?"},
+    {"id":"en-book","profile":"Uma","timezone":"UTC","documents":[["t16","m1","The book I lent Jo was The Left Hand of Darkness.",0,"2026-08-19T12:00:00+00:00"]],"question":"Do you remember which book I lent Jo?"},
+    {"id":"en-doctor","profile":"Ian","timezone":"UTC","documents":[["t17","m1","My dentist is Dr. Chen.",0,"2026-08-20T12:00:00+00:00"]],"question":"Do you remember my dentist's name?"},
+    {"id":"en-trail","profile":"May","timezone":"UTC","documents":[["t18","m1","My favorite trail is Serra Fina.",0,"2026-08-21T12:00:00+00:00"]],"question":"Do you remember my favorite trail?"},
+    {"id":"en-language","profile":"Noa","timezone":"UTC","documents":[["t19","m1","I am learning Japanese this year.",0,"2026-08-22T12:00:00+00:00"]],"question":"Do you remember which language I am learning?"},
+    {"id":"en-keys","profile":"Kai","timezone":"UTC","documents":[["t20","m1","I left the spare keys in the kitchen drawer.",0,"2026-08-23T12:00:00+00:00"]],"question":"Do you remember where I left the spare keys?"}
+  ]
+}

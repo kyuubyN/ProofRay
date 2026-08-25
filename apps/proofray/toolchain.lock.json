@@ -1,0 +1,36 @@
+{
+  "schema": "proofray.app.toolchain-lock.v1",
+  "flutter": {
+    "channel": "stable",
+    "version": "3.47.1",
+    "revision": "6655482ec06e547f90abf8ae7590466f4415978d"
+  },
+  "dart": {
+    "version": "3.13.1"
+  },
+  "python": {
+    "implementation": "CPython",
+    "short_version": "3.12",
+    "serious_python_runtime": "3.12.13"
+  },
+  "flutter_packages": {
+    "serious_python": "4.5.1",
+    "drift": "2.34.3",
+    "sqlite3": "3.5.2",
+    "flutter_secure_storage": "11.0.0",
+    "dart_duckdb_api": "1.4.4+proofray.1"
+  },
+  "duckdb": {
+    "engine_version": "1.4.2",
+    "linux_x86_64_sha256": "0a68e623cbdcfa06e10e1b5d6a3092d3fd3679f616008fb1a39b92e4a10d8f43",
+    "windows_x86_64_sha256": "4d3e5f2ee009a8fff5b8d43bc50f61c6b246b2b227748bc900f8520ec8fac0b0",
+    "android_source_sha256": "ee7e178341ea8199ad52eabdff07aa89969f9904868eaa94e71efb31eaef7f2d"
+  },
+  "android_native": {
+    "ndk_version": "28.2.13676358",
+    "cmake_version": "3.22.1",
+    "min_sdk": 29,
+    "compile_sdk": 36
+  },
+  "targets": ["Android-arm64", "Linux-x86_64", "Windows-x86_64"]
+}

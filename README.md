@@ -130,6 +130,18 @@ the repeated tool cycles. The run used `mongomock`, 979 input tokens, 110 output
 of accumulated provider latency. This is an integration and authority-boundary smoke test, not an
 answer-accuracy benchmark.
 
+## Native app (in development)
+
+The local-first Flutter client lives in [`apps/proofray`](apps/proofray/README.md).
+It targets Android, Linux and Windows with an embedded CPython 3.12 core, an
+encrypted Flutter-owned SQLite database, native provider/database setup and the
+proof Observatory. It is not yet a downloadable release: platform equivalence,
+encryption and packaging gates remain explicit in the app's
+[`RELEASE_GATES.md`](apps/proofray/docs/RELEASE_GATES.md).
+
+The app preserves the same contract as the Python package: a model may write or
+call ProofRay, but only the deterministic engine can attach proof authority.
+
 ## Try it in two minutes
 
 ```bash

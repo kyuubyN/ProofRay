@@ -1,0 +1,379 @@
+name: ProofRay app candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/proofray/**"
+      - "src/horizon_memory/**"
+      - "src/proofray/**"
+      - "pyproject.toml"
+      - ".github/workflows/proofray-app.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/proofray/**"
+      - "src/horizon_memory/**"
+      - "src/proofray/**"
+      - "pyproject.toml"
+      - ".github/workflows/proofray-app.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: proofray-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-import-contract:
+    name: Windows embedded feasibility build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install exact embedded dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -e ".[test]"
+          python -m pip install -r apps/proofray/python/requirements-mobile.txt
+      - name: Verify public imports and the native Windows lock
+        shell: pwsh
+        env:
+          PYTHONPATH: apps/proofray/python;src
+        run: |
+          python apps/proofray/tool/verify_embedded_imports.py
+          python -m pytest tests/test_horizon_file_lock.py -q
+
+      - name: Package the Windows embedded Python surface on Windows
+        shell: bash
+        working-directory: apps/proofray
+        run: |
+          ./tool/verify_toolchain.sh
+          flutter pub get --enforce-lockfile
+          dart run build_runner build
+          ./tool/package_python.sh Windows
+          "build/build_python_3.12.13/python/python.exe" \
+            tool/verify_compiled_boot.py Windows
+          ./tool/fetch_duckdb.sh Windows
+          ./tool/build_platform.sh Windows debug
+
+      - name: Exercise Windows onboarding, recall marker and restart
+        shell: pwsh
+        working-directory: apps/proofray
+        run: |
+          $env:SERIOUS_PYTHON_VERSION = "3.12"
+          $env:SERIOUS_PYTHON_APP = "$env:GITHUB_WORKSPACE/apps/proofray/build/python-app/Windows"
+          $env:SERIOUS_PYTHON_SITE_PACKAGES = "$env:GITHUB_WORKSPACE/apps/proofray/build/site-packages/Windows"
+          $env:APPDATA = "$env:RUNNER_TEMP/proofray-native-acceptance"
+          flutter test -d windows integration_test/proofray_native_acceptance_test.dart
+
+      - name: Require Windows native payload and publish size evidence
+        shell: pwsh
+        working-directory: apps/proofray
+        run: |
+          $bundle = "build/windows/x64/runner/Debug"
+          if (-not (Test-Path "$bundle/duckdb.dll")) { throw "duckdb.dll missing" }
+          if (-not (Test-Path "$bundle/python312_d.dll")) { throw "python312_d.dll missing" }
+          if (-not (Test-Path "$bundle/python3_d.dll")) { throw "python3_d.dll missing" }
+          if (-not (Test-Path "$bundle/dart_bridge_d.dll")) { throw "dart_bridge_d.dll missing" }
+          if (-not (Test-Path "$bundle/Lib")) { throw "Python stdlib missing" }
+          if (-not (Test-Path "$bundle/DLLs")) { throw "Python DLL directory missing" }
+          if (-not (Test-Path "$bundle/app/proofray_app")) { throw "Python app missing" }
+          if (-not (Test-Path "$bundle/app/main.pyc")) { throw "compiled Python entrypoint missing" }
+          if (-not (Test-Path "$bundle/site-packages/numpy")) { throw "NumPy missing" }
+          $size = (Get-ChildItem $bundle -Recurse -File | Measure-Object Length -Sum).Sum
+          $size | Set-Content build/windows-bundle-size.txt
+          Compress-Archive -Path "$bundle/*" -DestinationPath proofray-windows-debug.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proofray-windows-debug-feasibility
+          path: |
+            apps/proofray/proofray-windows-debug.zip
+            apps/proofray/build/windows-bundle-size.txt
+
+  python-backend:
+    name: Embedded backend contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install core and pure connector drivers
+        run: |
+          python -m pip install -e ".[test]"
+          python -m pip install -r apps/proofray/python/requirements-mobile.txt
+
+      - name: Run app backend contracts without feasibility replay
+        env:
+          PYTHONPATH: apps/proofray/python:src
+        run: python -m pytest apps/proofray/python/tests -q -m "not slow and not integration"
+
+      - name: Compile packaged Python surface
+        run: >-
+          python -m compileall -q
+          apps/proofray/python/proofray_app
+          apps/proofray/python/main.py
+
+      - name: Verify frozen runtime manifest
+        env:
+          PYTHONPATH: apps/proofray/python:src
+        run: |
+          python -m json.tool apps/proofray/python/proofray_app/frozen_equivalence_cases.json >/dev/null
+          python -m proofray_app.embedded_equivalence --verify-desktop
+
+  flutter-contracts:
+    name: Flutter analyze and headless contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+
+      - name: Verify exact toolchain and lockfile
+        working-directory: apps/proofray
+        run: |
+          ./tool/verify_toolchain.sh
+          python3 tool/verify_native_locks.py
+          flutter pub get --enforce-lockfile
+
+      - name: Verify generated Drift output is current
+        working-directory: apps/proofray
+        run: |
+          dart run build_runner build
+
+      - name: Fetch verified DuckDB Linux library
+        working-directory: apps/proofray
+        run: |
+          ./tool/fetch_duckdb.sh Linux
+          echo "PROOFRAY_DUCKDB_LIBRARY=$PWD/build/duckdb/Linux/libduckdb.so" >> "$GITHUB_ENV"
+
+      - name: Analyze and run widget contracts headlessly
+        working-directory: apps/proofray
+        run: |
+          flutter analyze
+          flutter test
+
+  linux-feasibility-build:
+    name: Linux embedded feasibility build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install native Linux toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
+            liblzma-dev libsecret-1-dev xauth xvfb
+
+      - name: Resolve exact Dart graph and generate Drift
+        working-directory: apps/proofray
+        run: |
+          ./tool/verify_toolchain.sh
+          flutter pub get --enforce-lockfile
+          dart run build_runner build
+
+      - name: Package and verify CPython 3.12 surface
+        working-directory: apps/proofray
+        run: |
+          ./tool/package_python.sh Linux
+          ./tool/fetch_duckdb.sh Linux
+          env PYTHONPATH="$PWD/build/python-app/Linux:$PWD/build/site-packages/Linux" \
+            "$PWD/build/build_python_3.12.13/python/bin/python3" \
+            tool/verify_embedded_imports.py
+          env PYTHONPATH="$PWD/build/python-app/Linux:$PWD/build/site-packages/Linux" \
+            "$PWD/build/build_python_3.12.13/python/bin/python3" \
+            -m proofray_app.embedded_equivalence --verify-desktop
+          env PYTHONPATH="$PWD/build/python-app/Linux:$PWD/build/site-packages/Linux" \
+            "$PWD/build/build_python_3.12.13/python/bin/python3" \
+            tool/verify_compiled_boot.py Linux
+
+      - name: Compile Linux bundle without launching it
+        working-directory: apps/proofray
+        run: ./tool/build_platform.sh Linux debug
+
+      - name: Record Bit Horizon Linux frame diagnostic
+        working-directory: apps/proofray
+        env:
+          SERIOUS_PYTHON_VERSION: "3.12"
+          SERIOUS_PYTHON_APP: ${{ github.workspace }}/apps/proofray/build/python-app/Linux
+          SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/apps/proofray/build/site-packages/Linux
+        run: >-
+          xvfb-run -a flutter test -d linux --profile
+          integration_test/bit_horizon_performance_test.dart
+
+      - name: Exercise native onboarding, recall marker and restart
+        working-directory: apps/proofray
+        env:
+          SERIOUS_PYTHON_VERSION: "3.12"
+          SERIOUS_PYTHON_APP: ${{ github.workspace }}/apps/proofray/build/python-app/Linux
+          SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/apps/proofray/build/site-packages/Linux
+          XDG_DATA_HOME: ${{ runner.temp }}/proofray-native-acceptance
+        run: >-
+          xvfb-run -a flutter test -d linux --profile
+          integration_test/proofray_native_acceptance_test.dart
+
+      - name: Require native libraries and publish size evidence
+        working-directory: apps/proofray
+        run: |
+          test -f build/linux/x64/debug/bundle/lib/libduckdb.so
+          test -f build/linux/x64/debug/bundle/lib/libpython3.so
+          test -f build/linux/x64/debug/bundle/lib/libpython3.12.so.1.0
+          test -d build/linux/x64/debug/bundle/python3.12
+          test -d build/linux/x64/debug/bundle/app/proofray_app
+          test -f build/linux/x64/debug/bundle/app/main.pyc
+          test -d build/linux/x64/debug/bundle/site-packages/numpy
+          du -sb build/linux/x64/debug/bundle | tee build/linux-bundle-size.txt
+          tar -C build/linux/x64/debug -czf proofray-linux-debug.tar.gz bundle
+          artifact_bytes="$(stat -c %s proofray-linux-debug.tar.gz)"
+          printf 'compressed_debug_bytes=%s\nrelease_limit_bytes=209715200\n' \
+            "$artifact_bytes" >> build/linux-bundle-size.txt
+          if [ "$artifact_bytes" -gt 209715200 ]; then
+            printf 'status=DEBUG_EXCEEDS_RELEASE_LIMIT_REQUIRES_REPORT\n' \
+              >> build/linux-bundle-size.txt
+          else
+            printf 'status=WITHIN_RELEASE_LIMIT\n' >> build/linux-bundle-size.txt
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proofray-linux-debug-feasibility
+          path: |
+            apps/proofray/proofray-linux-debug.tar.gz
+            apps/proofray/build/linux-bundle-size.txt
+
+  android-arm64-feasibility-build:
+    name: Android arm64 embedded feasibility build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install exact Android native toolchain
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" \
+            "ndk;28.2.13676358" "cmake;3.22.1"
+
+      - name: Resolve, package and compile arm64 without launching
+        working-directory: apps/proofray
+        run: |
+          ./tool/verify_toolchain.sh
+          flutter pub get --enforce-lockfile
+          dart run build_runner build
+          ./tool/package_python.sh Android
+          python3 tool/verify_android_payload.py
+          ./tool/fetch_duckdb.sh Android
+          ./tool/build_platform.sh Android debug
+
+      - name: Require arm64 native payload and publish size evidence
+        working-directory: apps/proofray
+        run: |
+          python3 tool/verify_android_apk.py \
+            build/app/outputs/flutter-apk/app-debug.apk
+          stat -c %s build/app/outputs/flutter-apk/app-debug.apk | \
+            tee build/android-apk-size.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proofray-android-arm64-debug-feasibility
+          path: |
+            apps/proofray/build/app/outputs/flutter-apk/app-debug.apk
+            apps/proofray/build/android-apk-size.txt
+
+  connector-services:
+    name: PostgreSQL, MySQL and Elasticsearch contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: proofray
+          POSTGRES_PASSWORD: proofray
+          POSTGRES_DB: proofray
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U proofray -d proofray"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root-proofray
+          MYSQL_USER: proofray
+          MYSQL_PASSWORD: proofray
+          MYSQL_DATABASE: proofray
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -u proofray -pproofray"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.19.2
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports: ["9200:9200"]
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health"
+          --health-interval 10s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install -e ".[test]"
+          python -m pip install -r apps/proofray/python/requirements-mobile.txt
+      - name: Run explicitly provisioned connector contracts
+        env:
+          PYTHONPATH: apps/proofray/python:src
+          PROOFRAY_TEST_POSTGRESQL: postgresql://proofray@127.0.0.1:5432/proofray
+          PROOFRAY_TEST_POSTGRESQL_PASSWORD: proofray
+          PROOFRAY_TEST_MYSQL: mysql://proofray@127.0.0.1:3306/proofray
+          PROOFRAY_TEST_MYSQL_PASSWORD: proofray
+          PROOFRAY_TEST_ELASTICSEARCH: http://127.0.0.1:9200
+        run: python -m pytest apps/proofray/python/tests/test_live_connectors.py -q -m integration

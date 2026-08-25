@@ -20,7 +20,6 @@ honesto já congelado.
 from __future__ import annotations
 
 import errno
-import fcntl
 import hashlib
 import hmac
 import os
@@ -31,6 +30,7 @@ from enum import IntEnum
 from pathlib import Path
 
 from horizon_memory._engine.horizon_artifacts import ArtifactLimits
+from horizon_memory._engine import file_lock as fcntl
 from horizon_memory._engine.horizon_durability import (
     durable_replace,
     ensure_durable_directory_chain,

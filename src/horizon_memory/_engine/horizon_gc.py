@@ -20,7 +20,6 @@ E0 é PURO: só calcula alcançabilidade e um `GcPlan`; não apaga nem move nada
 from __future__ import annotations
 
 import errno
-import fcntl
 import hashlib
 import hmac
 import os
@@ -31,6 +30,7 @@ from enum import Enum
 from pathlib import Path
 
 from horizon_memory._engine.horizon_durability import fsync_dir, open_hardened_lock
+from horizon_memory._engine import file_lock as fcntl
 from horizon_memory._engine.horizon_manifest import (
     BASE_KINDS, OpenGenerationState, parse_manifest)
 from horizon_memory._engine.horizon_publication import (

@@ -442,7 +442,8 @@ class AuthorizedSidecarMemory:
     """Standalone causal memory whose only ingest route is an authorized sidecar."""
 
     def __init__(self, scope: str, authorities: tuple[SidecarAuthority, ...], *,
-                 limits: SidecarLimits | None = None):
+                 limits: SidecarLimits | None = None,
+                 _defer_publication: bool = False):
         self.limits = limits or SidecarLimits()
         if not authorities:
             raise ValueError("authorized sidecar memory needs at least one authority")
@@ -461,7 +462,9 @@ class AuthorizedSidecarMemory:
         self.scope = scope
         self.purpose = next(iter(purposes))
         self._authorities = by_id
-        self._memory = StandaloneCausalMemory(scope)
+        self._memory = StandaloneCausalMemory(
+            scope, _defer_publication=_defer_publication)
+        self._defer_publication = _defer_publication
         self._attestations: dict[int, AttestedSidecarFact] = {}
         self._sources: dict[str, CausalSourceEnvelope] = {}
         self._completeness: dict[tuple[str, str], AttestedCompletenessClaim] = {}
@@ -472,6 +475,27 @@ class AuthorizedSidecarMemory:
         # scope) cost paid on every certified query regardless of how small that population
         # actually is. This index makes that lookup O(population size for this key) instead.
         self._facts_by_key: dict[tuple[str, str], dict[int, AttestedSidecarFact]] = {}
+
+    def _fork_for_atomic_update(self) -> "AuthorizedSidecarMemory":
+        """Create an isolated candidate that can be published after host commit."""
+        staged = AuthorizedSidecarMemory(
+            self.scope, tuple(self._authorities.values()), limits=self.limits)
+        staged._memory = self._memory._fork_for_atomic_update()
+        staged._attestations = dict(self._attestations)
+        staged._sources = dict(self._sources)
+        staged._completeness = dict(self._completeness)
+        staged._superseded_by = dict(self._superseded_by)
+        # Inner populations are immutable from the published object's point of
+        # view: ingest already copies every touched key before changing it.
+        staged._facts_by_key = dict(self._facts_by_key)
+        return staged
+
+    def _finalize_publication(self) -> None:
+        """Publish one index after private recovery; never callable twice."""
+        if not self._defer_publication:
+            return
+        self._memory._finalize_publication()
+        self._defer_publication = False
 
     @staticmethod
     def _selected_population(facts: tuple[TypedCausalFact, ...], subject: str,
@@ -608,8 +632,7 @@ class AuthorizedSidecarMemory:
                 pending_superseded.update({fact_id: fact.fact_id for fact_id in previous})
         # Build the sidecar publication first.  The underlying memory independently checks
         # source, FactIds, causal edges and index construction before its own atomic swap.
-        prospective = {**self._attestations,
-                       **{item.fact.fact_id: item for item in proposed}}
+        proposed_by_id = {item.fact.fact_id: item for item in proposed}
         if any(not isinstance(claim, AttestedCompletenessClaim) for claim in claims):
             return SidecarIngestReceipt("REJECTED_COMPLETENESS", adapter_id,
                                         authority_sha256, (), source.sha256,
@@ -644,15 +667,25 @@ class AuthorizedSidecarMemory:
                 self._completeness.get((claim.subject, claim.predicate)) == claim
                 for claim in claims)
             core_state, core_fact_ids = ("IDEMPOTENT" if identical else "APPLIED"), ()
-        self._attestations = prospective
+        if self._defer_publication:
+            self._attestations.update(proposed_by_id)
+        else:
+            self._attestations = {**self._attestations, **proposed_by_id}
         # Commit the same incremental update to the secondary index: only the keys this batch
         # touched are replaced (from the already-built `prospective_by_key` overlay), never a
         # full rebuild from `self._attestations`.
-        self._facts_by_key = {**self._facts_by_key, **prospective_by_key}
+        if self._defer_publication:
+            self._facts_by_key.update(prospective_by_key)
+        else:
+            self._facts_by_key = {**self._facts_by_key, **prospective_by_key}
         self._sources[source.source_id] = source
-        self._completeness = {**self._completeness,
-                              **{(claim.subject, claim.predicate): claim for claim in claims}}
-        self._superseded_by = {**self._superseded_by, **pending_superseded}
+        claim_updates = {(claim.subject, claim.predicate): claim for claim in claims}
+        if self._defer_publication:
+            self._completeness.update(claim_updates)
+            self._superseded_by.update(pending_superseded)
+        else:
+            self._completeness = {**self._completeness, **claim_updates}
+            self._superseded_by = {**self._superseded_by, **pending_superseded}
         return SidecarIngestReceipt(core_state, adapter_id, authority_sha256,
                                     core_fact_ids, source.sha256,
                                     "authorized sidecar batch atomically committed" if
