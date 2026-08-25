@@ -295,7 +295,7 @@ jobs:
 
       - name: Install exact Android native toolchain
         run: |
-          sdkmanager --channel=3 "platforms;android-37" "build-tools;36.0.0" \
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" \
             "ndk;28.2.13676358" "cmake;3.22.1"
 
       - name: Resolve, package and compile arm64 without launching

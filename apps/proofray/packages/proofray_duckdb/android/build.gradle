@@ -22,7 +22,9 @@ apply plugin: "com.android.library"
 
 android {
     namespace = "io.proofray.proofray_duckdb"
-    compileSdk = 37
+    // Kept in sync with the app module's own compileSdk -- see the comment
+    // in android/app/build.gradle.kts for why this isn't 37.
+    compileSdk = 36
     ndkVersion = "28.2.13676358"
     defaultConfig {
         minSdk = 29
