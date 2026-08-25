@@ -15,9 +15,11 @@ if ! command -v "$proofray_flutter_bin" >/dev/null 2>&1; then
   exit 1
 fi
 
-machine="$("$proofray_flutter_bin" --version --machine)"
-revision="$(printf '%s' "$machine" | "$proofray_python_bin" -c 'import json,sys; print(json.load(sys.stdin)["frameworkRevision"])')"
-dart_version="$(printf '%s' "$machine" | "$proofray_python_bin" -c 'import json,sys; print(json.load(sys.stdin)["dartSdkVersion"])')"
+machine="$("$proofray_flutter_bin" --version --machine 2>&1)"
+# A cold Flutter checkout may build the tool before printing the machine JSON.
+# Keep the lock check deterministic while tolerating that bootstrap preamble.
+revision="$(printf '%s' "$machine" | "$proofray_python_bin" -c 'import json,sys; raw=sys.stdin.read(); start=raw.find("{"); assert start >= 0, raw; print(json.JSONDecoder().raw_decode(raw[start:])[0]["frameworkRevision"])')"
+dart_version="$(printf '%s' "$machine" | "$proofray_python_bin" -c 'import json,sys; raw=sys.stdin.read(); start=raw.find("{"); assert start >= 0, raw; print(json.JSONDecoder().raw_decode(raw[start:])[0]["dartSdkVersion"])')"
 
 if [[ "$revision" != "$expected_flutter" || "$dart_version" != "$expected_dart" ]]; then
   echo "Toolchain mismatch: Flutter=$revision Dart=$dart_version" >&2

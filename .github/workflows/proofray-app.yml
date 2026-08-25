@@ -229,8 +229,9 @@ jobs:
           SERIOUS_PYTHON_APP: ${{ github.workspace }}/apps/proofray/build/python-app/Linux
           SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/apps/proofray/build/site-packages/Linux
         run: >-
-          xvfb-run -a flutter test -d linux --profile
-          integration_test/bit_horizon_performance_test.dart
+          xvfb-run -a flutter drive --profile -d linux
+          --driver=test_driver/integration_test.dart
+          --target=integration_test/bit_horizon_performance_test.dart
 
       - name: Exercise native onboarding, recall marker and restart
         working-directory: apps/proofray
@@ -240,7 +241,7 @@ jobs:
           SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/apps/proofray/build/site-packages/Linux
           XDG_DATA_HOME: ${{ runner.temp }}/proofray-native-acceptance
         run: >-
-          xvfb-run -a flutter test -d linux --profile
+          xvfb-run -a flutter test -d linux
           integration_test/proofray_native_acceptance_test.dart
 
       - name: Require native libraries and publish size evidence
