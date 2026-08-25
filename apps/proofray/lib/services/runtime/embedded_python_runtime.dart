@@ -92,7 +92,15 @@ class EmbeddedPythonRuntime {
   }
 
   Future<int> _waitForPort(File runtime) async {
-    final DateTime deadline = DateTime.now().add(const Duration(seconds: 12));
+    // A cold embedded interpreter (CPython + NumPy + horizon_memory import)
+    // on a freshly provisioned CI runner can take well over ten seconds to
+    // bind its bridge socket and publish runtime.json; 12s was measured to
+    // be too tight on hosted Linux/Windows GitHub Actions runners and made
+    // the app surface a permanent "LOCAL CORE UNAVAILABLE" error before the
+    // process had a real chance to start. 30s leaves headroom under the
+    // acceptance test's own 45s "STARTING LOCAL CORE" tolerance for the
+    // bridge connect + auth handshake (up to 10s) that follows this wait.
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
     while (DateTime.now().isBefore(deadline)) {
       if (await runtime.exists()) {
         try {
