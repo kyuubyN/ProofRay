@@ -1,4 +1,4 @@
-name: ProofRay app candidate
+name: ProofRay Linux Alpha candidate
 
 on:
   pull_request:
@@ -17,7 +17,15 @@ on:
       - "src/proofray/**"
       - "pyproject.toml"
       - ".github/workflows/proofray-app.yml"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      run_experimental_platforms:
+        description: >-
+          Also run the non-release Windows and Android feasibility builds.
+          These jobs are diagnostics, not a platform-support claim.
+        required: true
+        type: boolean
+        default: false
 
 concurrency:
   group: proofray-app-${{ github.ref }}
@@ -25,7 +33,11 @@ concurrency:
 
 jobs:
   windows-import-contract:
-    name: Windows embedded feasibility build
+    # Windows has early-user reports, but no owner-controlled device matrix or
+    # release artifact yet. Keep the smoke test available for investigation;
+    # do not make an unverified platform block the Linux Alpha release.
+    if: github.event_name == 'workflow_dispatch' && inputs.run_experimental_platforms
+    name: Windows experimental feasibility (manual)
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -284,7 +296,11 @@ jobs:
             apps/proofray/build/linux-bundle-size.txt
 
   android-arm64-feasibility-build:
-    name: Android arm64 embedded feasibility build
+    # An APK payload can compile on hosted CI, but that does not validate a
+    # physical Android device. This remains an explicit manual diagnostic
+    # until the Android release gates have real-device evidence.
+    if: github.event_name == 'workflow_dispatch' && inputs.run_experimental_platforms
+    name: Android arm64 experimental feasibility (manual)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

@@ -31,9 +31,10 @@ leaves your computer unless you choose to connect one yourself.
 > false memories; it is not a claim that alpha software can never contain an ingestion, routing or
 > interpretation bug.
 
-The core has also been successfully run by early testers on **Windows**. Automated release CI
-currently covers Ubuntu with Python 3.10–3.13, so Windows support should still be considered
-early-user validated rather than part of the automated compatibility matrix.
+The public native-app Alpha release surface is **Linux x86_64 via AppImage**. The core has also
+been run by early testers on Windows, but Windows and Android remain experimental ports: their
+feasibility checks are manual diagnostics, not release-support claims, until they have controlled
+device validation and distributable artifacts.
 
 The current limitation is semantic coverage, not an attempt to hide uncertainty: ProofRay does not
 yet provide universal natural-language mapping. The parts that read and understand questions have
@@ -130,12 +131,12 @@ the repeated tool cycles. The run used `mongomock`, 979 input tokens, 110 output
 of accumulated provider latency. This is an integration and authority-boundary smoke test, not an
 answer-accuracy benchmark.
 
-## The native app (in development)
+## The native app (Linux Alpha)
 
-The local-first Flutter client lives in [`apps/proofray`](apps/proofray/README.md). It targets
-Android, Linux and Windows, and runs an embedded CPython 3.12 core inside the same process as the
-interface, so the memory engine is not a service you have to start and stop: opening the app starts
-it, closing the app ends it. Conversations live in an encrypted Flutter-owned SQLite database.
+The local-first Flutter client lives in [`apps/proofray`](apps/proofray/README.md). Its public Alpha
+package is a Linux x86_64 AppImage. It runs an embedded CPython 3.12 core inside the same process as
+the interface, so the memory engine is not a service you have to start and stop: opening the app
+starts it, closing the app ends it. Conversations live in an encrypted Flutter-owned SQLite database.
 
 Inside it you get the chat, the proof Observatory beside every answer, a pane listing the memories
 ProofRay is authorized to hold (each removable), and setup for providers and data sources.
@@ -169,10 +170,10 @@ evidence that the path works end to end, not as a number about how well it works
 that do carry numbers, along with what each of them does and does not establish, are in
 [Benchmarks and claim boundaries](docs/BENCHMARKS.md).
 
-The app is not a downloadable release yet: platform equivalence, encryption and packaging gates are
-listed in [`RELEASE_GATES.md`](apps/proofray/docs/RELEASE_GATES.md). It keeps the same contract as
-the Python package — a model may write or call ProofRay, but only the deterministic engine can
-attach proof authority.
+Linux release evidence and remaining platform gates are listed in
+[`RELEASE_GATES.md`](apps/proofray/docs/RELEASE_GATES.md). Windows and Android are intentionally
+not advertised as downloadable releases yet. The app keeps the same contract as the Python package
+— a model may write or call ProofRay, but only the deterministic engine can attach proof authority.
 
 ## Try it in two minutes
 

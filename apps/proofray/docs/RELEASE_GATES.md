@@ -2,6 +2,18 @@
 
 No unchecked row is a claim of support.
 
+## Platform release status
+
+| Platform | Public status | CI policy |
+|---|---|---|
+| Linux x86_64 | **Public Alpha** as an AppImage | Required on pull requests: native acceptance, packaging and shared contracts. |
+| Windows x86_64 | Experimental | Manual feasibility workflow only; no release claim. |
+| Android arm64 | Experimental | Manual feasibility workflow only; no physical-device claim. |
+
+The Linux release claim is deliberately narrower than “all v1 targets work.”
+Hosted compilation is useful evidence, but it cannot substitute for testing the
+secure store, lifecycle and bridge on a device the project controls.
+
 ## Feasibility spike
 
 - [ ] Flutter 3.47.1 / Dart lock verified.
@@ -19,7 +31,8 @@ Linux evidence already closed headlessly:
 - [x] CPython 3.12.13 package imports core, NumPy and every pure connector driver.
 - [x] Twenty frozen cases reproduce the complete desktop digest exactly.
 - [x] Repository DuckDB FFI opens, creates only the dedicated namespace and discovers it.
-- [ ] Full Flutter Linux bundle awaits the CI image because this workstation lacks GTK headers.
+- [x] Full Flutter Linux bundle builds and runs its native first-launch,
+      encrypted-memory, recall-marker and restart acceptance path on CI.
 
 ## Storage and recovery
 
@@ -55,7 +68,8 @@ Linux headless storage evidence:
 - [x] Green brain appears iff `memory_consulted=true`.
 - [x] Model rewrite failure always displays exact certified text.
 - [x] Personal-memory abstention never falls through to general model priors.
-- [ ] First-launch acceptance path passes through restart with byte-identical proof.
+- [x] Linux first-launch acceptance path passes through restart with the
+      expected reopened evidence and proof state in CI.
 
 Headless product evidence:
 

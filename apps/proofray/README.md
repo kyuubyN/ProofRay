@@ -3,15 +3,19 @@
 Native, local-first Flutter client for ProofRay. The UI does not use Flet and
 model output never becomes memory authority automatically.
 
-## Targets and pinned runtime
+## Release surface and pinned runtime
 
-- Android 10+ arm64 (`minSdk` 29; Serious Python itself requires at least 23)
-- Linux x86_64
-- Windows 10+ x86_64
+| Platform | Status | Evidence boundary |
+|---|---|---|
+| Linux x86_64 | **Public Alpha** | AppImage packaging and native first-launch/restart acceptance run in CI. |
+| Windows 10+ x86_64 | Experimental | Early-user reports and manual hosted feasibility only; no release artifact claim. |
+| Android 10+ arm64 | Experimental | APK compilation diagnostic only; no physical-device validation. |
+
+- Android uses `minSdk` 29; Serious Python itself requires at least 23.
 - Flutter 3.47.1 at `6655482ec06e547f90abf8ae7590466f4415978d`
 - embedded CPython 3.12.13 through Serious Python 4.5.1
-- pinned `tzdata 2026.3`, so IANA profile clocks reopen identically on Windows,
-  Android and Linux even when the operating system has no zoneinfo database
+- pinned `tzdata 2026.3`, so IANA profile clocks use the same pinned database
+  across the three implementation targets
 
 The complete toolchain lock is in `toolchain.lock.json`. iOS, accounts, cloud
 sync, continuous background synchronization and on-device model execution are
@@ -131,7 +135,8 @@ by the exact pinned Flutter revision, applies Android 10 (`minSdk 29`), resolves
 the versioned Dart lockfile and generates Drift code. It never builds or launches
 the app and refuses to overwrite an existing platform directory.
 
-The app has deliberately not been launched in the current implementation run.
-Until the feasibility and release matrices in `docs/RELEASE_GATES.md` are filled
-with real artifacts, this directory is an implementation candidate, not a
-published binary claim.
+The Linux Alpha is validated by native CI, including first launch, encrypted
+storage, a recall marker and restart. It is the only packaged release surface.
+The Windows and Android shells remain implementation candidates until their
+platform-specific rows in [`docs/RELEASE_GATES.md`](docs/RELEASE_GATES.md) have
+real-device evidence.
