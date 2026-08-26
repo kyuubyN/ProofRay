@@ -1,0 +1,7 @@
+# Managed by the ProofRay repository. Do not update without passing the
+# embedded-runtime equivalence gate on every v1 platform.
+version:
+  revision: "6655482ec06e547f90abf8ae7590466f4415978d"
+  channel: stable
+
+project_type: app

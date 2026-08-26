@@ -30,13 +30,30 @@ class StandaloneCausalMemory:
     u8 Horizon store.
     """
 
-    def __init__(self, scope: str):
+    def __init__(self, scope: str, *, _defer_publication: bool = False):
         if not scope:
             raise ValueError("standalone causal memory needs one explicit scope")
         self.scope = scope
         self._facts: dict[int, TypedCausalFact] = {}
         self._sources: dict[str, CausalSourceEnvelope] = {}
         self._executor: TypedCausalExecutor | None = None
+        self._defer_publication = _defer_publication
+
+    def _fork_for_atomic_update(self) -> "StandaloneCausalMemory":
+        """Copy mutable state while sharing the immutable published executor."""
+        staged = StandaloneCausalMemory(self.scope)
+        staged._facts = dict(self._facts)
+        staged._sources = dict(self._sources)
+        staged._executor = self._executor
+        return staged
+
+    def _finalize_publication(self) -> None:
+        """Build one query index after a private, sequential recovery replay."""
+        if not self._defer_publication:
+            return
+        self._executor = (TypedCausalExecutor(tuple(sorted(self._facts.values())), self.scope)
+                          if self._facts else None)
+        self._defer_publication = False
 
     def ingest(self, adapter: CausalIngestAdapter,
                batch: CausalAdapterBatch) -> CausalIngestReceipt:
@@ -77,15 +94,23 @@ class StandaloneCausalMemory:
             return CausalIngestReceipt("IDEMPOTENT", adapter_id,
                                        tuple(fact.fact_id for fact in proposed), source.sha256,
                                        "identical batch already committed")
-        prospective = {**self._facts, **{fact.fact_id: fact for fact in novel}}
-        known = set(prospective)
+        novel_by_id = {fact.fact_id: fact for fact in novel}
+        known = set(self._facts) | set(novel_by_id)
         missing = tuple(sorted({cause for fact in novel for cause in fact.causes if cause not in known}))
         if missing:
             return CausalIngestReceipt("REJECTED_CAUSAL", adapter_id, missing, source.sha256,
                                        "causal edge references an unknown FactId")
-        # Construct before publication: failure cannot leave a partial batch.
-        executor = TypedCausalExecutor(tuple(sorted(prospective.values())), self.scope)
-        self._facts = prospective
+        if self._defer_publication:
+            # Recovery owns this unpublished object exclusively.  Mutating it in
+            # place avoids an O(N^2) series of dictionary copies and query-index
+            # rebuilds; `_finalize_publication` constructs the index exactly once.
+            self._facts.update(novel_by_id)
+            executor = None
+        else:
+            prospective = {**self._facts, **novel_by_id}
+            # Construct before publication: failure cannot leave a partial batch.
+            executor = TypedCausalExecutor(tuple(sorted(prospective.values())), self.scope)
+            self._facts = prospective
         self._sources[source.source_id] = source
         self._executor = executor
         return CausalIngestReceipt("APPLIED", adapter_id,

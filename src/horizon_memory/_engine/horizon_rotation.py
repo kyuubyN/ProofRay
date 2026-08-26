@@ -28,13 +28,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import fcntl
 import os
 import struct
 from dataclasses import dataclass, replace
 from enum import IntEnum
 
 from horizon_memory._engine.horizon_batch import LeaseState, ROTATION_NOT_NEEDED as _NOT_NEEDED
+from horizon_memory._engine import file_lock as fcntl
 
 _LEASE_OWNED_BY_PREPARED = LeaseState.OWNED_BY_PREPARED
 from horizon_memory._engine.horizon_manifest import WalSegmentDescriptor

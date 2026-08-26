@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-import fcntl
 import os
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from .causal_adapter_protocol import CausalAdapterBatch, CausalIngestAdapter
 from .durable_causal_memory import CausalDeleteReceipt, DurableCausalMemory
 from .standalone_causal_memory import CausalIngestReceipt
 from .typed_causal_program import TypedCausalProgram, TypedCausalResult
+from ._engine import file_lock as fcntl
 
 
 class ConcurrentDurableCausalMemory:

@@ -1,0 +1,16 @@
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+lib/storage/app_database.g.dart
+python/build/
+python/__pycache__/
+*.pyc
+*.iml
+
+# Golden-test diff output, written on every failed comparison.
+test/failures/
+
+# Local release artifacts; the AppImage is attached to a GitHub release.
+build/appimage/

@@ -43,3 +43,7 @@ horizon_memory = ["resources/wordnet-3.0/*"]
 testpaths = ["tests"]
 addopts = "-ra"
 pythonpath = ["src"]
+markers = [
+    "slow: opt-in feasibility or performance validation",
+    "integration: requires explicitly provisioned external services",
+]

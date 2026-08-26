@@ -1,0 +1,41 @@
+group = "io.proofray.proofray_duckdb"
+version = "1.0"
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:9.1.1")
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+
+android {
+    namespace = "io.proofray.proofray_duckdb"
+    // Kept in sync with the app module's own compileSdk -- see the comment
+    // in android/app/build.gradle.kts for why this isn't 37.
+    compileSdk = 36
+    ndkVersion = "28.2.13676358"
+    defaultConfig {
+        minSdk = 29
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = "../src/CMakeLists.txt"
+            version = "3.22.1"
+        }
+    }
+}

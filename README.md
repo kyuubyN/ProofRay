@@ -31,9 +31,10 @@ leaves your computer unless you choose to connect one yourself.
 > false memories; it is not a claim that alpha software can never contain an ingestion, routing or
 > interpretation bug.
 
-The core has also been successfully run by early testers on **Windows**. Automated release CI
-currently covers Ubuntu with Python 3.10–3.13, so Windows support should still be considered
-early-user validated rather than part of the automated compatibility matrix.
+The public native-app Alpha release surface is **Linux x86_64 via AppImage**. The core has also
+been run by early testers on Windows, but Windows and Android remain experimental ports: their
+feasibility checks are manual diagnostics, not release-support claims, until they have controlled
+device validation and distributable artifacts.
 
 The current limitation is semantic coverage, not an attempt to hide uncertainty: ProofRay does not
 yet provide universal natural-language mapping. The parts that read and understand questions have
@@ -129,6 +130,50 @@ both tool requests with the original question unchanged, and produced byte-ident
 the repeated tool cycles. The run used `mongomock`, 979 input tokens, 110 output tokens and 18.27 s
 of accumulated provider latency. This is an integration and authority-boundary smoke test, not an
 answer-accuracy benchmark.
+
+## The native app (Linux Alpha)
+
+The local-first Flutter client lives in [`apps/proofray`](apps/proofray/README.md). Its public Alpha
+package is a Linux x86_64 AppImage. It runs an embedded CPython 3.12 core inside the same process as
+the interface, so the memory engine is not a service you have to start and stop: opening the app
+starts it, closing the app ends it. Conversations live in an encrypted Flutter-owned SQLite database.
+
+Inside it you get the chat, the proof Observatory beside every answer, a pane listing the memories
+ProofRay is authorized to hold (each removable), and setup for providers and data sources.
+
+**Memory is shared across conversations, deliberately.** Something you said in one chat can be
+recalled in another, because that is what a personal memory is for. Only plainly declarative turns
+become memory: questions stay in history, and a greeting carries no fact worth keeping.
+
+### Bring your own model, or run one locally
+
+The provider picker in the chat lists whatever is actually set up — an API provider you saved, a
+local model on disk, or no AI at all — and the choice survives a restart.
+
+For local models the app installs an official [llama.cpp](https://github.com/ggml-org/llama.cpp)
+build for your machine and serves GGUF files from a folder you control. Both downloads are verified
+against the SHA-256 the source itself publishes (GitHub for the engine, Hugging Face for the model
+files) before anything is unpacked, kept or executed. Models are browsed live on Hugging Face rather
+than from a list baked into the app, and any `.gguf` you drop into the folder yourself is picked up
+the same way.
+
+### One thing it demonstrated
+
+On 2026-08-26, a **Qwen2.5 3B Instruct quantised to Q2_K** — a small model, heavily compressed,
+running locally through llama.cpp `b10630` — answered a recall question correctly because ProofRay
+supplied the attested fact and the model only had to phrase it. That is the whole application
+hypothesis in one run: identity, time and context come from memory, so the model can spend its
+limited capacity on the language.
+
+It is a demonstration, not a measurement: one question, no control arm, no held-out set. Read it as
+evidence that the path works end to end, not as a number about how well it works. The benchmarks
+that do carry numbers, along with what each of them does and does not establish, are in
+[Benchmarks and claim boundaries](docs/BENCHMARKS.md).
+
+Linux release evidence and remaining platform gates are listed in
+[`RELEASE_GATES.md`](apps/proofray/docs/RELEASE_GATES.md). Windows and Android are intentionally
+not advertised as downloadable releases yet. The app keeps the same contract as the Python package
+— a model may write or call ProofRay, but only the deterministic engine can attach proof authority.
 
 ## Try it in two minutes
 
@@ -243,6 +288,21 @@ contested worlds, and reopens a certificate bound to every context intent and au
 Its current MemGym consumed-development proof coverage is 6/120, so it is not enabled by default and
 is not advertised as MemGym answer accuracy. `ProofCascadeResolver` is the ready-made opt-in order:
 scalar proof first, explanatory proof second, ordinary engine evidence fallback last.
+
+## Ways to use it
+
+The same engine, reached four different ways. Whichever you pick, proof authority stays in the
+deterministic core.
+
+- **The Python SDK** — `pip install proofray`. The library shown above: `ProofRayMemory` for the
+  storage layer and `ProofRayAnswerEngine` for asking questions in plain language. This is the
+  surface everything else is built on, and the one to use when ProofRay is part of your own program.
+- **An HTTP API** — a small local server for calling it from any language, documented in
+  [`api/README.md`](api/README.md). Answers carry the same evidence and proof fields as the library.
+- **MCP** — the same answers exposed as a tool a chat assistant can call for itself, so Claude
+  Desktop or Cursor can ask ProofRay questions mid-conversation.
+- **The native app** — the desktop and mobile client described above, for using it directly rather
+  than building on it.
 
 ## What can you connect it to?
 

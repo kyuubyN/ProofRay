@@ -91,7 +91,10 @@ from .typed_sidecar import (
 )
 from .durable_causal_memory import CausalDeleteReceipt, DurableCausalMemory
 from .concurrent_durable_memory import ConcurrentDurableCausalMemory
-from .durable_typed_sidecar import DurableAuthorizedSidecarMemory
+from .durable_typed_sidecar import (
+    AuthorizedSidecarRecordStore, DurableAuthorizedSidecarMemory,
+    FileAuthorizedSidecarRecordStore, MemoryAuthorizedSidecarRecordStore,
+)
 from .open_text_memory import (
     MEMGYM_REFERENCE_PROFILE, OpenTextAtomicRelationResult, OpenTextAtomicRelationResultPT,
     OpenTextEvidenceResult, OpenTextHorizonMemory,
@@ -188,7 +191,8 @@ __all__ = [
     "SidecarIngestReceipt", "AuthorizedSidecarMemory",
     "SidecarLimits",
     "ConcurrentDurableCausalMemory",
-    "DurableAuthorizedSidecarMemory",
+    "AuthorizedSidecarRecordStore", "DurableAuthorizedSidecarMemory",
+    "FileAuthorizedSidecarRecordStore", "MemoryAuthorizedSidecarRecordStore",
     "MEMGYM_REFERENCE_PROFILE", "OpenTextAtomicRelationResult", "OpenTextAtomicRelationResultPT",
     "OpenTextEvidenceResult",
     "OpenTextHorizonMemory", "BinaryQueryDemand", "BinarySpanReading",

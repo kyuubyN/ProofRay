@@ -19,7 +19,6 @@ Ordem intra-batch: o `enqueue_ticket`, atribuído atomicamente na admissão (FIF
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import hmac
 import os
@@ -32,6 +31,7 @@ from enum import IntEnum
 from pathlib import Path
 
 from horizon_memory._engine.horizon_durability import open_hardened_lock
+from horizon_memory._engine import file_lock as fcntl
 from horizon_memory._engine.horizon_store import (
     BASE_ABSENT,
     BASE_ABSTAIN,

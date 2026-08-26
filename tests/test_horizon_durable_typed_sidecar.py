@@ -8,7 +8,8 @@ import pytest
 
 from horizon_memory import (
     AttestedSidecarFact, CausalAdapterBatch, CausalSelector, CausalSourceEnvelope,
-    DeterministicCausalCompiler, DurableAuthorizedSidecarMemory, SidecarAuthority,
+    DeterministicCausalCompiler, DurableAuthorizedSidecarMemory,
+    MemoryAuthorizedSidecarRecordStore, SidecarAuthority,
     SidecarLifecycle, StructuredCausalDeclaration, TypedCausalProgram,
 )
 
@@ -30,11 +31,12 @@ class Adapter:
         return (AttestedSidecarFact.seal(fact, self.authority, self.lifecycle),)
 
 
-def _batch(fid=1, value="ready", version=1, source_id="s", asserted=True):
+def _batch(fid=1, value="ready", version=1, source_id="s", asserted=True,
+           event_id="device-state"):
     return CausalAdapterBatch(source_id, value, "scope", (
         StructuredCausalDeclaration(
             fid, "scope", "device", "state", value, (0, len(value)), version,
-            version, version=version, asserted=asserted, event_id="device-state"),))
+            version, version=version, asserted=asserted, event_id=event_id),))
 
 
 def test_durable_sidecar_reopens_authority_lifecycle_and_query_index(tmp_path):
@@ -55,6 +57,66 @@ def test_idempotent_retry_does_not_append_a_second_record(tmp_path):
     assert memory.ingest(Adapter(), _batch()).state == "APPLIED"
     assert memory.ingest(Adapter(), _batch()).state == "IDEMPOTENT"
     assert memory.record_count == 1
+
+
+def test_append_validates_serialized_delta_without_replaying_prior_ledger(tmp_path, monkeypatch):
+    memory = DurableAuthorizedSidecarMemory("scope", tmp_path / "s.jsonl", (AUTHORITY,))
+    assert memory.ingest(Adapter(), _batch()).state == "APPLIED"
+
+    def unexpected_replay(_records):
+        raise AssertionError("ordinary append must not replay the prior ledger")
+
+    monkeypatch.setattr(memory, "_recover", unexpected_replay)
+    receipt = memory.ingest(
+        Adapter(), _batch(2, "online", 1, "s2", event_id="device-state:2"))
+    assert receipt.state == "APPLIED"
+    assert memory.record_count == 2 and memory.fact_count == 2
+
+
+def test_append_never_reencodes_an_unchanged_canonical_prefix(monkeypatch):
+    store = MemoryAuthorizedSidecarRecordStore()
+    memory = DurableAuthorizedSidecarMemory(
+        "scope", authorities=(AUTHORITY,), record_store=store)
+    assert memory.ingest(Adapter(), _batch()).state == "APPLIED"
+
+    import horizon_memory.durable_typed_sidecar as durable_module
+    original = durable_module._canonical
+
+    def guarded(value):
+        if isinstance(value, dict) and value.get("sequence") == 1:
+            raise AssertionError("unchanged sidecar prefix was re-encoded")
+        return original(value)
+
+    monkeypatch.setattr(durable_module, "_canonical", guarded)
+    receipt = memory.ingest(
+        Adapter(), _batch(2, "online", 1, "s2", event_id="device-state:2"))
+    assert receipt.state == "APPLIED"
+    assert len(store.load()) == 2
+
+
+def test_recovery_builds_query_executor_once_after_sequential_validation(
+        tmp_path, monkeypatch):
+    path = tmp_path / "s.jsonl"
+    memory = DurableAuthorizedSidecarMemory("scope", path, (AUTHORITY,))
+    for index in range(1, 17):
+        assert memory.ingest(Adapter(), _batch(
+            index, f"value-{index}", 1, f"source-{index}",
+            event_id=f"device-state:{index}")).state == "APPLIED"
+
+    import horizon_memory.standalone_causal_memory as standalone_module
+    original = standalone_module.TypedCausalExecutor
+    constructions = 0
+
+    class CountingExecutor(original):
+        def __init__(self, facts, scope):
+            nonlocal constructions
+            constructions += 1
+            super().__init__(facts, scope)
+
+    monkeypatch.setattr(standalone_module, "TypedCausalExecutor", CountingExecutor)
+    reopened = DurableAuthorizedSidecarMemory("scope", path, (AUTHORITY,))
+    assert reopened.fact_count == 16
+    assert constructions == 1
 
 
 def test_invalid_update_is_never_written(tmp_path):
@@ -120,3 +182,81 @@ def test_v1_attested_fact_serialization_remains_metadata_free(tmp_path):
     assert "route_metadata" not in record["facts"][0]
     reopened = DurableAuthorizedSidecarMemory("scope", path, (AUTHORITY,))
     assert reopened.attested_facts()[0].route_metadata is None
+
+
+def test_abstract_record_store_commits_before_index_publication():
+    store = MemoryAuthorizedSidecarRecordStore()
+    memory = DurableAuthorizedSidecarMemory(
+        "scope", authorities=(AUTHORITY,), record_store=store)
+    store.fail_next_replace = True
+    rejected = memory.ingest(Adapter(), _batch())
+    assert rejected.state == "REJECTED_DURABILITY"
+    assert memory.fact_count == 0 and memory.record_count == 0 and store.load() == ()
+
+    applied = memory.ingest(Adapter(), _batch())
+    assert applied.state == "APPLIED" and memory.fact_count == 1
+    reopened = DurableAuthorizedSidecarMemory(
+        "scope", authorities=(AUTHORITY,), record_store=store)
+    assert reopened.fact_count == 1
+    assert reopened.ledger_head_sha256 == memory.ledger_head_sha256
+
+
+def test_compiler_crash_cannot_mutate_host_records_or_published_index():
+    class CrashingAdapter(Adapter):
+        def compile_sidecar(self, batch):
+            raise RuntimeError("injected compiler crash")
+
+    store = MemoryAuthorizedSidecarRecordStore()
+    memory = DurableAuthorizedSidecarMemory(
+        "scope", authorities=(AUTHORITY,), record_store=store)
+
+    receipt = memory.ingest(CrashingAdapter(), _batch())
+
+    assert receipt.state == "REJECTED_ADAPTER"
+    assert "injected compiler crash" in receipt.reason
+    assert store.load() == ()
+    assert memory.fact_count == 0 and memory.record_count == 0
+
+
+def test_abstract_store_and_file_backend_share_exact_record_bytes(tmp_path):
+    path = tmp_path / "same.jsonl"
+    file_memory = DurableAuthorizedSidecarMemory("scope", path, (AUTHORITY,))
+    assert file_memory.ingest(Adapter(), _batch()).state == "APPLIED"
+    record = path.read_bytes().removesuffix(b"\n")
+
+    store = MemoryAuthorizedSidecarRecordStore((record,))
+    hosted = DurableAuthorizedSidecarMemory(
+        "scope", authorities=(AUTHORITY,), record_store=store)
+    assert hosted.ledger_head_sha256 == file_memory.ledger_head_sha256
+    assert hosted.attested_facts() == file_memory.attested_facts()
+
+
+def test_purge_rechains_and_revalidates_before_publication():
+    store = MemoryAuthorizedSidecarRecordStore()
+    memory = DurableAuthorizedSidecarMemory(
+        "scope", authorities=(AUTHORITY,), record_store=store)
+    assert memory.ingest(Adapter(), _batch(1, "ready", 1, "s1")).state == "APPLIED"
+    assert memory.ingest(
+        Adapter(), _batch(2, "online", 1, "s2", event_id="device-state:2")).state == "APPLIED"
+    old_head = memory.ledger_head_sha256
+    receipt = memory.purge_source("s1")
+    assert receipt.state == "PURGED" and receipt.removed_fact_ids == (1,)
+    assert receipt.previous_head_sha256 == old_head
+    assert receipt.new_head_sha256 == memory.ledger_head_sha256 != old_head
+    assert memory.fact_count == 1 and memory.record_count == 1
+    reopened = DurableAuthorizedSidecarMemory(
+        "scope", authorities=(AUTHORITY,), record_store=store)
+    assert tuple(item.fact.fact_id for item in reopened.attested_facts()) == (2,)
+
+
+def test_failed_purge_commit_does_not_change_published_index():
+    store = MemoryAuthorizedSidecarRecordStore()
+    memory = DurableAuthorizedSidecarMemory(
+        "scope", authorities=(AUTHORITY,), record_store=store)
+    assert memory.ingest(Adapter(), _batch()).state == "APPLIED"
+    old_head = memory.ledger_head_sha256
+    store.fail_next_replace = True
+    receipt = memory.purge_fact_ids((1,), source_id="s")
+    assert receipt.state == "REJECTED_DURABILITY"
+    assert memory.fact_count == 1 and memory.record_count == 1
+    assert memory.ledger_head_sha256 == old_head

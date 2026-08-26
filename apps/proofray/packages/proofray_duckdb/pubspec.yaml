@@ -1,0 +1,23 @@
+name: proofray_duckdb
+description: Repository-owned, read-only DuckDB host adapter for ProofRay.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+
+dependencies:
+  dart_duckdb:
+    path: ../dart_duckdb_core
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true

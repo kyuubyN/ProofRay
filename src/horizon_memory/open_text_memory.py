@@ -28,7 +28,10 @@ from .typed_sidecar import (
     SidecarFactDeclaration, SidecarIngestReceipt, SidecarLifecycle,
     SidecarObservedIntent, SidecarRouteMetadata,
 )
-from .durable_typed_sidecar import DurableAuthorizedSidecarMemory
+from .durable_typed_sidecar import (
+    AuthorizedSidecarRecordStore, DurableAuthorizedSidecarMemory,
+)
+from .durable_causal_memory import CausalDeleteReceipt
 from .english_atomic_relations import (
     EnglishAtomicRelationCompiler, EnglishAtomicRelationResult,
 )
@@ -87,8 +90,10 @@ class OpenTextHorizonMemory:
                  profile: EngineProfile | None = None,
                  candidate_generator: CandidateGenerator | None = None,
                  ledger_path: str | Path | None = None,
+                 record_store: AuthorizedSidecarRecordStore | None = None,
                  pt_lexicon=None):
-        if scope_id < 0 or not session_id or not purpose:
+        if (scope_id < 0 or not session_id or not purpose
+                or ledger_path is not None and record_store is not None):
             raise ValueError("open-text memory needs scope, session and purpose")
         self.scope_id = scope_id
         self.scope = str(scope_id)
@@ -96,10 +101,12 @@ class OpenTextHorizonMemory:
         self.authority = SidecarAuthority(
             "open-text-span-v1", "lossless-surface-document", 1,
             OPEN_TEXT_SCHEMA_SHA256, (self.scope,), ("surface_document",), purpose)
-        self._sidecar = (AuthorizedSidecarMemory(self.scope, (self.authority,))
-                         if ledger_path is None else
-                         DurableAuthorizedSidecarMemory(
-                             self.scope, Path(ledger_path), (self.authority,)))
+        self._sidecar = (
+            AuthorizedSidecarMemory(self.scope, (self.authority,))
+            if ledger_path is None and record_store is None else
+            DurableAuthorizedSidecarMemory(
+                self.scope, None if ledger_path is None else Path(ledger_path),
+                (self.authority,), record_store=record_store))
         self._documents, self._context_intents = self._state_from_sidecar()
         self._evidence_index = None
         self._turn_index = None
@@ -277,6 +284,241 @@ class OpenTextHorizonMemory:
         return self._engine.answer(
             question, self._documents,
             context_intents=self._context_intents if context_intents is None else context_intents)
+
+    def documents_snapshot(self) -> tuple[RouteDocument, ...]:
+        """Return the immutable active routing snapshot, never the mutable index."""
+        return self._documents
+
+    def answer_excluding_sources(self, question: str,
+                                 source_ids: tuple[str, ...]) -> AnsweredResult | None:
+        """Answer while excluding exact route sources from the verified snapshot.
+
+        This is an idempotent outbox boundary: a just-committed user turn can
+        never answer the question that caused that same operation.
+        """
+        if (not question or source_ids != tuple(sorted(set(source_ids)))
+                or any(not isinstance(item, str) or not item for item in source_ids)):
+            raise ValueError("open-text exclusion needs a question and canonical sources")
+        excluded = set(source_ids)
+        documents = tuple(item for item in self._documents if item.source not in excluded)
+        if not documents:
+            return None
+        if any(not self._sidecar.verify_attestation(item.fact_id) for item in documents):
+            raise RuntimeError("open-text source authority failed revalidation")
+        fact_ids = {item.fact_id for item in documents}
+        intents = tuple(item for item in self._context_intents
+                        if set(item.fact_ids) <= fact_ids)
+        return self._engine.answer(question, documents, context_intents=intents)
+
+    def purge_source(self, source_id: str) -> CausalDeleteReceipt:
+        """Remove one RouteDocument source from durable authority.
+
+        A source can span multiple FactIds.  The durable sidecar removes the
+        complete matching set, rechains the ledger, revalidates the surviving
+        field and commits it before this facade publishes the new snapshot.
+        """
+        if not source_id:
+            raise ValueError("open-text purge requires an exact source identity")
+        return self.purge_sources((source_id,))
+
+    def purge_sources(self, source_ids: tuple[str, ...]) -> CausalDeleteReceipt:
+        """Atomically remove a canonical set of RouteDocument sources."""
+        if (not source_ids or source_ids != tuple(sorted(set(source_ids)))
+                or any(not isinstance(item, str) or not item for item in source_ids)):
+            raise ValueError("open-text purge requires canonical source identities")
+        if not isinstance(self._sidecar, DurableAuthorizedSidecarMemory):
+            raise RuntimeError("open-text purge requires a durable record store")
+        selected = set(source_ids)
+        fact_ids = tuple(sorted(
+            document.fact_id for document in self._documents
+            if document.source in selected))
+        if not fact_ids:
+            head = self._sidecar.ledger_head_sha256
+            return CausalDeleteReceipt(
+                "REJECTED_NOT_FOUND", source_ids[0], (), head, head,
+                "route source is absent from open-text memory")
+        purge_identity = source_ids[0] if len(source_ids) == 1 else \
+            "source-set:" + hashlib.sha256("\x00".join(source_ids).encode()).hexdigest()
+        receipt = self._sidecar.purge_fact_ids(fact_ids, source_id=purge_identity)
+        if receipt.state != "PURGED":
+            return receipt
+        self._engine.invalidate_prepared_runtime()
+        self._documents, self._context_intents = self._state_from_sidecar()
+        self._evidence_index = None
+        self._turn_index = None
+        return receipt
+
+    def purge_batch_source_prefix(self, prefix: str) -> CausalDeleteReceipt:
+        """Remove durable import batches by their sealed batch-source prefix."""
+        if not prefix:
+            raise ValueError("open-text batch prefix is required")
+        if not isinstance(self._sidecar, DurableAuthorizedSidecarMemory):
+            raise RuntimeError("open-text purge requires a durable record store")
+        fact_ids = tuple(sorted(
+            item.fact.fact_id for item in self._sidecar.attested_facts()
+            if item.fact.source_id.startswith(prefix)))
+        if not fact_ids:
+            head = self._sidecar.ledger_head_sha256
+            return CausalDeleteReceipt(
+                "REJECTED_NOT_FOUND", prefix, (), head, head,
+                "batch source prefix is absent from open-text memory")
+        receipt = self._sidecar.purge_fact_ids(fact_ids, source_id=prefix)
+        if receipt.state == "PURGED":
+            self._engine.invalidate_prepared_runtime()
+            self._documents, self._context_intents = self._state_from_sidecar()
+            self._evidence_index = None
+            self._turn_index = None
+        return receipt
+
+    def update_document(self, replacement: RouteDocument) -> SidecarIngestReceipt:
+        """Atomically replace one durable source version under the same FactId."""
+        if not isinstance(self._sidecar, DurableAuthorizedSidecarMemory):
+            raise RuntimeError("open-text update requires a durable record store")
+        matches = [item for item in self._documents if item.fact_id == replacement.fact_id]
+        if len(matches) != 1:
+            raise ValueError("open-text update requires one existing FactId")
+        previous = matches[0]
+        if replacement == previous:
+            return SidecarIngestReceipt(
+                "IDEMPOTENT", self.authority.adapter_id,
+                self.authority.authority_sha256, (replacement.fact_id,),
+                hashlib.sha256(replacement.text.encode("utf-8")).hexdigest(),
+                "replacement is already the active version")
+        if (replacement.scope_id != self.scope_id or replacement.source != previous.source
+                or replacement.session_id != previous.session_id
+                or replacement.version <= previous.version
+                or replacement.sequence != previous.sequence
+                or replacement.role != previous.role or replacement.speaker != previous.speaker):
+            raise ValueError("open-text update may change only content, version and event metadata")
+        clock = replacement.sequence if replacement.sequence is not None else replacement.fact_id
+        event_time = replacement.event_time if replacement.event_time is not None else clock
+        declaration = StructuredCausalDeclaration(
+            replacement.fact_id, self.scope, replacement.source, "surface_document",
+            replacement.text, (0, len(replacement.text)), clock, event_time,
+            version=replacement.version,
+            event_id=f"{replacement.source}:surface-document:{replacement.fact_id}")
+        lifecycle = SidecarLifecycle(
+            clock, None, self.authority.purpose, "open-text-host-update")
+        metadata = SidecarRouteMetadata(
+            replacement.scope_id, replacement.session_id, replacement.version,
+            generation_id=replacement.generation_id, sequence=replacement.sequence,
+            event_time=replacement.event_time, role=replacement.role,
+            speaker=replacement.speaker, span=replacement.span)
+        bundle_id = "open-text-update:" + hashlib.sha256(
+            (replacement.source + "\x00" + str(replacement.version) + "\x00" +
+             replacement.text).encode("utf-8")).hexdigest()
+        receipt = self._sidecar.replace_fact_ids(
+            DeclarativeSidecarAdapter(self.authority),
+            CausalAdapterBatch(bundle_id, replacement.text, self.scope, (
+                SidecarFactDeclaration(declaration, lifecycle, metadata),)),
+            (previous.fact_id,),
+        )
+        if receipt.state != "APPLIED":
+            return receipt
+        if not self._sidecar.verify_attestation(replacement.fact_id):
+            raise RuntimeError("open-text update failed post-commit verification")
+        self._engine.invalidate_prepared_runtime()
+        self._documents, self._context_intents = self._state_from_sidecar()
+        self._evidence_index = None
+        self._turn_index = None
+        return receipt
+
+    def upsert_documents(self, documents: tuple[RouteDocument, ...], *,
+                         bundle_id: str | None = None) -> SidecarIngestReceipt:
+        """Atomically publish a canonical connector batch of inserts and updates.
+
+        Existing FactIds are removed and reintroduced in the same durable
+        replacement transaction. Exact retry rows are allowed; changed rows
+        must preserve source topology and strictly increase their version.
+        Observed-intent fibers are intentionally excluded because replacing one
+        of their members without recompiling the full intent would weaken its
+        authority.
+        """
+        if (not documents or tuple(document.fact_id for document in documents) !=
+                tuple(sorted({document.fact_id for document in documents}))):
+            raise ValueError("open-text upsert documents must be FactId-canonical")
+        if any(document.scope_id != self.scope_id for document in documents):
+            raise ValueError("open-text upsert document scope differs from memory")
+        existing = {document.fact_id: document for document in self._documents}
+        existing_ids = tuple(document.fact_id for document in documents
+                             if document.fact_id in existing)
+        if not existing_ids:
+            return self.ingest_documents(documents, bundle_id=bundle_id)
+        intent_fact_ids = {fact_id for intent in self._context_intents
+                           for fact_id in intent.fact_ids}
+        if set(existing_ids) & intent_fact_ids:
+            raise ValueError("open-text upsert cannot replace an observed-intent fact")
+        if all(existing.get(document.fact_id) == document for document in documents):
+            content = "\n".join(document.text for document in documents)
+            return SidecarIngestReceipt(
+                "IDEMPOTENT", self.authority.adapter_id,
+                self.authority.authority_sha256,
+                tuple(document.fact_id for document in documents),
+                hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                "upsert batch is already active")
+        for replacement in documents:
+            previous = existing.get(replacement.fact_id)
+            if previous is None or previous == replacement:
+                continue
+            if replacement.source != previous.source:
+                raise ValueError("open-text upsert source identity was rebound")
+            if (replacement.session_id != previous.session_id
+                    or replacement.version <= previous.version
+                    or replacement.sequence != previous.sequence
+                    or replacement.role != previous.role
+                    or replacement.speaker != previous.speaker):
+                raise ValueError(
+                    "open-text upsert may change only content, version and event metadata")
+        if not isinstance(self._sidecar, DurableAuthorizedSidecarMemory):
+            raise RuntimeError("open-text upsert requires a durable record store")
+
+        chunks: list[str] = []
+        declarations: list[SidecarFactDeclaration] = []
+        offset = 0
+        for document in documents:
+            if chunks:
+                chunks.append("\n")
+                offset += 1
+            start = offset
+            chunks.append(document.text)
+            offset += len(document.text)
+            clock = document.sequence if document.sequence is not None else document.fact_id
+            event_time = document.event_time if document.event_time is not None else clock
+            declaration = StructuredCausalDeclaration(
+                document.fact_id, self.scope, document.source, "surface_document",
+                document.text, (start, offset), clock, event_time,
+                version=document.version,
+                event_id=f"{document.source}:surface-document:{document.fact_id}")
+            lifecycle = SidecarLifecycle(
+                clock, None, self.authority.purpose, "open-text-host-upsert")
+            metadata = SidecarRouteMetadata(
+                document.scope_id, document.session_id, document.version,
+                generation_id=document.generation_id, sequence=document.sequence,
+                event_time=document.event_time, role=document.role,
+                speaker=document.speaker, span=document.span)
+            declarations.append(SidecarFactDeclaration(
+                declaration, lifecycle, metadata))
+        content = "".join(chunks)
+        if bundle_id is None:
+            bundle_id = "open-text-upsert:" + hashlib.sha256(
+                "\x00".join(
+                    f"{item.fact_id}:{item.source}:{item.version}:{item.text}"
+                    for item in documents).encode("utf-8")).hexdigest()
+        receipt = self._sidecar.replace_fact_ids(
+            DeclarativeSidecarAdapter(self.authority),
+            CausalAdapterBatch(
+                bundle_id, content, self.scope, tuple(declarations)),
+            existing_ids)
+        if receipt.state != "APPLIED":
+            return receipt
+        if any(not self._sidecar.verify_attestation(document.fact_id)
+               for document in documents):
+            raise RuntimeError("open-text upsert failed post-commit verification")
+        self._engine.invalidate_prepared_runtime()
+        self._documents, self._context_intents = self._state_from_sidecar()
+        self._evidence_index = None
+        self._turn_index = None
+        return receipt
 
     def answer_atomic_relation_en(self, question: str, *, fact_id: int) \
             -> OpenTextAtomicRelationResult:
