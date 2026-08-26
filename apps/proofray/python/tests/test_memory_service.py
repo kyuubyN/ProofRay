@@ -136,6 +136,104 @@ def test_evidence_fallback_uses_selected_exact_source_not_every_document():
         "Minha bicicleta é azul cobalto.",)
 
 
+def test_greetings_never_become_permanent_memory():
+    """A greeting is declarative but carries no fact.
+
+    Regression for a real report: the memory filled up with "oi". Every one of
+    these passes the question filter, so without a content floor they became
+    attested facts and competed for retrieval against real statements.
+    """
+    for greeting in (
+        "oi", "Oi!", "ola", "ok", "blz", "kkkkkk", "valeu", "vlw", "hmm",
+        "sim", "aham", "hi", "hello", "hey", "thanks", "cool",
+    ):
+        assert is_authoritative_observation(greeting) is False, greeting
+
+
+def test_short_personal_statements_are_still_remembered():
+    """The floor must never cost a real fact -- that is the whole product."""
+    for statement in (
+        "gosto de cafe",
+        "moro em SP",
+        "Tenho 3 gatos",
+        "meu nome e Kaue",
+        "comprei um teclado novo",
+        "I have two dogs",
+        "the deploy broke on friday",
+    ):
+        assert is_authoritative_observation(statement) is True, statement
+
+
+def test_evidence_publishes_every_fact_the_engine_selected_not_only_the_best():
+    """Two separate statements about one subject must both reach the reply.
+
+    Regression for a real 2026-08-25 report: the evidence branch used to keep
+    only the claims whose relevance_score equalled the maximum.  Those scores
+    are reciprocal-rank values (1, 1/2, 1/3, ...), so two distinct facts never
+    tie -- the rule silently collapsed to "publish the single best fact" and
+    the model only ever saw one of them.
+    """
+    service = ConversationMemoryService(profile_name="Kaue")
+    service.remember_user_message(
+        conversation_id="thread", message_id="m1",
+        text="Foi uma automação python que mandou um loop gigante pra todo mundo.",
+        timestamp=datetime(2026, 8, 25, 12, tzinfo=timezone.utc),
+    )
+    service.remember_user_message(
+        conversation_id="thread", message_id="m2",
+        text="Eu tava fazendo um código python e acabei mandando 300 emails.",
+        timestamp=datetime(2026, 8, 25, 13, tzinfo=timezone.utc),
+    )
+    service.remember_user_message(
+        conversation_id="thread", message_id="m3",
+        text="Meu jantar favorito é sopa de abóbora.",
+        timestamp=datetime(2026, 8, 25, 14, tzinfo=timezone.utc),
+    )
+
+    reply = service.answer_prior("thread", "O que eu falei sobre python?")
+
+    assert reply.authority == "evidence"
+    published = " ".join(item["text"] for item in reply.sources).casefold()
+    assert "loop gigante" in published
+    assert "300 emails" in published
+    # Widening the selection must not turn the reply into an evidence dump of
+    # every remembered turn -- the engine's own relevance gate still decides.
+    assert "sopa" not in published
+
+
+def test_evidence_keeps_three_related_turns_apart_from_unrelated_chatter():
+    """The widened cut must survive a realistic field, not just a clean one.
+
+    Portuguese function words are the failure mode this guards: `observe_raw_text`
+    only drops English ones, so a question anchoring on "que" or "minha" used to
+    drag in turns that share nothing but grammar.  Measured before/after on this
+    shape -- recall doubled while published noise stayed flat.
+    """
+    service = ConversationMemoryService(profile_name="Kaue")
+    turns = (
+        "Comprei um teclado novo que eu queria faz tempo.",
+        "Falei com a minha mãe sobre o casamento dela.",
+        "Meu jantar favorito é sopa de abóbora.",
+        "O deploy quebrou na sexta de tarde.",
+        "O deploy só voltou depois que eu reiniciei o servidor.",
+        "O deploy agora roda automático toda madrugada.",
+    )
+    for index, text in enumerate(turns):
+        service.remember_user_message(
+            conversation_id="thread", message_id=f"m{index}", text=text,
+            timestamp=datetime(2026, 8, 25, 8 + index, tzinfo=timezone.utc),
+        )
+
+    reply = service.answer_prior("thread", "O que aconteceu com o deploy?")
+
+    assert reply.authority == "evidence"
+    published = " ".join(item["text"] for item in reply.sources).casefold()
+    for expected in ("quebrou na sexta", "reiniciei o servidor", "roda automático"):
+        assert expected in published
+    for unrelated in ("teclado", "casamento", "sopa"):
+        assert unrelated not in published
+
+
 def test_personal_field_spans_conversations_without_flattening_sessions():
     service = ConversationMemoryService(profile_name="Kaue")
     service.remember_user_message(

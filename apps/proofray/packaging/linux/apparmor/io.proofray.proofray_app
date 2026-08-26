@@ -1,0 +1,124 @@
+# AppArmor profile for the ProofRay desktop app.
+#
+# What this is for: the app runs an embedded Python interpreter and, when the
+# user asks for a local model, executes a llama.cpp build that was downloaded
+# after installation. Confinement here is not about stopping someone from
+# modifying ProofRay -- the source is public and a determined user can rebuild
+# it however they like. It is about bounding what a compromised or simply buggy
+# component can reach: the encrypted database, the user's home directory, and
+# the network.
+#
+# Install:
+#   sudo install -m 0644 io.proofray.proofray_app /etc/apparmor.d/
+#   sudo apparmor_parser -r /etc/apparmor.d/io.proofray.proofray_app
+#
+# Distribution note: this profile is written for a fixed install prefix. An
+# AppImage mounts itself at a different path on every run, so it cannot be
+# confined by an absolute-path profile; package as .deb/.rpm or ship the
+# AppImage unconfined and say so, rather than shipping a profile that silently
+# never attaches.
+
+abi <abi/4.0>,
+
+include <tunables/global>
+
+@{PROOFRAY_LIBEXEC} = /opt/proofray /usr/lib/proofray
+@{PROOFRAY_DATA} = @{HOME}/.local/share/io.proofray.proofray_app/proofray
+
+profile io.proofray.proofray_app @{PROOFRAY_LIBEXEC}/proofray_app{,.bin} flags=(attach_disconnected) {
+  include <abstractions/base>
+  include <abstractions/dbus-session-strict>
+  include <abstractions/fonts>
+  include <abstractions/freedesktop.org>
+  include <abstractions/mesa>
+  include <abstractions/nameservice>
+  include <abstractions/opencl>
+  include <abstractions/openssl>
+  include <abstractions/ssl_certs>
+  include <abstractions/wayland>
+  include <abstractions/X>
+
+  # The application itself: read and execute its own bundle, nothing more.
+  @{PROOFRAY_LIBEXEC}/ r,
+  @{PROOFRAY_LIBEXEC}/** r,
+  @{PROOFRAY_LIBEXEC}/proofray_app{,.bin} ixr,
+  @{PROOFRAY_LIBEXEC}/lib/*.so* mr,
+
+  # Encrypted conversation store, embedded runtime state and model folder.
+  owner @{PROOFRAY_DATA}/ rw,
+  owner @{PROOFRAY_DATA}/** rwk,
+  owner @{HOME}/.local/share/io.proofray.proofray_app/ rw,
+
+  # Secrets live in the desktop keyring, reached over the session bus.
+  dbus send bus=session path=/org/freedesktop/secrets/**
+       interface=org.freedesktop.Secret.*,
+  dbus send bus=session path=/org/freedesktop/secrets
+       interface=org.freedesktop.DBus.Properties,
+
+  # Optional provider APIs and the download of llama.cpp / model files. The
+  # deterministic memory core itself never needs the network; this is here for
+  # the parts the user explicitly turns on.
+  network inet stream,
+  network inet6 stream,
+  network netlink raw,
+
+  # GPU access for the interface and, through the child below, for inference.
+  /dev/dri/ r,
+  /dev/dri/** rw,
+  /dev/kfd rw,
+  /sys/devices/** r,
+  /sys/class/drm/ r,
+  /sys/class/kfd/** r,
+  /proc/@{pid}/{stat,statm,status,cmdline,maps} r,
+  /proc/sys/kernel/{osrelease,ostype} r,
+
+  # The llama.cpp build the user chose to install. It is downloaded after
+  # installation, so it lives in writable data -- which is exactly why it gets
+  # its own, much smaller profile instead of inheriting this one.
+  owner @{PROOFRAY_DATA}/llama.cpp/**/llama-server Px -> io.proofray.llama_server,
+
+  # Anything the user opens deliberately (importing a file, choosing a model
+  # folder) goes through the desktop portal rather than a blanket home read.
+  include if exists <local/io.proofray.proofray_app>
+}
+
+# The inference server. It reads one model file, answers on loopback, and has
+# no business doing anything else -- notably no outbound network and no access
+# to the conversation database.
+profile io.proofray.llama_server flags=(attach_disconnected) {
+  include <abstractions/base>
+  include <abstractions/mesa>
+  include <abstractions/opencl>
+  include <abstractions/nameservice>
+
+  owner @{PROOFRAY_DATA}/llama.cpp/** r,
+  owner @{PROOFRAY_DATA}/llama.cpp/**/*.so* mr,
+  owner @{PROOFRAY_DATA}/llama.cpp/**/llama-server ix,
+
+  # Model weights, read-only. The server never writes a model back.
+  owner @{PROOFRAY_DATA}/models/** r,
+
+  # Loopback only: llama.cpp binds a local port for ProofRay to talk to. It has
+  # no reason to reach the internet, and denying that means a hostile model file
+  # or a compromised build cannot phone home with what it was asked.
+  network inet stream,
+  network inet6 stream,
+
+  /dev/dri/ r,
+  /dev/dri/** rw,
+  /dev/kfd rw,
+  /sys/devices/** r,
+  /sys/class/kfd/** r,
+  /proc/@{pid}/{stat,statm,status,cmdline,maps} r,
+  /proc/sys/kernel/{osrelease,ostype} r,
+  /proc/cpuinfo r,
+  /proc/meminfo r,
+
+  # Explicitly denied, so a change here has to be deliberate.
+  deny owner @{PROOFRAY_DATA}/*.db* rwk,
+  deny owner @{HOME}/.ssh/** r,
+  deny owner @{HOME}/.config/** r,
+  deny /etc/shadow r,
+
+  include if exists <local/io.proofray.llama_server>
+}

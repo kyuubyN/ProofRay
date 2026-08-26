@@ -208,19 +208,29 @@ class ChatController extends ChangeNotifier {
           providerId == null || providerSecretLoader == null
           ? null
           : await providerSecretLoader!(providerId!);
-      await for (final BridgeEvent event in activeBridge.sendMessage(
-        conversationId: conversationId,
-        messageId: messageId,
-        text: text,
-        memoryMode: memoryMode,
-        sequence: userSequence,
-        createdAt: now,
-        providerId: providerId,
-        providerSecret: providerSecret,
-        turns: _recentTurnsBefore(userMessage.id),
-        keywords: _keywords,
-        onRequestId: (String value) => _activeRequestId = value,
-      )) {
+      // A message.send stream has no deadline of its own: the embedded core
+      // answers over a socket, and an optional AI provider adds a network hop
+      // on top of that. If either stalls, `await for` simply never yields a
+      // terminal event and the answer bubble stays on its typing placeholder
+      // forever, with no error and no way back -- reported as "sent a message,
+      // got three dots and nothing else". This ceiling sits above the
+      // provider's own 90s transport timeout so a legitimately slow model is
+      // never cut short, and turns a silent hang into a visible failure.
+      await for (final BridgeEvent event in activeBridge
+          .sendMessage(
+            conversationId: conversationId,
+            messageId: messageId,
+            text: text,
+            memoryMode: memoryMode,
+            sequence: userSequence,
+            createdAt: now,
+            providerId: providerId,
+            providerSecret: providerSecret,
+            turns: _recentTurnsBefore(userMessage.id),
+            keywords: _keywords,
+            onRequestId: (String value) => _activeRequestId = value,
+          )
+          .timeout(const Duration(seconds: 120))) {
         _applyEvent(event, assistantId, now);
         completed =
             completed ||
@@ -229,6 +239,22 @@ class ChatController extends ChangeNotifier {
       }
       if (completed) {
         await _hydrateAssistantSources(assistantId, activeBridge);
+      } else {
+        // The stream ended without a terminal event -- a dropped bridge socket
+        // does exactly this. Nothing threw, so the catch below never runs and
+        // the placeholder would otherwise stay pending for the rest of the
+        // session.
+        _stage = BitHorizonStage.abstained;
+        _replaceAssistant(
+          assistantId,
+          ChatMessage(
+            id: assistantId,
+            role: MessageRole.assistant,
+            text: '',
+            createdAt: now,
+            authority: AnswerAuthority.abstention,
+          ),
+        );
       }
     } on Object {
       _replaceAssistant(
@@ -325,19 +351,24 @@ class ChatController extends ChangeNotifier {
             retryProviderId == null || providerSecretLoader == null
             ? null
             : await providerSecretLoader!(retryProviderId);
-        await for (final BridgeEvent event in activeBridge.sendMessage(
-          conversationId: operation.conversationId,
-          messageId: user.id,
-          text: user.text,
-          memoryMode: retryMode,
-          sequence: operation.sequence,
-          createdAt: user.createdAt,
-          providerId: retryProviderId,
-          providerSecret: providerSecret,
-          turns: _recentTurnsBefore(user.id),
-          keywords: operation.keywords,
-          onRequestId: (String value) => _activeRequestId = value,
-        )) {
+        // Same deadline as send(): an outbox retry that stalls would otherwise
+        // hold `_sending` for the rest of the session and block every later
+        // message in this conversation.
+        await for (final BridgeEvent event in activeBridge
+            .sendMessage(
+              conversationId: operation.conversationId,
+              messageId: user.id,
+              text: user.text,
+              memoryMode: retryMode,
+              sequence: operation.sequence,
+              createdAt: user.createdAt,
+              providerId: retryProviderId,
+              providerSecret: providerSecret,
+              turns: _recentTurnsBefore(user.id),
+              keywords: operation.keywords,
+              onRequestId: (String value) => _activeRequestId = value,
+            )
+            .timeout(const Duration(seconds: 120))) {
           _applyEvent(event, assistantId, user.createdAt);
           completed =
               completed ||
@@ -382,7 +413,7 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
     final DateTime now = DateTime.now().toUtc();
     final String messageId =
-        'confirmed_${now.microsecondsSinceEpoch}_${_identity++}';
+        '$confirmedObservationIdPrefix${now.microsecondsSinceEpoch}_${_identity++}';
     final ChatMessage observation = ChatMessage(
       id: messageId,
       role: MessageRole.user,
@@ -683,6 +714,24 @@ class ChatController extends ChangeNotifier {
       memoryMode = _baseMemoryMode;
     }
     notifyListeners();
+  }
+
+  /// Keeps a superseded controller alive only until its in-flight outbox
+  /// exchange reaches a terminal state. This is used for a fresh conversation
+  /// request: the user can leave an active reply without dropping its durable
+  /// work, while the previous controller is never disposed mid-stream.
+  void releaseWhenIdle() {
+    if (!_sending) {
+      dispose();
+      return;
+    }
+    late VoidCallback listener;
+    listener = () {
+      if (_sending) return;
+      removeListener(listener);
+      dispose();
+    };
+    addListener(listener);
   }
 }
 

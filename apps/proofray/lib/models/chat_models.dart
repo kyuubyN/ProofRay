@@ -1,5 +1,16 @@
 import 'package:flutter/foundation.dart';
 
+/// ID prefix for a message created by [ChatController.confirmAsMemory].
+///
+/// These are stored (and reopen from the database) exactly like an ordinary
+/// [MessageRole.user] turn, on purpose -- the memory-authority model treats
+/// a confirmed observation as something the user genuinely asserted, and
+/// existing turn-context/history logic must keep working unchanged for it.
+/// The prefix exists only so presentation code (see [MessageTranscript]) can
+/// tell the two apart without a schema change: a confirmed observation must
+/// never be rendered as if the user had just typed and sent it.
+const String confirmedObservationIdPrefix = 'confirmed_';
+
 enum MessageRole { user, assistant, system }
 
 enum AnswerAuthority { proved, evidence, abstention, contested, model, pending }

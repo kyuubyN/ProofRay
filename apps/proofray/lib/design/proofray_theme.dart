@@ -80,3 +80,22 @@ ThemeData buildProofRayTheme() {
     ),
   );
 }
+
+
+/// Keeps an action at its natural width.
+///
+/// A button is only as wide as its label until something forces it wider --
+/// and a `ListView` or a stretched `Column` does exactly that to every direct
+/// child, which is how "Save local profile" ended up spanning the whole
+/// settings pane. Wrapping the button removes that pressure without touching
+/// the button's own style, so it stays consistent with the ones already inside
+/// a `Wrap` or a dialog.
+class CompactAction extends StatelessWidget {
+  const CompactAction({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      Align(alignment: Alignment.centerLeft, child: child);
+}

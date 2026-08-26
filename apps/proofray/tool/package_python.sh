@@ -43,3 +43,30 @@ export SERIOUS_PYTHON_SITE_PACKAGES="$app_dir/build/site-packages/$target"
 requirements="$app_dir/python/requirements-mobile.txt"
 "$proofray_dart_bin" run serious_python:main package "$stage_dir" -p "$target" \
   -r -r -r "$requirements" --compile-app --compile-packages --cleanup
+
+# dart_bridge's native SP_RUN_PATH mode (src/serious_python_run.c's
+# sp_pyrun_file, see https://github.com/flet-dev/dart-bridge) always feeds
+# the resolved entrypoint's raw bytes through Py_CompileString as if they
+# were source text -- it never checks for a .pyc magic header or loads
+# bytecode via marshal, unlike Python's own import machinery. A compiled
+# main.pyc entrypoint therefore crashes the embedded core on every real
+# launch with a UTF-8 SyntaxError (confirmed: `python3 main.pyc` runs it
+# fine directly through the standard interpreter, which does understand
+# .pyc; only dart_bridge's own limited-API reimplementation cannot).
+#
+# --compile-app above still compiles the whole staged app (including the
+# entrypoint) so imported application code -- proofray_app/, proofray/,
+# horizon_memory/ -- ships as bytecode, same as before. Only the top-level
+# entrypoint is swapped back to its original, trivial, uncompiled source
+# afterwards: main.py is a 5-line stub with zero application logic (just
+# `from proofray_app.bridge_server import main; main()`), so this doesn't
+# meaningfully change what's readable in the shipped bundle. The compiled
+# main.pyc is removed rather than left alongside main.py, because
+# SeriousPython.run()'s own Dart-side resolution always prefers a .pyc
+# over a .py when both exist.
+target_main_pyc="$app_dir/build/python-app/$target/main.pyc"
+target_main_py="$app_dir/build/python-app/$target/main.py"
+if [[ -f "$target_main_pyc" ]]; then
+  rm -f "$target_main_pyc"
+  cp "$app_dir/python/main.py" "$target_main_py"
+fi

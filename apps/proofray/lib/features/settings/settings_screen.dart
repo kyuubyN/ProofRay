@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 
 import '../../design/proofray_theme.dart';
+import '../local_models/local_model_controller.dart';
+import '../local_models/local_model_panel.dart';
+import 'model_id_field.dart';
 import '../../features/chat/chat_controller.dart';
 import '../../l10n/app_strings.dart';
 import '../../models/chat_models.dart';
@@ -15,6 +18,8 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     required this.integrations,
     required this.bridge,
+    required this.localModels,
+    required this.onProviderSelected,
     required this.chat,
     required this.currentLocale,
     required this.onLocaleChanged,
@@ -25,6 +30,11 @@ class SettingsScreen extends StatefulWidget {
 
   final IntegrationStore integrations;
   final ProofRayBridge? Function() bridge;
+  final LocalModelController localModels;
+  /// Routed through the app so the choice is remembered, rather than
+  /// living only in the controller of the current conversation.
+  final Future<void> Function(String? providerId, {bool supportsTools})
+  onProviderSelected;
   final ChatController chat;
   final Locale currentLocale;
   final ValueChanged<Locale> onLocaleChanged;
@@ -124,10 +134,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _customModel = provider.customModel;
       _supportsTools = provider.supportsTools;
       _models = models;
-      widget.chat.setProvider(
+      unawaited(widget.onProviderSelected(
         provider.id,
         supportsTools: provider.supportsTools,
-      );
+      ));
     });
   }
 
@@ -266,9 +276,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _connect({required bool discover}) async {
+  /// The key for the provider being edited: what was typed, or what the vault
+  /// already holds. The secret field is cleared after every successful save, so
+  /// treating "empty field" as "no key" would break every action taken after
+  /// the first one -- which is exactly how model discovery came back empty.
+  Future<String?> _resolveSecret() async {
+    final String typed = _secret.text.trim();
+    if (typed.isNotEmpty) return typed;
+    for (final StoredProvider item in await widget.integrations.providers()) {
+      if (item.id == 'provider-$_kind') {
+        return widget.integrations.providerSecret(item);
+      }
+    }
+    return null;
+  }
+
+  Future<void> _connect() async {
     final ProofRayBridge? bridge = widget.bridge();
-    if (bridge == null || (!discover && _model.text.trim().isEmpty)) {
+    if (bridge == null || _model.text.trim().isEmpty) {
       setState(
         () => _status = _tr(
           'Core local ou ID do modelo indisponível.',
@@ -281,55 +306,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _busy = true;
       _status = null;
     });
-    final String providerId = discover
-        ? 'provider-discovery-$_kind'
-        : 'provider-$_kind';
+    final String providerId = 'provider-$_kind';
     try {
-      final String? enteredSecret = _secret.text.trim().isEmpty
-          ? null
-          : _secret.text.trim();
-      String? secretLease = enteredSecret;
-      if (secretLease == null) {
-        final List<StoredProvider> stored = await widget.integrations
-            .providers();
-        StoredProvider? matching;
-        for (final StoredProvider item in stored) {
-          if (item.id == 'provider-$_kind') {
-            matching = item;
-            break;
-          }
-        }
-        if (matching != null) {
-          secretLease = await widget.integrations.providerSecret(matching);
-        }
-      }
-      final String configuredModel = _model.text.trim().isEmpty
-          ? 'model-discovery'
-          : _model.text.trim();
+      final String? secretLease = await _resolveSecret();
+      final String configuredModel = _model.text.trim();
       final bool selectedToolSupport = _supportsTools;
       await bridge.configureProvider(
         providerId: providerId,
         kind: _kind,
         modelId: configuredModel,
         endpoint: _endpoint.text.trim(),
-        customModel: discover || _customModel,
-        toolCallingOverride: discover ? null : selectedToolSupport,
+        customModel: _customModel,
+        toolCallingOverride: selectedToolSupport,
       );
-      if (discover) {
-        _models = await bridge.listProviderModels(
-          providerId,
-          secret: secretLease,
-        );
-        await bridge.removeProvider(providerId);
-        if (!mounted) return;
-        setState(
-          () => _status = _tr(
-            'Modelos descobertos. Selecione um, teste e salve.',
-            'Models discovered. Select one, then test and save.',
-          ),
-        );
-        return;
-      }
       await bridge.testProvider(providerId, secret: secretLease);
       await widget.integrations.saveProvider(
         id: providerId,
@@ -344,7 +333,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (_models.isNotEmpty) {
         await widget.integrations.cacheProviderModels(providerId, _models);
       }
-      widget.chat.setProvider(providerId, supportsTools: selectedToolSupport);
+      await widget.onProviderSelected(
+        providerId,
+        supportsTools: selectedToolSupport,
+      );
       if (!mounted) return;
       setState(() {
         _stored = widget.integrations.providers();
@@ -354,19 +346,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Connected. The key is in the vault, or session-only when no vault exists.',
         );
       });
-    } on Object {
-      if (discover) {
-        try {
-          await bridge.removeProvider(providerId);
-        } on Object {
-          // The temporary provider is secretless and process-local.
-        }
-      }
+    } on Object catch (error) {
       if (mounted) {
+        final String reason = error is ProofRayBridgeException
+            ? error.code
+            : error.runtimeType.toString();
         setState(
           () => _status = _tr(
-            'Conexão rejeitada. Verifique endpoint, modelo e chave.',
-            'Connection rejected. Check endpoint, model and key.',
+            'Conexão rejeitada ($reason). Verifique endpoint, modelo e chave.',
+            'Connection rejected ($reason). Check endpoint, model and key.',
           ),
         );
       }
@@ -419,9 +407,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           decoration: InputDecoration(labelText: strings.timezone),
         ),
         const SizedBox(height: 10),
-        OutlinedButton(
-          onPressed: _saveProfile,
-          child: Text(strings.saveProfile),
+        CompactAction(
+          child: OutlinedButton(
+            onPressed: _saveProfile,
+            child: Text(strings.saveProfile),
+          ),
         ),
         const Divider(height: 40),
         Text(
@@ -445,16 +435,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: 'openai_compatible',
               child: Text('OpenAI compatible / Ollama / LM Studio'),
             ),
+            DropdownMenuItem(value: 'local', child: Text('Local model')),
           ],
           onChanged: (String? value) {
             if (value == null) return;
             setState(() {
               _kind = value;
-              _endpoint.text = _endpoints[value]!;
+              _endpoint.text = _endpoints[value] ?? '';
             });
           },
         ),
         const SizedBox(height: 12),
+        if (_kind == 'local') ...<Widget>[
+          LocalModelPanel(
+            controller: widget.localModels,
+            bridge: widget.bridge,
+          ),
+        ] else ...<Widget>[
         TextField(
           controller: _endpoint,
           decoration: const InputDecoration(labelText: 'Endpoint'),
@@ -468,16 +465,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           decoration: InputDecoration(labelText: strings.apiKeyVaultOnly),
         ),
         const SizedBox(height: 12),
-        TextField(
+        ModelIdField(
           controller: _model,
-          decoration: InputDecoration(labelText: strings.modelId),
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(strings.customModel),
-          subtitle: Text(strings.customModelExplanation),
-          value: _customModel,
-          onChanged: (bool value) => setState(() => _customModel = value),
+          kind: _kind,
+          endpoint: () => _endpoint.text.trim(),
+          bridge: widget.bridge,
+          secret: _resolveSecret,
+          initialModels: _models,
+          onModelsDiscovered: (List<Map<String, Object?>> models) =>
+              setState(() => _models = models),
+          custom: _customModel,
+          onCustomChanged: (bool value) =>
+              setState(() => _customModel = value),
+          onToolSupportDiscovered: (bool supported) => setState(() {
+            _supportsTools = supported;
+            if (!supported && widget.chat.memoryMode == MemoryMode.tool) {
+              widget.chat.setMemoryMode(MemoryMode.keywords);
+            }
+          }),
+          label: strings.modelId,
+          customLabel: strings.customModel,
+          customExplanation: strings.customModelExplanation,
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -494,56 +502,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
           value: _supportsTools,
           onChanged: (bool value) => setState(() => _supportsTools = value),
         ),
-        Wrap(
-          spacing: 10,
-          children: <Widget>[
-            FilledButton(
-              onPressed: _busy ? null : () => _connect(discover: false),
-              child: Text(strings.testAndSave),
-            ),
-            OutlinedButton(
-              onPressed: _busy ? null : () => _connect(discover: true),
-              child: Text(strings.discoverModels),
-            ),
-            TextButton(
-              onPressed: () => widget.chat.setProvider(null),
-              child: Text(strings.useWithoutAi),
-            ),
-          ],
-        ),
+        ],
+        if (_kind != 'local')
+          Wrap(
+            spacing: 10,
+            children: <Widget>[
+              FilledButton(
+                onPressed: _busy ? null : _connect,
+                child: Text(strings.testAndSave),
+              ),
+              TextButton(
+                onPressed: () => unawaited(widget.onProviderSelected(null)),
+                child: Text(strings.useWithoutAi),
+              ),
+            ],
+          ),
         if (_status != null) ...<Widget>[
           const SizedBox(height: 12),
-          Text(
-            _status!,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-          ),
-        ],
-        if (_models.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 20),
-          Text(
-            strings.discoveredModels,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          for (final Map<String, Object?> model in _models)
-            ListTile(
-              dense: true,
-              title: Text(
-                model['display_name'] as String? ??
-                    model['model_id'] as String? ??
-                    '',
-              ),
-              subtitle: Text(
-                'tools: ${model['supports_tools'] == true ? strings.yes : strings.no}',
-              ),
-              onTap: () => setState(() {
-                _model.text = model['model_id'] as String? ?? _model.text;
-                _supportsTools = model['supports_tools'] == true;
-                if (model['supports_tools'] != true &&
-                    widget.chat.memoryMode == MemoryMode.tool) {
-                  widget.chat.setMemoryMode(MemoryMode.keywords);
-                }
-              }),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              border: Border.all(color: ProofRayColors.ink),
+              borderRadius: const BorderRadius.all(Radius.circular(2)),
             ),
+            child: Text(
+              _status!,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
         ],
         const Divider(height: 40),
         Text(
@@ -558,9 +545,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         const SizedBox(height: 10),
-        OutlinedButton(
-          onPressed: _saveKeywords,
-          child: Text(strings.saveDeterministicTrigger),
+        CompactAction(
+          child: OutlinedButton(
+            onPressed: _saveKeywords,
+            child: Text(strings.saveDeterministicTrigger),
+          ),
         ),
         const Divider(height: 40),
         Text(

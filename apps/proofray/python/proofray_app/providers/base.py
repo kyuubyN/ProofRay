@@ -181,12 +181,31 @@ def memory_instruction(memory: MemoryContext | None) -> str | None:
     if memory is None:
         return None
     if memory.authority == "proved":
-        return "PROOFRAY_PROVED:\n" + memory.deterministic_text
+        return (
+            "PROOFRAY_PROVED: the text below is a certified answer to the "
+            "user's question. Answer using it; you may rephrase it, but "
+            "never change or add facts.\n" + memory.deterministic_text
+        )
     if memory.authority == "evidence":
-        return "PROOFRAY_EVIDENCE_NOT_A_COMPLETE_ANSWER:\n" + memory.deterministic_text
+        return (
+            "PROOFRAY_EVIDENCE: the text below is a verified excerpt from "
+            "the user's own memory, relevant to their question but not a "
+            "complete pre-composed answer. If it answers the question, use "
+            "it directly in your reply. Do not ignore it and do not "
+            "silently fall back to general knowledge when it applies.\n"
+            + memory.deterministic_text
+        )
     if memory.authority == "contested":
-        return "PROOFRAY_CONTESTED: report conflicting memories; do not choose one."
-    return "PROOFRAY_ABSTAINED: report insufficient verified memory; do not answer from priors."
+        return (
+            "PROOFRAY_CONTESTED: memory holds multiple conflicting records "
+            "for this question. Tell the user the memories conflict; do not "
+            "pick one and present it as certain."
+        )
+    return (
+        "PROOFRAY_ABSTAINED: no verified memory was found for this "
+        "question. Say so plainly; do not answer from general knowledge or "
+        "invent a personal fact."
+    )
 
 
 __all__ = [

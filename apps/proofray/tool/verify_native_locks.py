@@ -76,8 +76,9 @@ def main() -> None:
         raise SystemExit("embedded app must be compiled and source-cleaned")
     if "appFileName:" in embedded_runtime:
         raise SystemExit(
-            "Serious Python must auto-detect compiled main.pyc; "
-            "forcing main.py breaks cleaned packages"
+            "Serious Python must auto-detect the packaged entrypoint "
+            "(main.py, kept uncompiled -- see tool/package_python.sh); "
+            "forcing appFileName breaks that resolution"
         )
 
 

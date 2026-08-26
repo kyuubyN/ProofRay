@@ -158,7 +158,9 @@ class ProofRayBridge {
       ),
     ).first;
     if (event.event != 'completed') {
-      throw const ProofRayBridgeException('provider_configuration_failed');
+      throw ProofRayBridgeException(
+        _errorCode(event, fallback: 'provider_configuration_failed'),
+      );
     }
   }
 
@@ -178,7 +180,9 @@ class ProofRayBridge {
     ).first;
     final Object? raw = event.payload['models'];
     if (event.event != 'completed' || raw is! List<Object?>) {
-      throw const ProofRayBridgeException('provider_models_failed');
+      throw ProofRayBridgeException(
+        _errorCode(event, fallback: 'provider_models_failed'),
+      );
     }
     return raw.whereType<Map<String, Object?>>().toList(growable: false);
   }
@@ -195,8 +199,21 @@ class ProofRayBridge {
       ),
     ).first;
     if (event.event != 'completed' || event.payload['reachable'] != true) {
-      throw const ProofRayBridgeException('provider_test_failed');
+      throw ProofRayBridgeException(
+        _errorCode(event, fallback: 'provider_test_failed'),
+      );
     }
+  }
+
+  /// The bridge only ever hands back a closed, secret-free `code` string on
+  /// an `error` event (see bridge_server.py's own `safe_error`/RuntimeError
+  /// handling) -- safe to surface directly instead of a generic fallback.
+  static String _errorCode(BridgeEvent event, {required String fallback}) {
+    if (event.event == 'error') {
+      final Object? code = event.payload['code'];
+      if (code is String && code.isNotEmpty) return code;
+    }
+    return fallback;
   }
 
   Future<void> removeProvider(String providerId) async {
@@ -305,6 +322,81 @@ class ProofRayBridge {
     'memory.purge_source',
     <String, Object?>{'source_id': sourceId},
   );
+
+  /// Official llama.cpp builds that match this machine, each carrying the
+  /// SHA-256 GitHub published for it.
+  Future<Map<String, Object?>> llamaBuilds() =>
+      _completed('llama.builds', const <String, Object?>{});
+
+  /// Downloads and verifies one build. Emits `progress` events while bytes
+  /// arrive; the terminal event carries the installed server path.
+  Stream<BridgeEvent> installLlamaBuild({
+    required Map<String, Object?> build,
+    required String destination,
+  }) => request(
+    BridgeRequest(
+      requestId: _newRequestId(),
+      method: 'llama.install',
+      payload: <String, Object?>{...build, 'destination': destination},
+    ),
+  );
+
+  Future<Map<String, Object?>> modelFamilies() =>
+      _completed('models.families', const <String, Object?>{});
+
+  /// Searches Hugging Face for GGUF repositories, most downloaded first.
+  Future<Map<String, Object?>> searchModels(String query) =>
+      _completed('models.search', <String, Object?>{'query': query});
+
+  Future<Map<String, Object?>> modelFiles(String repository) => _completed(
+    'models.files',
+    <String, Object?>{'repository': repository},
+  );
+
+  Stream<BridgeEvent> downloadModel({
+    required Map<String, Object?> file,
+    required String destination,
+  }) => request(
+    BridgeRequest(
+      requestId: _newRequestId(),
+      method: 'models.download',
+      payload: <String, Object?>{...file, 'destination': destination},
+    ),
+  );
+
+  /// Model files under a directory the user picked. Unsupported formats come
+  /// back too, flagged, so the UI can say why they are not offered.
+  Future<List<Map<String, Object?>>> scanLocalModels(String directory) async {
+    final Map<String, Object?> result = await _completed(
+      'local.scan',
+      <String, Object?>{'directory': directory},
+    );
+    final Object? models = result['models'];
+    if (models is! List<Object?>) {
+      throw const ProofRayBridgeException('local_scan_failed');
+    }
+    return <Map<String, Object?>>[
+      for (final Object? item in models)
+        if (item is Map<String, Object?>) item,
+    ];
+  }
+
+  /// Starts llama.cpp on loopback for one model and resolves only once it
+  /// answers -- weights reach VRAM before the server serves, so returning
+  /// earlier would report a model as usable while it still is not.
+  Future<Map<String, Object?>> loadLocalModel(
+    String modelPath, {
+    String? serverBinary,
+  }) => _completed('local.load', <String, Object?>{
+    'model_path': modelPath,
+    'server_binary': ?serverBinary,
+  });
+
+  Future<Map<String, Object?>> localModelStatus() =>
+      _completed('local.status', const <String, Object?>{});
+
+  Future<Map<String, Object?>> unloadLocalModel() =>
+      _completed('local.unload', const <String, Object?>{});
 
   Future<int> warmMemory() async {
     final Map<String, Object?> result = await _completed(

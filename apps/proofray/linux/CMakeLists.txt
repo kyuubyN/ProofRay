@@ -42,6 +42,13 @@ endif()
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_14)
   target_compile_options(${TARGET} PRIVATE -Wall -Werror)
+  # GCC 14+ started flagging `decltype(&some_glibc_fn)` as "ignoring
+  # attributes on template argument" whenever the referenced function (e.g.
+  # pclose) carries an attribute -- harmless, and not something this repo
+  # controls since it fires inside vendored plugin code (flutter_timezone's
+  # own Linux platform sources), not project code. Downgraded from -Werror
+  # so a newer local toolchain than CI's doesn't block a debug build.
+  target_compile_options(${TARGET} PRIVATE -Wno-error=ignored-attributes)
   target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
   target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
 endfunction()
@@ -92,6 +99,16 @@ set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+# Ships a real app icon in the bundle (as "proofray_app.png", next to the
+# binary) so any downstream Linux packaging (.desktop entry, AppImage, deb)
+# has something to point at. Desktop-entry authoring/installation itself is
+# a separate, later packaging step -- see tool/install_linux_desktop_entry.sh
+# for the local-dev-only version of that.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/app_icon.png"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  RENAME "proofray_app.png"
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"

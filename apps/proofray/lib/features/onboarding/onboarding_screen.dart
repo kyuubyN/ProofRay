@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../design/proofray_theme.dart';
 import '../../l10n/app_strings.dart';
 import '../../models/chat_models.dart';
+import '../settings/model_id_field.dart';
 
 class OnboardingResult {
   const OnboardingResult({
@@ -58,7 +59,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final TextEditingController _providerSecret = TextEditingController();
   int _page = 0;
   MemoryMode _mode = MemoryMode.keywords;
-  String _locale = 'system';
+  // English by default rather than the host locale: onboarding is the first
+  // thing anyone sees, and a neutral default is less confusing than a language
+  // guessed from the machine. The dropdown still offers System and pt-BR, and
+  // whatever is chosen here becomes the app's language immediately after.
+  String _locale = 'en';
   String _timezone = 'system';
   String _providerKind = 'none';
   bool _providerCustomModel = false;
@@ -76,10 +81,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   void _next() {
+    // The model id is deliberately not required here. Nobody should have to
+    // know what their provider currently calls its models to get past the
+    // tutorial -- and the real catalogue is only reachable from Settings, once
+    // the embedded core is running.
+    //
+    // The key is required, though: choosing a provider without one produces a
+    // configuration that cannot answer anything, and the model list in Settings
+    // cannot be fetched either. Wanting no AI at all is a different choice, and
+    // the provider dropdown already offers it.
     if (_page == 3 &&
         _providerKind != 'none' &&
         (_providerEndpoint.text.trim().isEmpty ||
-            _providerModel.text.trim().isEmpty)) {
+            _providerSecret.text.trim().isEmpty)) {
       setState(() => _providerError = 'provider_fields_required');
       return;
     }
@@ -100,7 +114,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         providerEndpoint: _providerKind == 'none'
             ? null
             : _providerEndpoint.text.trim(),
-        providerModelId: _providerKind == 'none'
+        providerModelId:
+            _providerKind == 'none' || _providerModel.text.trim().isEmpty
             ? null
             : _providerModel.text.trim(),
         providerSecret: _providerSecret.text.trim().isEmpty
@@ -320,33 +335,33 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           ),
                           const SizedBox(height: 10),
                           TextField(
-                            controller: _providerModel,
-                            decoration: InputDecoration(
-                              labelText: pt ? 'ID do modelo' : 'Model ID',
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          TextField(
                             controller: _providerSecret,
                             obscureText: true,
                             enableSuggestions: false,
                             autocorrect: false,
                             decoration: InputDecoration(
                               labelText: pt
-                                  ? 'Chave de API (cofre ou sessão)'
-                                  : 'API key (vault or session)',
+                                  ? 'Chave de API (cofre ou sessão) *'
+                                  : 'API key (vault or session) *',
                             ),
                           ),
-                          SwitchListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(
-                              pt
-                                  ? 'ID personalizado ou experimental'
-                                  : 'Custom or experimental model ID',
-                            ),
-                            value: _providerCustomModel,
-                            onChanged: (bool value) =>
+                          const SizedBox(height: 10),
+                          // No bridge is passed: the embedded core only starts
+                          // once onboarding finishes, so the provider cannot be
+                          // asked for its catalogue yet. The field says so and
+                          // falls back to free text rather than offering a
+                          // hardcoded model list that would go stale.
+                          ModelIdField(
+                            controller: _providerModel,
+                            kind: _providerKind,
+                            endpoint: () => _providerEndpoint.text.trim(),
+                            custom: _providerCustomModel,
+                            onCustomChanged: (bool value) =>
                                 setState(() => _providerCustomModel = value),
+                            label: pt ? 'ID do modelo' : 'Model ID',
+                            customLabel: pt
+                                ? 'ID personalizado ou experimental'
+                                : 'Custom or experimental model ID',
                           ),
                           SwitchListTile(
                             contentPadding: EdgeInsets.zero,
@@ -375,8 +390,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           const SizedBox(height: 8),
                           Text(
                             pt
-                                ? 'Informe endpoint e ID do modelo, ou escolha Sem IA.'
-                                : 'Enter endpoint and model ID, or choose No AI.',
+                                ? 'Informe o endpoint e a chave de API, ou escolha Sem IA.'
+                                : 'Enter the endpoint and API key, or choose No AI.',
                             style: const TextStyle(color: ProofRayColors.ink),
                           ),
                         ],
@@ -411,12 +426,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             Padding(
               padding: const EdgeInsets.all(20),
-              child: SizedBox(
-                width: double.infinity,
-                height: 48,
+              child: Align(
+                alignment: Alignment.centerRight,
                 child: FilledButton(
                   onPressed: _next,
                   style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 14,
+                    ),
                     shape: const RoundedRectangleBorder(
                       borderRadius: BorderRadius.all(Radius.circular(2)),
                     ),

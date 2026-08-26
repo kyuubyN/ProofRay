@@ -10,8 +10,13 @@ ARM64 = ROOT / "build/site-packages/Android/arm64-v8a"
 
 
 def main() -> None:
-    if not (APP / "main.pyc").is_file() or (APP / "main.py").exists():
-        raise SystemExit("Android app must contain compiled main.pyc only")
+    # main.py stays uncompiled and (APP / "main.pyc") absent: dart_bridge's
+    # native entrypoint execution (Py_CompileString) cannot load compiled
+    # bytecode, only source -- see tool/package_python.sh's own comment.
+    # Everything main.py imports (proofray_app/, proofray/, horizon_memory/)
+    # still ships compiled.
+    if not (APP / "main.py").is_file() or (APP / "main.pyc").exists():
+        raise SystemExit("Android app must contain uncompiled main.py only")
     if not (ARM64 / "tzdata/__init__.pyc").is_file():
         raise SystemExit("Android arm64 payload lacks the pinned IANA tzdata package")
     libraries = sorted(ARM64.rglob("*.so"))

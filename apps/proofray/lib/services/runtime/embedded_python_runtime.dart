@@ -21,6 +21,12 @@ class EmbeddedPythonRuntime {
     HostRequestHandler? hostRequestHandler,
     String profileName = 'User',
     String timezone = 'UTC',
+    // Diagnostic-only: reports which startup stage is in progress so the UI
+    // can show more than a single static "starting" label. Every stage here
+    // is currently unbounded except _waitForPort's own 30s timeout --
+    // warmMemory() in particular has none, so a slow local corpus can leave
+    // the UI stuck on that one label indefinitely with no other symptom.
+    void Function(String stage)? onStatus,
   }) async {
     if (_bridge != null) {
       return _bridge!;
@@ -30,6 +36,7 @@ class EmbeddedPythonRuntime {
     }
     _started = true;
     try {
+      onStatus?.call('preparing_bootstrap');
       final Directory support = await getApplicationSupportDirectory();
       final Directory runtimeDirectory = Directory(
         p.join(support.path, 'proofray', 'runtime'),
@@ -51,6 +58,7 @@ class EmbeddedPythonRuntime {
         'profile_name': profileName,
         'timezone': timezone,
       });
+      onStatus?.call('launching_embedded_python');
       await SeriousPython.run(
         environmentVariables: <String, String>{
           'PROOFRAY_APP_BOOTSTRAP': bootstrap.path,
@@ -59,13 +67,24 @@ class EmbeddedPythonRuntime {
         },
         sync: false,
       );
+      onStatus?.call('waiting_for_bridge_port');
       final int port = await _waitForPort(runtime);
+      onStatus?.call('connecting_bridge');
       _bridge = await ProofRayBridge.connect(
         port: port,
         token: token,
         hostRequestHandler: hostRequestHandler,
       );
-      await _bridge!.warmMemory();
+      onStatus?.call('warming_memory_index');
+      // warmMemory() has no bridge-level timeout of its own (see
+      // ProofRayBridge.request/_completed) and its cost scales with the
+      // local corpus, not a fixed amount of work -- diagnosed as the actual
+      // cause of a real, reproducible "stuck on STARTING LOCAL CORE"
+      // report after a long testing session accumulated many conversations/
+      // messages. 45s here is generous for a personal-scale corpus and
+      // turns an indefinite hang into a visible, reportable failure.
+      await _bridge!.warmMemory().timeout(const Duration(seconds: 45));
+      onStatus?.call('ready');
       return _bridge!;
     } on Object {
       await _bridge?.close();

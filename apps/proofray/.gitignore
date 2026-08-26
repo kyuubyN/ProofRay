@@ -8,3 +8,9 @@ python/build/
 python/__pycache__/
 *.pyc
 *.iml
+
+# Golden-test diff output, written on every failed comparison.
+test/failures/
+
+# Local release artifacts; the AppImage is attached to a GitHub release.
+build/appimage/

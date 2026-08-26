@@ -10,11 +10,19 @@ from pathlib import Path
 import re
 import secrets
 import tempfile
+import time
 import threading
 from typing import Mapping
 from datetime import datetime
 
 from .host_record_store import HostAuthorizedSidecarRecordStore
+from .llama_installer import (
+    LlamaBuild, available_builds, host_platform, install_build,
+)
+from .local_models import LocalModelRuntime, scan_model_directory
+from .model_catalog import (
+    CatalogFile, download_model, families, repository_files, search_models,
+)
 from .connector_manager import ConnectorManager
 from .connectors import ConnectorConfig, ConnectorKind, DocumentMapping
 from .connectors.host_database import HostDatabaseConnector
@@ -113,6 +121,7 @@ class ProofRayBridgeServer:
             raise ValueError("bridge token must be high entropy")
         self._token = token
         self._providers = providers or ProviderManager()
+        self._local_models = LocalModelRuntime()
         self._host_calls = HostCallBroker()
         self._connectors = ConnectorManager(factory=lambda config: (
             HostDatabaseConnector(config, self._host_calls.call)
@@ -137,6 +146,10 @@ class ProofRayBridgeServer:
             task.cancel()
         if self._tasks:
             await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+        # Before the executor goes away: a llama-server left running would keep
+        # holding the GPU memory it loaded, with nothing left to stop it.
+        with suppress(Exception):
+            self._local_models.unload()
         self._executor.shutdown(wait=True, cancel_futures=True)
 
     async def handle(self, reader: asyncio.StreamReader,
@@ -216,6 +229,76 @@ class ProofRayBridgeServer:
                     raise ValueError("memory source identity is required")
                 result = await asyncio.get_running_loop().run_in_executor(
                     self._executor, self._memory.purge_source, source_id)
+                events = (BridgeEvent(request.request_id, "completed", result),)
+            elif request.method == "llama.builds":
+                builds = await asyncio.get_running_loop().run_in_executor(
+                    self._executor, available_builds)
+                name, arch = host_platform()
+                events = (BridgeEvent(request.request_id, "completed", {
+                    "platform": name, "architecture": arch,
+                    "builds": [item.payload() for item in builds],
+                }),)
+            elif request.method == "llama.install":
+                await self._stream_download(request, writer, _llama_install_job)
+                events = ()
+            elif request.method == "models.families":
+                events = (BridgeEvent(request.request_id, "completed", {
+                    "families": families(),
+                }),)
+            elif request.method == "models.search":
+                query = request.payload.get("query", "")
+                if not isinstance(query, str):
+                    raise ValueError("a search query must be text")
+                results = await asyncio.get_running_loop().run_in_executor(
+                    self._executor, partial(search_models, query))
+                events = (BridgeEvent(request.request_id, "completed", {
+                    "results": [item.payload() for item in results],
+                }),)
+            elif request.method == "models.files":
+                repository = request.payload.get("repository")
+                if not isinstance(repository, str):
+                    raise ValueError("a repository is required")
+                files = await asyncio.get_running_loop().run_in_executor(
+                    self._executor, repository_files, repository)
+                events = (BridgeEvent(request.request_id, "completed", {
+                    "files": [item.payload() for item in files],
+                }),)
+            elif request.method == "models.download":
+                await self._stream_download(request, writer, _model_download_job)
+                events = ()
+            elif request.method == "local.scan":
+                directory = request.payload.get("directory")
+                if not isinstance(directory, str):
+                    raise ValueError("a model directory is required")
+                rows = await asyncio.get_running_loop().run_in_executor(
+                    self._executor, scan_model_directory, directory)
+                events = (BridgeEvent(request.request_id, "completed", {
+                    "models": [item.payload() for item in rows],
+                }),)
+            elif request.method == "local.load":
+                payload = request.payload
+                model_path = payload.get("model_path")
+                binary = payload.get("server_binary")
+                if not isinstance(model_path, str) or (
+                        binary is not None and not isinstance(binary, str)):
+                    raise ValueError("a model path is required")
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    self._executor,
+                    partial(self._local_models.load, model_path,
+                            server_binary=binary),
+                )
+                # Waiting is a separate executor job so the loading state is
+                # observable while VRAM fills, instead of one opaque call.
+                result = await loop.run_in_executor(
+                    self._executor, self._local_models.wait_until_ready)
+                events = (BridgeEvent(request.request_id, "completed", result),)
+            elif request.method == "local.status":
+                events = (BridgeEvent(
+                    request.request_id, "completed", self._local_models.status()),)
+            elif request.method == "local.unload":
+                result = await asyncio.get_running_loop().run_in_executor(
+                    self._executor, self._local_models.unload)
                 events = (BridgeEvent(request.request_id, "completed", result),)
             elif request.method == "memory.warm":
                 result = await asyncio.get_running_loop().run_in_executor(
@@ -322,6 +405,24 @@ class ProofRayBridgeServer:
         except (KeyError, TypeError, ValueError):
             writer.write(safe_error(request.request_id, "invalid_request").encode())
             await writer.drain()
+        except RuntimeError as error:
+            # Every RuntimeError raised anywhere under proofray_app/ (providers,
+            # connectors, memory_service, transport) uses a fixed, closed-
+            # vocabulary message -- never raw text from a caught lower-level
+            # exception, never a secret, never user-supplied data (grep the
+            # package for "raise RuntimeError" to audit this invariant). It is
+            # therefore safe to surface as the error code, unlike safe_error's
+            # own generic fallback below; this is what lets the app tell a
+            # provider connection test's real failure reason (bad model ID,
+            # HTTP 401, unreachable endpoint, ...) apart from an unexpected bug.
+            code = str(error)
+            writer.write(
+                safe_error(
+                    request.request_id,
+                    code if code and len(code) <= 160 else "internal_error",
+                ).encode()
+            )
+            await writer.drain()
         except Exception:
             writer.write(safe_error(request.request_id, "internal_error").encode())
             await writer.drain()
@@ -413,6 +514,65 @@ class ProofRayBridgeServer:
             await worker
         finally:
             self._request_providers.pop(request.request_id, None)
+
+    async def _stream_download(self, request: BridgeRequest,
+                               writer: asyncio.StreamWriter,
+                               job: Callable[[dict[str, object], Callable[[int, int], None]], object],
+                               ) -> None:
+        """Run a long download, reporting progress as it goes.
+
+        A multi-gigabyte fetch behind a single request/response would look
+        identical to a hang, so bytes are reported while they arrive and the
+        terminal event still carries the result.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[object] = asyncio.Queue()
+        sentinel = object()
+        payload = dict(request.payload)
+        last = 0.0
+
+        def report(received: int, total: int) -> None:
+            nonlocal last
+            now = time.monotonic()
+            # Throttled: one frame per chunk would flood the socket with
+            # updates far finer than anything a progress bar can show.
+            if received < total and now - last < 0.2:
+                return
+            last = now
+            loop.call_soon_threadsafe(queue.put_nowait, {
+                "received_bytes": received, "total_bytes": total,
+            })
+
+        def produce() -> None:
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, ("result", job(payload, report)))
+            except Exception as error:
+                loop.call_soon_threadsafe(queue.put_nowait, error)
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+        worker = loop.run_in_executor(self._executor, produce)
+        while True:
+            item = await queue.get()
+            if item is sentinel:
+                break
+            if isinstance(item, Exception):
+                code = str(item)
+                writer.write(safe_error(
+                    request.request_id,
+                    code if code and len(code) <= 160 else "download_failed",
+                ).encode())
+                await writer.drain()
+                await asyncio.gather(worker, return_exceptions=True)
+                return
+            if isinstance(item, tuple) and item[0] == "result":
+                writer.write(BridgeEvent(
+                    request.request_id, "completed", item[1]).encode())
+            else:
+                writer.write(BridgeEvent(
+                    request.request_id, "progress", item).encode())
+            await writer.drain()
+        await worker
 
     def _configure_provider(self, payload: dict[str, object]) -> None:
         provider_id = payload.get("provider_id")
@@ -551,6 +711,38 @@ class ProofRayBridgeServer:
         if not isinstance(connector_id, str):
             raise ValueError("connector identity is required")
         return connector_id
+
+
+def _llama_install_job(payload: dict[str, object],
+                       report: Callable[[int, int], None]) -> dict[str, object]:
+    destination = payload.get("destination")
+    if not isinstance(destination, str) or not destination:
+        raise ValueError("an install directory is required")
+    build = LlamaBuild(
+        tag=str(payload.get("tag", "")),
+        asset=str(payload.get("asset", "")),
+        variant=str(payload.get("variant", "")),
+        url=str(payload.get("url", "")),
+        size_bytes=int(payload.get("size_bytes") or 0),
+        sha256=str(payload.get("sha256", "")),
+    )
+    server = install_build(build, destination, on_progress=report)
+    return {"server_binary": server, "tag": build.tag, "variant": build.variant}
+
+
+def _model_download_job(payload: dict[str, object],
+                        report: Callable[[int, int], None]) -> dict[str, object]:
+    destination = payload.get("destination")
+    if not isinstance(destination, str) or not destination:
+        raise ValueError("a model directory is required")
+    file = CatalogFile(
+        repository=str(payload.get("repository", "")),
+        filename=str(payload.get("filename", "")),
+        size_bytes=int(payload.get("size_bytes") or 0),
+        sha256=str(payload.get("sha256", "")),
+    )
+    path = download_model(file, destination, on_progress=report)
+    return {"model_path": path, "filename": file.filename}
 
 
 def _atomic_json(path: Path, value: dict[str, object]) -> None:

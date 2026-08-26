@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:proofray_app/features/local_models/local_model_controller.dart';
+import 'package:proofray_app/storage/integration_store.dart';
 import 'package:proofray_app/design/proofray_theme.dart';
 import 'package:proofray_app/features/chat/chat_controller.dart';
 import 'package:proofray_app/features/chat/chat_screen.dart';
@@ -86,8 +88,22 @@ Widget _fixture(ChatController controller, Locale locale) => MaterialApp(
   supportedLocales: const <Locale>[Locale('en'), Locale('pt', 'BR')],
   localizationsDelegates: GlobalMaterialLocalizations.delegates,
   theme: buildProofRayTheme(),
-  home: Scaffold(body: ChatScreen(controller: controller)),
+  home: Scaffold(
+    body: ChatScreen(
+      controller: controller,
+      localModels: LocalModelController(
+        integrations: _NoIntegrations(),
+        bridge: () => null,
+      ),
+      providerSwitcher: const SizedBox.shrink(),
+    ),
+  ),
 );
+
+class _NoIntegrations implements IntegrationStore {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 ChatController _controller() => ChatController(
   conversationId: 'golden-thread',

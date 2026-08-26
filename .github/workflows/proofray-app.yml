@@ -87,7 +87,8 @@ jobs:
           if (-not (Test-Path "$bundle/Lib")) { throw "Python stdlib missing" }
           if (-not (Test-Path "$bundle/DLLs")) { throw "Python DLL directory missing" }
           if (-not (Test-Path "$bundle/app/proofray_app")) { throw "Python app missing" }
-          if (-not (Test-Path "$bundle/app/main.pyc")) { throw "compiled Python entrypoint missing" }
+          if (-not (Test-Path "$bundle/app/main.py")) { throw "Python entrypoint missing" }
+          if (Test-Path "$bundle/app/main.pyc") { throw "entrypoint must stay uncompiled for dart_bridge" }
           if (-not (Test-Path "$bundle/site-packages/numpy")) { throw "NumPy missing" }
           $size = (Get-ChildItem $bundle -Recurse -File | Measure-Object Length -Sum).Sum
           $size | Set-Content build/windows-bundle-size.txt
@@ -194,7 +195,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
-            liblzma-dev libsecret-1-dev xauth xvfb
+            liblzma-dev libsecret-1-dev xauth xvfb apparmor-utils
+
+      # Parses only (-Q), so this needs no privileges and never touches the
+      # runner's own AppArmor state. It also asserts the confinement is still
+      # expressed: a profile that stopped naming the llama.cpp child profile
+      # would still load cleanly and protect nothing.
+      - name: Verify the AppArmor profile
+        working-directory: apps/proofray
+        run: ./tool/verify_apparmor_profile.sh
 
       - name: Resolve exact Dart graph and generate Drift
         working-directory: apps/proofray
@@ -252,7 +261,8 @@ jobs:
           test -f build/linux/x64/debug/bundle/lib/libpython3.12.so.1.0
           test -d build/linux/x64/debug/bundle/python3.12
           test -d build/linux/x64/debug/bundle/app/proofray_app
-          test -f build/linux/x64/debug/bundle/app/main.pyc
+          test -f build/linux/x64/debug/bundle/app/main.py
+          test ! -f build/linux/x64/debug/bundle/app/main.pyc
           test -d build/linux/x64/debug/bundle/site-packages/numpy
           du -sb build/linux/x64/debug/bundle | tee build/linux-bundle-size.txt
           tar -C build/linux/x64/debug -czf proofray-linux-debug.tar.gz bundle

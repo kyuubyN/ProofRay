@@ -886,9 +886,11 @@ class _SourcesScreenState extends State<SourcesScreen> {
           decoration: InputDecoration(labelText: strings.connectorOptions),
         ),
         const SizedBox(height: 12),
-        FilledButton(
-          onPressed: _busy ? null : _detectAndConnect,
-          child: Text(strings.detectTestDiscover),
+        CompactAction(
+          child: FilledButton(
+            onPressed: _busy ? null : _detectAndConnect,
+            child: Text(strings.detectTestDiscover),
+          ),
         ),
         if (_namespaces.isNotEmpty) ...<Widget>[
           const Divider(height: 38),
@@ -932,9 +934,11 @@ class _SourcesScreenState extends State<SourcesScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          OutlinedButton(
-            onPressed: _previewMapping,
-            child: Text(strings.generatePreview),
+          CompactAction(
+            child: OutlinedButton(
+              onPressed: _previewMapping,
+              child: Text(strings.generatePreview),
+            ),
           ),
         ],
         if (_preview != null) ...<Widget>[
@@ -955,9 +959,11 @@ class _SourcesScreenState extends State<SourcesScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _busy ? null : _sync,
-            child: Text(strings.importAuthorizedMapping),
+          CompactAction(
+            child: FilledButton(
+              onPressed: _busy ? null : _sync,
+              child: Text(strings.importAuthorizedMapping),
+            ),
           ),
           if (_connectorId != null && _managedNamespaceAvailable) ...<Widget>[
             const SizedBox(height: 8),

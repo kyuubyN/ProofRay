@@ -24,14 +24,21 @@ class _MemoryScreenState extends State<MemoryScreen> {
     _reload();
   }
 
-  void _reload() => _rows = widget.store.memoryObservations();
+  // Block body on purpose: `void` is erased at runtime, so an arrow body
+  // still hands setState the assigned Future and Flutter throws on it.
+  void _reload() {
+    _rows = widget.store.memoryObservations();
+  }
 
   Future<void> _purge(MemoryObservation observation) async {
+    final AppStrings strings = AppStrings.of(context);
     final ProofRayBridge? bridge = widget.bridge();
     if (bridge == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${strings.remove}: local_core_unavailable')),
+      );
       return;
     }
-    final AppStrings strings = AppStrings.of(context);
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
@@ -53,14 +60,35 @@ class _MemoryScreenState extends State<MemoryScreen> {
     if (confirmed != true) {
       return;
     }
-    final Map<String, Object?> result = await bridge.purgeMemorySource(
-      observation.sourceId,
-    );
-    if (!mounted) return;
-    if (result['state'] == 'PURGED') {
-      await widget.store.markMemoryPurged(observation.messageId);
-      setState(_reload);
+    // Every outcome below has to reach the screen. This used to return
+    // silently on a null bridge, on any non-PURGED state, and -- because the
+    // onPressed callback discards the future -- on a thrown bridge error too,
+    // so a failed purge was indistinguishable from a button that does nothing.
+    String? failure;
+    try {
+      final Map<String, Object?> result = await bridge.purgeMemorySource(
+        observation.sourceId,
+      );
+      final Object? state = result['state'];
+      if (state == 'PURGED' || state == 'REJECTED_NOT_FOUND') {
+        // NOT_FOUND means the durable field no longer holds this source while
+        // the local row still claims it does: the local flag is the stale one,
+        // so clearing it is the repair, not a failure to report.
+        await widget.store.markMemoryPurged(observation.messageId);
+        if (!mounted) return;
+        setState(_reload);
+        return;
+      }
+      failure = state is String ? state : 'unknown_state';
+    } on ProofRayBridgeException catch (error) {
+      failure = error.code;
+    } on Object catch (error) {
+      failure = error.toString();
     }
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('${strings.remove}: $failure')));
   }
 
   @override

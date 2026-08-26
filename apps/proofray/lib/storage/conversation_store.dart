@@ -40,6 +40,7 @@ abstract interface class ConversationStore {
   Future<List<VerifiedSourceRecord>> verifiedSources();
   Future<void> markMemoryPurged(String messageId);
   Future<void> updateMemoryMode(String conversationId, MemoryMode mode);
+  Future<void> renameConversation(String conversationId, String title);
   Future<void> commitConfirmedObservation(
     String conversationId,
     ChatMessage message,
@@ -711,6 +712,17 @@ class DriftConversationStore implements ConversationStore {
         'UPDATE conversations SET memory_mode=?, updated_at=? WHERE id=?',
         <Object?>[
           mode.name,
+          DateTime.now().toUtc().millisecondsSinceEpoch,
+          conversationId,
+        ],
+      );
+
+  @override
+  Future<void> renameConversation(String conversationId, String title) =>
+      database.customStatement(
+        'UPDATE conversations SET title=?, updated_at=? WHERE id=?',
+        <Object?>[
+          title,
           DateTime.now().toUtc().millisecondsSinceEpoch,
           conversationId,
         ],

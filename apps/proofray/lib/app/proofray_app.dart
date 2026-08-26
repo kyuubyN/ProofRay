@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 
+import '../design/pixel_black_hole.dart';
 import '../design/proofray_theme.dart';
 import '../features/chat/chat_controller.dart';
+import '../features/chat/provider_switcher.dart';
+import '../features/local_models/local_model_controller.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/shell/proofray_shell.dart';
 import '../l10n/app_strings.dart';
@@ -26,27 +29,46 @@ class ProofRayApp extends StatefulWidget {
 class _ProofRayAppState extends State<ProofRayApp> {
   static const String _profileId = 'local-owner';
   ChatController? _chat;
+  LocalModelController? _localModels;
+  static const String _localProviderId = 'provider-local-model';
+  static const String _providerPreference = 'provider.selected';
+  static const String _noProviderChoice = 'none';
+  String? _configuredLocalEndpoint;
   final EmbeddedPythonRuntime _runtime = EmbeddedPythonRuntime();
   ProofRayDatabase? _database;
   DriftConversationStore? _store;
   IntegrationStore? _integrations;
   AppKeyStore _keyStore = AppKeyStore();
+  // Launch screen: the storage/runtime work below already takes time, so this
+  // is a floor on how long the wave is shown, not an added delay on top of it.
+  bool _splashHolding = true;
+  bool _splashDone = false;
   bool _storageStarting = true;
   String? _storageError;
   bool _runtimeStarting = false;
+  String? _runtimeStatus;
   String? _runtimeError;
   String? _localDatabasePath;
-  Locale? _locale;
+  // Everything before a profile exists -- storage gate, passphrase gate and
+  // the onboarding tutorial -- renders in English. A returning user's stored
+  // locale replaces this during `_initializeStorage`, so this only ever decides
+  // the very first launch.
+  Locale? _locale = const Locale('en');
 
   @override
   void initState() {
     super.initState();
+    Timer(const Duration(milliseconds: 2400), () {
+      if (mounted) setState(() => _splashHolding = false);
+    });
     unawaited(_initializeStorage());
   }
 
   @override
   void dispose() {
     _chat?.dispose();
+    _localModels?.removeListener(_syncLocalModelProvider);
+    _localModels?.dispose();
     unawaited(_runtime.stop());
     unawaited(_database?.close());
     super.dispose();
@@ -76,6 +98,10 @@ class _ProofRayAppState extends State<ProofRayApp> {
         _localDatabasePath = databasePath;
         _store = DriftConversationStore(database);
         _integrations = IntegrationStore(database, _keyStore);
+        _localModels = LocalModelController(
+          integrations: _integrations!,
+          bridge: () => _runtime.bridge,
+        )..addListener(_syncLocalModelProvider);
         _storageStarting = false;
       });
       final LocalProfile? profile = await _store!.localProfile(_profileId);
@@ -107,9 +133,13 @@ class _ProofRayAppState extends State<ProofRayApp> {
             hostRequestHandler: _store!.handleHostRequest,
             profileName: profile.displayName,
             timezone: profile.timezone,
+            onStatus: (String stage) {
+              if (mounted) setState(() => _runtimeStatus = stage);
+            },
           );
           await _restoreIntegrations(bridge, controller);
           controller.attachBridge(bridge);
+          unawaited(_localModels?.restore());
         } on Object {
           if (mounted) setState(() => _runtimeError = 'runtime_start_failed');
         } finally {
@@ -194,6 +224,9 @@ class _ProofRayAppState extends State<ProofRayApp> {
         hostRequestHandler: store.handleHostRequest,
         profileName: result.displayName,
         timezone: timezone,
+        onStatus: (String stage) {
+          if (mounted) setState(() => _runtimeStatus = stage);
+        },
       );
       await _restoreIntegrations(bridge, controller);
       if (result.providerKind != null &&
@@ -246,6 +279,63 @@ class _ProofRayAppState extends State<ProofRayApp> {
     }
   }
 
+  /// Switches the conversation's provider and remembers the choice.
+  ///
+  /// Selection has to outlive the process: someone who picked OpenAI, or who
+  /// deliberately turned the AI off, should not find Gemini selected again the
+  /// next time the app opens.
+  Future<void> selectProvider(String? providerId, {bool supportsTools = true}) async {
+    _chat?.setProvider(providerId, supportsTools: supportsTools);
+    await _integrations?.setPreference(
+      _providerPreference,
+      providerId ?? _noProviderChoice,
+    );
+    if (mounted) setState(() {});
+  }
+
+  /// Points the conversation at llama.cpp once it is actually serving.
+  ///
+  /// A local model needs no new provider implementation: llama.cpp exposes the
+  /// same OpenAI-shaped surface the app already speaks, so this configures the
+  /// existing openai_compatible path against the loopback port the runtime
+  /// just opened. The endpoint only exists while the model is ready, which is
+  /// what keeps a half-loaded model from being selected as a working provider.
+  void _syncLocalModelProvider() {
+    final LocalModelController? local = _localModels;
+    final ChatController? chat = _chat;
+    final ProofRayBridge? bridge = _runtime.bridge;
+    if (local == null || chat == null || bridge == null) return;
+    final String? endpoint = local.endpoint;
+    if (endpoint == null) {
+      if (chat.providerId == _localProviderId) {
+        unawaited(selectProvider(null));
+      }
+      return;
+    }
+    if (chat.providerId == _localProviderId &&
+        _configuredLocalEndpoint == endpoint) {
+      return;
+    }
+    _configuredLocalEndpoint = endpoint;
+    unawaited(() async {
+      try {
+        await bridge.configureProvider(
+          providerId: _localProviderId,
+          kind: 'openai_compatible',
+          modelId: local.active?.name ?? 'local-model',
+          endpoint: endpoint,
+          customModel: true,
+        );
+        // llama.cpp advertises tool calling per model and this app cannot know
+        // which build is running, so Tool mode stays off rather than failing
+        // mid-conversation.
+        unawaited(selectProvider(_localProviderId, supportsTools: false));
+      } on Object {
+        _configuredLocalEndpoint = null;
+      }
+    }());
+  }
+
   Future<void> _restoreIntegrations(
     ProofRayBridge bridge,
     ChatController controller,
@@ -257,7 +347,7 @@ class _ProofRayAppState extends State<ProofRayApp> {
       controller.setKeywords(keywords.whereType<String>());
     }
     final List<StoredProvider> providers = await integrations.providers();
-    String? firstConfiguredProvider;
+    final List<StoredProvider> configured = <StoredProvider>[];
     for (final StoredProvider provider in providers) {
       try {
         await bridge.configureProvider(
@@ -268,19 +358,31 @@ class _ProofRayAppState extends State<ProofRayApp> {
           customModel: provider.customModel,
           toolCallingOverride: provider.supportsTools,
         );
-        firstConfiguredProvider ??= provider.id;
+        configured.add(provider);
       } on Object {
         // A stale optional provider must not block the local deterministic core.
       }
     }
-    final StoredProvider? selectedProvider = firstConfiguredProvider == null
-        ? null
-        : providers.firstWhere(
-            (StoredProvider item) => item.id == firstConfiguredProvider,
-          );
+    // Whatever was last chosen, not whatever happens to be first in the table.
+    // Restoring the first row is why the app kept coming back on Gemini after
+    // someone had deliberately switched away from it.
+    final Object? remembered = await integrations.preference(_providerPreference);
+    StoredProvider? selected;
+    for (final StoredProvider provider in configured) {
+      if (provider.id == remembered) {
+        selected = provider;
+        break;
+      }
+    }
+    if (remembered == _noProviderChoice) {
+      // An explicit "no AI" is a choice too, and must survive a restart.
+      controller.setProvider(null);
+      return;
+    }
+    selected ??= configured.isEmpty ? null : configured.first;
     controller.setProvider(
-      firstConfiguredProvider,
-      supportsTools: selectedProvider?.supportsTools ?? true,
+      selected?.id,
+      supportsTools: selected?.supportsTools ?? true,
     );
     for (final StoredConnector connector in await integrations.connectors()) {
       if (connector.status == 'disconnected') continue;
@@ -354,9 +456,26 @@ class _ProofRayAppState extends State<ProofRayApp> {
           ? storedKeywords.whereType<String>().toList()
           : const <String>[],
     );
-    final bridge = _runtime.bridge;
+    final ProofRayBridge? bridge = _runtime.bridge;
     if (bridge != null) controller.attachBridge(bridge);
     final ChatController? prior = _chat;
+    // The AI provider is a process-wide selection, not per-conversation: the
+    // embedded core's ProviderManager already holds the live configuration
+    // from startup (_restoreIntegrations) or from the settings screen, and it
+    // survives every conversation switch. Only the Dart-side *selection* was
+    // being dropped here, so opening any conversation silently fell back to
+    // memory-only and someone had to reconnect the provider by hand.
+    //
+    // Carrying it over from the prior controller is a plain in-memory copy --
+    // deliberately NOT a _restoreIntegrations() call, which would re-issue a
+    // configureProvider bridge round-trip per provider on every single
+    // conversation click for a configuration the core already has.
+    if (prior != null && prior.providerId != null) {
+      controller.setProvider(
+        prior.providerId,
+        supportsTools: prior.providerSupportsTools,
+      );
+    }
     if (!mounted) {
       controller.dispose();
       return;
@@ -368,23 +487,51 @@ class _ProofRayAppState extends State<ProofRayApp> {
   Future<void> _newConversation() async {
     final DriftConversationStore? store = _store;
     final ChatController? current = _chat;
-    if (store == null || current == null || current.sending) return;
+    if (store == null || current == null) return;
     final DateTime now = DateTime.now().toUtc();
     final String id = 'conversation_${now.microsecondsSinceEpoch}';
+    final String title = 'Conversation ${now.toLocal()}';
     await store.ensureConversation(
       conversationId: id,
       profileId: _profileId,
-      title: 'Conversation ${now.toLocal()}',
+      title: title,
       memoryMode: current.memoryMode,
     );
-    await _openConversation(
-      ConversationSummary(
-        id: id,
-        title: 'Conversation ${now.toLocal()}',
-        updatedAt: now,
-        memoryMode: current.memoryMode,
-      ),
+    if (!current.sending) {
+      await _openConversation(
+        ConversationSummary(
+          id: id,
+          title: title,
+          updatedAt: now,
+          memoryMode: current.memoryMode,
+        ),
+      );
+      return;
+    }
+
+    // A fresh conversation has no historical reads to race with the active
+    // exchange. The old controller keeps its bridge/outbox ownership until
+    // its terminal event, then releases itself.
+    final ChatController controller = ChatController(
+      conversationId: id,
+      memoryMode: current.memoryMode,
+      store: store,
+      initialNextSequence: 0,
+      providerSecretLoader: _providerSecret,
+      keywords: current.keywords,
     );
+    controller.setProvider(
+      current.providerId,
+      supportsTools: current.providerSupportsTools,
+    );
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    setState(() => _chat = controller);
+    final ProofRayBridge? bridge = _runtime.bridge;
+    if (bridge != null) controller.attachBridge(bridge);
+    current.releaseWhenIdle();
   }
 
   Future<void> _deleteConversation(
@@ -447,7 +594,32 @@ class _ProofRayAppState extends State<ProofRayApp> {
     locale: _locale,
     supportedLocales: const <Locale>[Locale('en'), Locale('pt', 'BR')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
-    home: _home(),
+    home: Stack(
+      children: <Widget>[
+        _home(),
+        // The launch screen fades out over its own layer rather than being
+        // swapped away, so the app is already composed underneath by the time
+        // the black hole finishes dissolving -- no flash of an empty frame
+        // between the two.
+        IgnorePointer(
+          ignoring: !_splashHolding,
+          child: AnimatedOpacity(
+            opacity: _splashHolding ? 1 : 0,
+            duration: const Duration(milliseconds: 650),
+            curve: Curves.easeOutCubic,
+            // Tearing the animation down mid-fade would freeze it on its last
+            // frame; keeping it mounted until the fade completes is what makes
+            // the transition read as smooth.
+            onEnd: () {
+              if (mounted && !_splashHolding) setState(() => _splashDone = true);
+            },
+            child: _splashDone
+                ? const SizedBox.shrink()
+                : const _LaunchWave(),
+          ),
+        ),
+      ],
+    ),
   );
 
   Widget _home() {
@@ -476,15 +648,38 @@ class _ProofRayAppState extends State<ProofRayApp> {
       children: <Widget>[
         ProofRayShell(
           chatController: _chat!,
+          localModels: _localModels!,
+          onProviderSelected: selectProvider,
+          // Built here because selecting a provider is the app's business: it
+          // has to reach the bridge, the chat and the stored preference at
+          // once, and none of those belong to the composer.
+          providerSwitcher: ProviderSwitcher(
+            integrations: _integrations!,
+            localModels: _localModels!,
+            selectedProviderId: _chat!.providerId,
+            onSelect: (StoredProvider? provider) async {
+              if (provider == null) {
+                await _localModels?.unload();
+                await selectProvider(null);
+                return;
+              }
+              await selectProvider(
+                provider.id,
+                supportsTools: provider.supportsTools,
+              );
+            },
+            onSelectLocalModel: (LocalModelEntry model) async {
+              // Loading publishes the loopback endpoint, and the listener that
+              // watches for it is what actually selects the provider -- so the
+              // selection can never point at a model that is not serving yet.
+              await _localModels?.load(model);
+            },
+          ),
           store: _store!,
           integrations: _integrations!,
           profileId: _profileId,
-          onOpenConversation: (ConversationSummary summary) {
-            unawaited(_openConversation(summary));
-          },
-          onNewConversation: () {
-            unawaited(_newConversation());
-          },
+          onOpenConversation: _openConversation,
+          onNewConversation: _newConversation,
           onDeleteConversation: _deleteConversation,
           locale: _locale ?? View.of(context).platformDispatcher.locale,
           onLocaleChanged: (Locale locale) {
@@ -492,10 +687,10 @@ class _ProofRayAppState extends State<ProofRayApp> {
           },
         ),
         if (_runtimeStarting)
-          const Positioned(
+          Positioned(
             top: 12,
             right: 12,
-            child: _RuntimeStatus(label: 'STARTING LOCAL CORE'),
+            child: _RuntimeStatus(label: _runtimeStatusLabel(_runtimeStatus)),
           ),
         if (_runtimeError != null)
           const Positioned(
@@ -506,6 +701,22 @@ class _ProofRayAppState extends State<ProofRayApp> {
       ],
     );
   }
+}
+
+/// Launch screen: a pixelated black hole, drawn in the same monochrome dither
+/// as the rest of the app. The wave bands bend into it, so the background and
+/// the subject are literally the same field rather than two stacked layers.
+class _LaunchWave extends StatelessWidget {
+  const _LaunchWave();
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+    backgroundColor: ProofRayColors.paper,
+    body: PixelBlackHole(
+      foreground: ProofRayColors.ink,
+      background: ProofRayColors.paper,
+    ),
+  );
 }
 
 class _StorageGate extends StatelessWidget {
@@ -604,6 +815,22 @@ class _PassphraseGateState extends State<_PassphraseGate> {
     );
   }
 }
+
+/// Maps EmbeddedPythonRuntime's internal stage keys to the short, all-caps
+/// labels this banner already uses. Diagnostic-only: helps tell "still
+/// launching the interpreter" apart from "stuck warming the memory index"
+/// instead of a single undifferentiated "STARTING LOCAL CORE" for the whole
+/// startup sequence, some stages of which (warmMemory in particular) have no
+/// timeout at all today.
+String _runtimeStatusLabel(String? stage) => switch (stage) {
+  'preparing_bootstrap' => 'PREPARING BOOTSTRAP',
+  'launching_embedded_python' => 'LAUNCHING LOCAL CORE',
+  'waiting_for_bridge_port' => 'WAITING FOR LOCAL CORE',
+  'connecting_bridge' => 'CONNECTING TO LOCAL CORE',
+  'warming_memory_index' => 'WARMING MEMORY INDEX',
+  'ready' => 'LOCAL CORE READY',
+  _ => 'STARTING LOCAL CORE',
+};
 
 class _RuntimeStatus extends StatelessWidget {
   const _RuntimeStatus({required this.label});

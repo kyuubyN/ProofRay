@@ -48,12 +48,21 @@ class MessageTranscript extends StatelessWidget {
     };
   }
 
+  bool get _isConfirmedObservation =>
+      message.role == MessageRole.user &&
+      message.id.startsWith(confirmedObservationIdPrefix);
+
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = AppStrings.of(context);
     final bool user = message.role == MessageRole.user;
+    final bool confirmed = _isConfirmedObservation;
     return Semantics(
-      label: user
+      label: confirmed
+          ? (strings.locale.languageCode == 'pt'
+                ? 'Salvo como memória'
+                : 'Saved to memory')
+          : user
           ? (strings.locale.languageCode == 'pt'
                 ? 'Mensagem do usuário'
                 : 'User message')
@@ -76,14 +85,29 @@ class MessageTranscript extends StatelessWidget {
               children: <Widget>[
                 Row(
                   children: <Widget>[
+                    if (confirmed) ...<Widget>[
+                      const Icon(
+                        Icons.check_circle_outline,
+                        size: 13,
+                        color: ProofRayColors.memoryGreen,
+                      ),
+                      const SizedBox(width: 5),
+                    ],
                     Text(
-                      user
+                      confirmed
+                          ? (strings.locale.languageCode == 'pt'
+                                ? 'SALVO COMO MEMÓRIA'
+                                : 'SAVED TO MEMORY')
+                          : user
                           ? (strings.locale.languageCode == 'pt'
                                 ? 'VOCÊ'
                                 : 'YOU')
                           : _authorityLabel(strings),
-                      style: Theme.of(context).textTheme.labelSmall
-                          ?.copyWith(color: ProofRayColors.quietInk),
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: confirmed
+                            ? ProofRayColors.memoryGreen
+                            : ProofRayColors.quietInk,
+                      ),
                     ),
                     const Spacer(),
                     if (!user && message.memoryConsulted)

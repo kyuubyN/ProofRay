@@ -18,9 +18,13 @@ def main() -> None:
     target = sys.argv[1] if len(sys.argv) == 2 else _host_target()
     app_dir = ROOT / "build" / "python-app" / target
     site_packages = ROOT / "build" / "site-packages" / target
-    entrypoint = app_dir / "main.pyc"
-    if not entrypoint.is_file() or (app_dir / "main.py").exists():
-        raise SystemExit("compiled package must contain main.pyc and no main.py")
+    # main.py stays uncompiled -- dart_bridge's native entrypoint execution
+    # (Py_CompileString) cannot load a compiled main.pyc, only source; see
+    # tool/package_python.sh's own comment. Application code it imports
+    # still ships compiled.
+    entrypoint = app_dir / "main.py"
+    if not entrypoint.is_file() or (app_dir / "main.pyc").exists():
+        raise SystemExit("compiled package must contain main.py and no main.pyc")
 
     with tempfile.TemporaryDirectory(prefix="proofray-compiled-boot-") as raw:
         runtime_dir = Path(raw)

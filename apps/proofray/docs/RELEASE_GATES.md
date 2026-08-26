@@ -78,6 +78,36 @@ Headless product evidence:
 - [x] Elasticsearch mappings use a unique sortable keyword ID; `_id` is rejected
       as an incremental checkpoint rather than silently paginated unsafely.
 
+## Local models and downloaded binaries
+
+The app fetches a llama.cpp build and GGUF files after installation and then
+executes one of them. That is a different trust boundary from everything above,
+so it gets its own rows.
+
+- [x] Engine and model downloads are verified against the SHA-256 the source
+      itself publishes (GitHub release asset digest, Hugging Face LFS oid); a
+      mismatch deletes the download and raises before anything is extracted.
+- [x] A file published without a checksum is not offered at all, rather than
+      downloaded unverified.
+- [x] Archives that would write outside the install directory are refused
+      before extraction, and an asset URL outside the release hosts is refused
+      before any request is made.
+- [x] `llama-server` is registered with `PR_SET_PDEATHSIG` on Linux, so it dies
+      with the app however the app exits, including `kill -9`. Spawning is
+      funnelled through one long-lived thread because that signal is scoped to
+      the spawning thread; both directions are covered by tests.
+- [x] The AppArmor profile parses, runs the downloaded engine under a separate
+      child profile, and denies that profile the conversation database
+      (`tool/verify_apparmor_profile.sh`).
+- [ ] The AppArmor profile has been loaded on a real system and the app still
+      starts, answers, and loads a local model under confinement.
+- [ ] Windows and macOS have an equivalent parent-death guarantee. Only Linux
+      is covered today; a Job Object (Windows) has not been implemented, so an
+      orphaned server after an abnormal exit remains possible there.
+- [ ] A hostile or truncated GGUF is handled without crashing the app.
+- [ ] Disk-space exhaustion during a multi-gigabyte download fails cleanly and
+      leaves no partial file that the model scan would offer.
+
 ## Performance and artifacts
 
 - [ ] Bit Horizon p95 frame time is below 16.7 ms.

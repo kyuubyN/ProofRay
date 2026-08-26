@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../design/proofray_theme.dart';
 import '../../l10n/app_strings.dart';
+import 'delete_conversation_prompt.dart';
 import '../../models/chat_models.dart';
 import '../../storage/conversation_store.dart';
 
@@ -22,7 +23,10 @@ class HistoryScreen extends StatefulWidget {
   final String profileId;
   final String activeConversationId;
   final ValueChanged<ConversationSummary> onOpen;
-  final VoidCallback onCreate;
+  // Awaitable so the list can refresh only once the conversation actually
+  // exists. A plain VoidCallback left this screen showing a stale list until
+  // something else happened to rebuild it.
+  final Future<void> Function() onCreate;
   final Future<void> Function(
     ConversationSummary conversation,
     bool purgeMemory,
@@ -42,45 +46,80 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _rows = widget.store.conversations(widget.profileId);
   }
 
+  @override
+  void didUpdateWidget(HistoryScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Opening a conversation elsewhere changes which row is active and can add
+    // rows this screen already read; without this the list keeps showing the
+    // snapshot taken the first time it was mounted.
+    if (oldWidget.activeConversationId != widget.activeConversationId) {
+      _refresh();
+    }
+  }
+
+  void _refresh() {
+    // Block body, never `setState(() => _rows = ...)`: the arrow form returns
+    // the assigned Future, and Flutter rejects a setState callback that returns
+    // one -- it throws mid-rebuild instead of refreshing. `void` is erased at
+    // runtime, so a declared return type does not protect the call either.
+    setState(() {
+      _rows = widget.store.conversations(widget.profileId);
+    });
+  }
+
+  Future<void> _create() async {
+    await widget.onCreate();
+    if (!mounted) return;
+    _refresh();
+  }
+
   Future<void> _confirmDelete(
     ConversationSummary conversation,
     bool purgeMemory,
   ) async {
+    if (!await confirmConversationDeletion(context, purgeMemory: purgeMemory)) {
+      return;
+    }
+    await widget.onDelete(conversation, purgeMemory);
+    if (!mounted) return;
+    _refresh();
+  }
+
+  Future<void> _rename(ConversationSummary conversation) async {
     final AppStrings strings = AppStrings.of(context);
     final bool pt = strings.locale.languageCode == 'pt';
-    final bool? confirmed = await showDialog<bool>(
+    final TextEditingController controller = TextEditingController(
+      text: conversation.title,
+    );
+    final String? title = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text(
-          purgeMemory
-              ? strings.deleteHistoryAndMemory
-              : strings.deleteHistoryOnly,
-        ),
-        content: Text(
-          purgeMemory
-              ? (pt
-                    ? 'As fontes desta conversa serão removidas, o ledger será reencadeado e o histórico será ocultado.'
-                    : 'This conversation’s sources will be removed, the ledger will be rechained, and history will be hidden.')
-              : (pt
-                    ? 'O histórico será ocultado, mas as memórias autorizadas continuarão disponíveis na aba Memória.'
-                    : 'History will be hidden, but authorized memories remain available in the Memory tab.'),
+        title: Text(pt ? 'Renomear conversa' : 'Rename conversation'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 200,
+          onSubmitted: (String value) => Navigator.pop(context, value.trim()),
         ),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context),
             child: Text(strings.cancel),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(pt ? 'Confirmar exclusão' : 'Confirm deletion'),
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: Text(pt ? 'Salvar' : 'Save'),
           ),
         ],
       ),
     );
-    if (!mounted || confirmed != true) return;
-    await widget.onDelete(conversation, purgeMemory);
+    controller.dispose();
+    if (!mounted || title == null || title.isEmpty || title == conversation.title) {
+      return;
+    }
+    await widget.store.renameConversation(conversation.id, title);
     if (!mounted) return;
-    setState(() => _rows = widget.store.conversations(widget.profileId));
+    _refresh();
   }
 
   @override
@@ -91,7 +130,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         _SectionHeader(
           title: strings.history,
           action: TextButton.icon(
-            onPressed: widget.onCreate,
+            onPressed: () => unawaited(_create()),
             icon: const Icon(Icons.add, size: 18),
             label: Text(strings.newConversation),
           ),
@@ -137,21 +176,35 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             fontSize: 11,
                           ),
                         ),
-                        trailing: PopupMenuButton<bool>(
-                          tooltip: strings.historyDeleteOptions,
-                          onSelected: (bool purge) =>
-                              unawaited(_confirmDelete(row, purge)),
-                          itemBuilder: (BuildContext context) =>
-                              <PopupMenuEntry<bool>>[
-                                PopupMenuItem(
-                                  value: false,
-                                  child: Text(strings.deleteHistoryOnly),
-                                ),
-                                PopupMenuItem(
-                                  value: true,
-                                  child: Text(strings.deleteHistoryAndMemory),
-                                ),
-                              ],
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            IconButton(
+                              tooltip: strings.locale.languageCode == 'pt'
+                                  ? 'Renomear conversa'
+                                  : 'Rename conversation',
+                              onPressed: () => unawaited(_rename(row)),
+                              icon: const Icon(Icons.edit_outlined, size: 18),
+                            ),
+                            PopupMenuButton<bool>(
+                              tooltip: strings.historyDeleteOptions,
+                              onSelected: (bool purge) =>
+                                  unawaited(_confirmDelete(row, purge)),
+                              itemBuilder: (BuildContext context) =>
+                                  <PopupMenuEntry<bool>>[
+                                    PopupMenuItem(
+                                      value: false,
+                                      child: Text(strings.deleteHistoryOnly),
+                                    ),
+                                    PopupMenuItem(
+                                      value: true,
+                                      child: Text(
+                                        strings.deleteHistoryAndMemory,
+                                      ),
+                                    ),
+                                  ],
+                            ),
+                          ],
                         ),
                       );
                     },
@@ -179,9 +232,20 @@ class _SectionHeader extends StatelessWidget {
     ),
     child: Row(
       children: <Widget>[
-        Text(title, style: Theme.of(context).textTheme.headlineSmall),
-        const Spacer(),
-        action,
+        // Expanded rather than a Spacer: on a narrow phone the title and the
+        // action together are wider than the row, and a Spacer resolves that
+        // by pushing the action off the edge. Letting the title give up its
+        // own space keeps the button reachable at any width.
+        Expanded(
+          child: Text(
+            title,
+            style: Theme.of(context).textTheme.headlineSmall,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(child: action),
       ],
     ),
   );

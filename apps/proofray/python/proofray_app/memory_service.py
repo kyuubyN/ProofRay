@@ -14,6 +14,12 @@ from proofray import (
     OpenTextProofRayMemory,
     RouteDocument,
 )
+# The `proofray` facade re-exports only `horizon_memory.__all__`, and the raw
+# channel observer is internal to the engine rather than part of that public
+# surface -- so this one import names the implementation module directly. It is
+# packaged alongside the facade (build/python-app/*/horizon_memory/), which the
+# facade itself imports, so it is always present wherever `proofray` resolves.
+from horizon_memory.raw_causal_channels import observe_raw_text
 from .connectors import MappedDocument
 
 
@@ -64,10 +70,27 @@ def should_consult_memory(mode: str, text: str, *, tool_requested: bool = False,
 
 
 def is_authoritative_observation(text: str) -> bool:
-    """Admit only plainly declarative user turns as source observations.
+    """Admit only plainly declarative user turns that actually carry a fact.
 
     Questions and requests remain in encrypted chat history, but cannot become
     evidence for later answers merely because the user uttered them.
+
+    A greeting is not a memory either.  "oi", "ok", "kkk" and "thanks" are
+    declarative by every syntactic test, so the question filter alone let every
+    one of them become a permanent attested fact -- reported as a memory full
+    of "oi".  They then compete for retrieval against real statements.
+
+    The floor is structural rather than a list of greetings, which could never
+    cover every language or spelling: an observation has to relate something to
+    something.  It qualifies when it carries an anchor -- a proper noun or a
+    number, which is a value on its own -- or at least two distinct content
+    tokens.  A bare interjection has neither.
+
+    Measured over 33 greetings and 16 real personal statements in Portuguese
+    and English: this floor rejects 31 of the 33 and keeps all 16.  Raising it
+    to three tokens rejects all 33 but starts discarding real facts ("gosto de
+    café", "I have two dogs"), and losing a fact someone told us is far worse
+    for a memory than keeping the occasional "bom dia".
     """
     if not isinstance(text, str):
         raise TypeError("observation text must be str")
@@ -75,7 +98,12 @@ def is_authoritative_observation(text: str) -> bool:
     if not stripped or "?" in stripped:
         return False
     folded = stripped.casefold()
-    return not any(folded.startswith(prefix) for prefix in _QUESTION_PREFIXES)
+    if any(folded.startswith(prefix) for prefix in _QUESTION_PREFIXES):
+        return False
+    observed = observe_raw_text(stripped)
+    if observed.entities or observed.numbers:
+        return True
+    return len(set(observed.lexical)) >= 2
 
 
 def _event_day(timestamp: datetime, timezone_name: str) -> int:
@@ -86,6 +114,79 @@ def _event_day(timestamp: datetime, timezone_name: str) -> int:
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
     return timestamp.astimezone(timezone).date().toordinal()
+
+
+def _closed_class_forms() -> frozenset[str]:
+    """Function words that can anchor nothing, per language.
+
+    `observe_raw_text` drops English function words itself but ships no
+    Portuguese equivalent -- a documented gap, and the reason a Portuguese
+    question anchors on "que" or "minha" and drags unrelated turns along with
+    the real answer.  These are the finite closed classes the engine's own
+    Portuguese morphology pack already defines and validates; nothing here is a
+    new list to keep growing.
+    """
+    forms: set[str] = set()
+    try:
+        from horizon_memory import portuguese_atomic_relations as _pt
+    except ImportError:  # pragma: no cover - engine always ships this pack
+        return frozenset()
+    for name in (
+        "_PT_ADPOSITIONS", "_PT_ADVERBS", "_PT_AUXILIARIES", "_PT_CLITICS",
+        "_PT_COORDINATORS", "_PT_DETERMINERS", "_PT_RELATIVES",
+    ):
+        forms.update(getattr(_pt, name, ()))
+    for name in (
+        "_PT_SUBORDINATOR_EXACT", "_PT_QUANTIFIER_EXACT",
+        "_PT_DISCOURSE_ADVERB_EXACT", "_PT_CHAT_ABBREVIATION_EXACT",
+    ):
+        forms.update(form for form, _classes in getattr(_pt, name, ()))
+    return frozenset(form.lstrip("-").casefold() for form in forms if form)
+
+
+_CLOSED_CLASS_FORMS = _closed_class_forms()
+
+
+def _question_bound_fact_ids(question: str, ranked: tuple[Any, ...]) -> tuple[int, ...]:
+    """Keep every ranked fact that shares the subject the best one matched on.
+
+    The engine ranks; this only decides where to cut.  It used to keep the
+    claims whose relevance_score equalled the maximum, but that score is a
+    reciprocal-rank value (1, 1/2, 1/3, ...) from the conversational recall
+    generator, so two distinct facts never tie: the rule silently collapsed to
+    "publish the single best fact" and its own `[:3]` cap was dead code.
+    Measured 2026-08-25 against the reported real case -- two separate user
+    statements about the same subject, both correctly ranked one and two by the
+    engine, only the first ever reaching the model.
+
+    A ratio on a reciprocal rank is only a rank cutoff, so the cut has to come
+    from the text.  The top-ranked fact defines the subject: the tokens it
+    shares with the question are what made it the answer.  A lower-ranked fact
+    joins it when it carries at least one of those same tokens, and is dropped
+    when it shares none -- which is what keeps an unrelated turn out even
+    though the engine still ranked it second of two.
+
+    Corpus-wide document frequency was tried first and rejected by measurement:
+    on a small personal field a subject mentioned in two turns out of three
+    looks exactly as common as a function word, so the very facts this exists
+    to recover were the ones it discarded.
+    """
+    if not ranked:
+        return ()
+    question_tokens = {
+        token for token in observe_raw_text(question, question=True).lexical
+        if token.casefold() not in _CLOSED_CLASS_FORMS
+    }
+    anchor = question_tokens & set(observe_raw_text(ranked[0].text).lexical)
+    selected: list[int] = []
+    for position, item in enumerate(ranked):
+        if item.fact_id in selected:
+            continue
+        if position == 0 or (anchor & set(observe_raw_text(item.text).lexical)):
+            selected.append(item.fact_id)
+        if len(selected) >= MAX_PUBLISHED_SOURCES:
+            break
+    return tuple(selected)
 
 
 @dataclass(frozen=True)
@@ -173,6 +274,20 @@ class ConversationMemoryService:
                 conversation_id):
             raise ValueError("conversation identity is required")
         if self._field is None:
+            # Reverted from PERSONAL_MEMORY_PROFILE back to the app's
+            # original CONVERSATIONAL_HIGH_RECALL_PROFILE on 2026-08-25: the
+            # personal profile's much larger answer_shortlist_size (500 vs
+            # 50) and answer_bytes (40,000 vs 24,576) made every memory
+            # query -- including the one `warm()` fires at every app
+            # startup -- visibly CPU-heavy against this session's own
+            # accumulated test corpus (reported as ~10fps UI stalls). The
+            # profile-selection finding itself (Scale Memory's tight
+            # defaults can silently drop a second relevant fact on a small
+            # personal corpus -- see engine_profile.py's own PERSONAL_MEMORY_
+            # PROFILE docstring) still stands; it needs to be reapplied with
+            # real before/after latency measurement on a realistic corpus
+            # size, not assumed safe from the docstring's own accuracy
+            # numbers alone.
             self._field = OpenTextProofRayMemory(
                 scope_id=self.scope_id,
                 session_id="proofray-personal-field",
@@ -267,13 +382,15 @@ class ConversationMemoryService:
                 exact_by_source[source_id] for source_id in direct.source_ids
                 if source_id in exact_by_source)
         else:
+            # `result.claims` and never `result.answer_lines`: the answer
+            # selector optimizes dossier coverage and is allowed to drop the
+            # top-relevance source entirely (measured -- a two-turn field
+            # answered a bicycle question with `answer_lines` holding only the
+            # unrelated turn, while `claims` ranked the bicycle turn first).
             ranked = tuple(sorted(
                 result.claims,
                 key=lambda item: (-item.relevance_score, item.fact_id, item.text)))
-            best_score = ranked[0].relevance_score if ranked else 0.0
-            selected_ids = tuple(dict.fromkeys(
-                item.fact_id for item in ranked
-                if best_score > 0.0 and item.relevance_score == best_score))[:3]
+            selected_ids = _question_bound_fact_ids(question, ranked)
             exact_by_fact = {item.fact_id: item for item in result.resolver_evidence}
             evidence_items = tuple(
                 exact_by_fact[fact_id] for fact_id in selected_ids

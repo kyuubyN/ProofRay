@@ -35,8 +35,11 @@ def main() -> None:
             raise SystemExit("Android APK must contain exactly one Serious Python app.zip")
         with zipfile.ZipFile(BytesIO(archive.read(app_assets[0]))) as app_zip:
             app_names = set(app_zip.namelist())
-            if "main.pyc" not in app_names or "main.py" in app_names:
-                raise SystemExit("Android app.zip must contain compiled main.pyc only")
+            # main.py stays uncompiled -- dart_bridge's native entrypoint
+            # execution cannot load a compiled main.pyc; see
+            # tool/package_python.sh's own comment for the full reasoning.
+            if "main.py" not in app_names or "main.pyc" in app_names:
+                raise SystemExit("Android app.zip must contain uncompiled main.py only")
             if not any(name.startswith("proofray_app/") for name in app_names):
                 raise SystemExit("Android app.zip lacks the ProofRay backend")
         site_assets = [name for name in archive.namelist()

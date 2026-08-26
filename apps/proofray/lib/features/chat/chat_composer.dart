@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../design/proofray_theme.dart';
 import '../../l10n/app_strings.dart';
+import '../local_models/local_model_controller.dart';
 import '../../models/chat_models.dart';
 
 class ChatComposer extends StatefulWidget {
@@ -15,6 +16,8 @@ class ChatComposer extends StatefulWidget {
     required this.sending,
     required this.onCancel,
     required this.toolModeAvailable,
+    required this.localModels,
+    required this.providerSwitcher,
     super.key,
   });
 
@@ -24,6 +27,9 @@ class ChatComposer extends StatefulWidget {
   final bool sending;
   final VoidCallback onCancel;
   final bool toolModeAvailable;
+  final LocalModelController localModels;
+  /// Built by the app, which owns provider selection and its persistence.
+  final Widget providerSwitcher;
 
   @override
   State<ChatComposer> createState() => _ChatComposerState();
@@ -70,6 +76,7 @@ class _ChatComposerState extends State<ChatComposer> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: <Widget>[
+            widget.providerSwitcher,
             PopupMenuButton<MemoryMode>(
               key: const ValueKey<String>('memory-mode-button'),
               tooltip: _modeLabel(strings, widget.memoryMode),
@@ -114,29 +121,51 @@ class _ChatComposerState extends State<ChatComposer> {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: TextField(
-                controller: _controller,
-                focusNode: _focusNode,
-                minLines: 1,
-                maxLines: 6,
-                inputFormatters: <TextInputFormatter>[
-                  const Utf8LengthLimitingTextInputFormatter(64 * 1024),
-                ],
-                textInputAction: TextInputAction.newline,
-                decoration: InputDecoration(
-                  hintText: strings.askAnything,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 13,
+              child: Focus(
+                // A multiline TextField always treats a bare Enter as
+                // "insert a newline" and never fires onSubmitted, on every
+                // desktop platform with a hardware keyboard -- regardless
+                // of textInputAction. Intercept Enter ourselves so it
+                // sends (matching every other chat UI's convention) and
+                // let Shift+Enter fall through to the default behavior.
+                onKeyEvent: (FocusNode node, KeyEvent event) {
+                  final bool isEnter =
+                      event.logicalKey == LogicalKeyboardKey.enter ||
+                      event.logicalKey == LogicalKeyboardKey.numpadEnter;
+                  final bool shiftHeld =
+                      HardwareKeyboard.instance.isShiftPressed;
+                  if (event is KeyDownEvent && isEnter && !shiftHeld) {
+                    _send();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  minLines: 1,
+                  maxLines: 6,
+                  inputFormatters: <TextInputFormatter>[
+                    const Utf8LengthLimitingTextInputFormatter(64 * 1024),
+                  ],
+                  textInputAction: TextInputAction.newline,
+                  decoration: InputDecoration(
+                    hintText: strings.askAnything,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 13,
+                    ),
                   ),
+                  onSubmitted: (_) => _send(),
                 ),
-                onSubmitted: (_) => _send(),
               ),
             ),
             const SizedBox(width: 8),
             IconButton.filled(
               onPressed: widget.sending ? widget.onCancel : _send,
               style: IconButton.styleFrom(
+                backgroundColor: ProofRayColors.ink,
+                foregroundColor: ProofRayColors.paper,
                 shape: const RoundedRectangleBorder(
                   borderRadius: BorderRadius.all(Radius.circular(2)),
                 ),
