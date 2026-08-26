@@ -1,6 +1,6 @@
 # ProofRay app changelog
 
-## 0.1.0-alpha.2 — unreleased
+## 0.1.0-alpha.2 — 2026-08-26
 
 The app became usable end to end: a conversation, a memory that recalls across
 chats, and a model — hosted or local — that only ever phrases what ProofRay

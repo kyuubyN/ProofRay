@@ -1,16 +1,27 @@
-name: Publish to PyPI
+name: Publish Python package to PyPI
 
-# Never runs on an ordinary push or PR -- only a manually-triggered run, or a GitHub Release the
-# maintainer explicitly publishes. This project is pre-1.0 alpha (see pyproject.toml's own
-# version); nothing here fires on its own.
+# Never runs on an ordinary push or PR. A published GitHub Release only
+# publishes the Python package when it is explicitly tagged `python-v…`.
+# Native-app releases use `proofray-app-v…`, so releasing a Linux AppImage
+# cannot accidentally publish a differently-versioned package to PyPI.
 on:
   release:
     types: [published]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      publish_to_pypi:
+        description: Publish the current Python distribution to PyPI
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   build:
     name: Build sdist + wheel
+    if: >-
+      (github.event_name == 'release' &&
+       startsWith(github.event.release.tag_name, 'python-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_pypi)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +37,10 @@ jobs:
 
   publish:
     name: Publish to PyPI
+    if: >-
+      (github.event_name == 'release' &&
+       startsWith(github.event.release.tag_name, 'python-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_pypi)
     needs: build
     runs-on: ubuntu-latest
     # Requires a one-time setup on pypi.org (Publishing > Trusted Publisher) pointing at this
