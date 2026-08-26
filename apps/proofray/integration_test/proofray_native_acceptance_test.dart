@@ -87,27 +87,80 @@ Future<void> _unlockIfRequired(
   WidgetTester tester, {
   required Finder target,
 }) async {
+  // `pumpWidget` keeps an outgoing native surface as a transition snapshot
+  // for a frame. A plain text finder can see the old unlock label there even
+  // though it cannot receive a pointer. Wait for the actual controls that
+  // pass a hit test, otherwise the restart check races the old snapshot.
+  final Finder usableTarget = target.hitTestable();
+  final Finder unlockButton = find
+      .widgetWithText(FilledButton, 'Unlock with PBKDF2')
+      .hitTestable();
   await _waitForEither(
     tester,
-    target,
-    find.text('Unlock with PBKDF2'),
+    usableTarget,
+    unlockButton,
     timeout: const Duration(seconds: 30),
   );
-  if (find.text('Unlock with PBKDF2').evaluate().isEmpty) return;
-  await tester.enterText(
-    find.widgetWithText(TextField, 'Passphrase (10+ characters)'),
-    'proofray-ci-passphrase',
-  );
-  await tester.tap(find.text('Unlock with PBKDF2'));
+  if (unlockButton.evaluate().isEmpty) return;
+  final Finder passphrase = find
+      .widgetWithText(TextField, 'Passphrase (10+ characters)')
+      .hitTestable();
+  await _waitFor(tester, passphrase);
+  await tester.enterText(passphrase, 'proofray-ci-passphrase');
+  await tester.tap(unlockButton);
   await tester.pump();
 }
 
 Future<void> _send(WidgetTester tester, String text) async {
   final Finder composer = find.widgetWithText(TextField, 'Ask anything…');
   await _waitFor(tester, composer);
+  // Chat becomes visible before bridge/outbox recovery has necessarily
+  // finished. During that short window the same composer shows Stop rather
+  // than Send; waiting for the actual affordance avoids tapping an icon that
+  // is not in the live tree yet.
+  await _waitFor(
+    tester,
+    find.byIcon(Icons.arrow_upward),
+    timeout: const Duration(seconds: 45),
+  );
   await tester.enterText(composer, text);
-  await tester.tap(find.byIcon(Icons.arrow_upward));
+  // Native TextInput implementations may submit the current composing value
+  // while `enterText` synchronizes it. If that happened, the composer has
+  // already switched to Stop; tapping the now-absent arrow is not a product
+  // failure and would make this check platform-timing dependent.
+  if (find.byIcon(Icons.arrow_upward).evaluate().isNotEmpty) {
+    await tester.tap(find.byIcon(Icons.arrow_upward));
+  } else {
+    expect(find.byIcon(Icons.stop), findsWidgets);
+  }
   await tester.pump();
+  await _waitForExchangeToSettle(tester);
+}
+
+Future<void> _waitForExchangeToSettle(WidgetTester tester) async {
+  // The first send is deliberately not a recall. It still has to finish
+  // before the test sends the recall: ChatController rejects a second send
+  // while its outbox exchange is active. Waiting merely for the arrow icon is
+  // racy because it exists before the tap and can also reappear during a
+  // rebuild. Observe either the in-flight stop affordance or a terminal
+  // answer, then require the composer to return to its send affordance.
+  final Finder inFlight = find.byIcon(Icons.stop);
+  final Finder terminal = find.textContaining(
+    RegExp(r'^(PROVED|EVIDENCE|ABSTENTION|CONTESTED|MODEL ANSWER)$'),
+  );
+  await _waitForEither(
+    tester,
+    inFlight,
+    terminal,
+    timeout: const Duration(seconds: 45),
+  );
+  if (inFlight.evaluate().isNotEmpty) {
+    await _waitFor(
+      tester,
+      find.byIcon(Icons.arrow_upward),
+      timeout: const Duration(seconds: 45),
+    );
+  }
 }
 
 Future<void> _waitFor(
