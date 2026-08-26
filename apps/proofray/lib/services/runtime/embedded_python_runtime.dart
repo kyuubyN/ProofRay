@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:math';
+
+import 'package:ffi/ffi.dart';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -59,6 +62,7 @@ class EmbeddedPythonRuntime {
         'timezone': timezone,
       });
       onStatus?.call('launching_embedded_python');
+      _ensureGlobalPythonSymbols();
       await SeriousPython.run(
         environmentVariables: <String, String>{
           'PROOFRAY_APP_BOOTSTRAP': bootstrap.path,
@@ -93,6 +97,51 @@ class EmbeddedPythonRuntime {
       rethrow;
     } finally {
       _started = false;
+    }
+  }
+
+  /// Loads libpython into the global symbol scope before the interpreter runs.
+  ///
+  /// Compiled C-extension wheels like NumPy never link against a libpython of
+  /// their own -- the manylinux convention is that the embedding process has
+  /// already made those symbols global. Dart's FFI `dlopen` uses RTLD_LOCAL, so
+  /// the interpreter that `dart_bridge` pulls in stays private and NumPy dies
+  /// on import with `undefined symbol: PyObject_SelfIter`.
+  ///
+  /// The shipped launcher works around this with LD_PRELOAD, but that only
+  /// covers being started through the launcher: `flutter test -d linux`, an IDE
+  /// run and anything else invoking the binary directly all bypass it, which is
+  /// exactly how the acceptance test ended up with no local core at all. Doing
+  /// it here fixes every launch path, and is a no-op when LD_PRELOAD already
+  /// did it: dlopen on an already-loaded library just promotes its scope.
+  void _ensureGlobalPythonSymbols() {
+    if (!Platform.isLinux && !Platform.isAndroid) return;
+    try {
+      final Directory libraries = Directory(
+        p.join(p.dirname(Platform.resolvedExecutable), 'lib'),
+      );
+      if (!libraries.existsSync()) return;
+      final List<FileSystemEntity> found = libraries
+          .listSync()
+          .where((FileSystemEntity item) =>
+              p.basename(item.path).startsWith('libpython3.') &&
+              p.basename(item.path).contains('.so'))
+          .toList();
+      if (found.isEmpty) return;
+      // RTLD_NOW | RTLD_GLOBAL: resolve immediately so a broken build fails
+      // here rather than deep inside an import, and publish the symbols.
+      final int flags = 0x00002 | 0x00100;
+      final _DlOpen dlopen = DynamicLibrary.process()
+          .lookupFunction<_DlOpenNative, _DlOpen>('dlopen');
+      final Pointer<Utf8> path = found.first.path.toNativeUtf8();
+      try {
+        dlopen(path, flags);
+      } finally {
+        malloc.free(path);
+      }
+    } on Object {
+      // Best effort. If this fails the launcher's LD_PRELOAD may still have
+      // covered it, and the port wait below reports a core that never started.
     }
   }
 
@@ -147,3 +196,6 @@ class EmbeddedPythonRuntime {
     await temporary.rename(destination.path);
   }
 }
+
+typedef _DlOpenNative = Pointer<Void> Function(Pointer<Utf8>, Int32);
+typedef _DlOpen = Pointer<Void> Function(Pointer<Utf8>, int);

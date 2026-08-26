@@ -12,6 +12,13 @@ void main() {
     tester.binding.platformDispatcher.localeTestValue = const Locale('en');
     addTearDown(tester.binding.platformDispatcher.clearLocaleTestValue);
     await tester.pumpWidget(const ProofRayApp());
+    // The launch screen covers the app while it starts. A finder locates
+    // widgets it hides, so waiting for the text alone would tap the animation.
+    await _waitWhile(
+      tester,
+      find.byKey(const ValueKey<String>('proofray-launch-wave')),
+      timeout: const Duration(seconds: 30),
+    );
     await _unlockIfRequired(tester, target: find.text('Continue'));
     await _waitFor(tester, find.text('Continue'));
 

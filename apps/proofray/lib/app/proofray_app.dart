@@ -615,7 +615,10 @@ class _ProofRayAppState extends State<ProofRayApp> {
             },
             child: _splashDone
                 ? const SizedBox.shrink()
-                : const _LaunchWave(),
+                : const KeyedSubtree(
+                    key: _LaunchWave.launchKey,
+                    child: _LaunchWave(),
+                  ),
           ),
         ),
       ],
@@ -708,6 +711,12 @@ class _ProofRayAppState extends State<ProofRayApp> {
 /// the subject are literally the same field rather than two stacked layers.
 class _LaunchWave extends StatelessWidget {
   const _LaunchWave();
+
+  /// Named so a test can wait for the launch screen to finish instead of
+  /// tapping through it: a finder still locates a widget that is covered, so
+  /// "the button exists" is not the same as "the button can be pressed".
+  static const ValueKey<String> launchKey =
+      ValueKey<String>('proofray-launch-wave');
 
   @override
   Widget build(BuildContext context) => const Scaffold(

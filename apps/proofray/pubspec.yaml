@@ -18,6 +18,9 @@ dependencies:
   file_selector: 1.1.0
   flutter_secure_storage: 10.3.1
   flutter_timezone: 5.1.0
+  # Direct dependency: the embedded runtime calls dlopen itself to publish
+  # libpython's symbols globally, which Dart's own DynamicLibrary cannot do.
+  ffi: 2.2.0
   path: 1.9.1
   path_provider: 2.1.5
   serious_python: 4.5.1
