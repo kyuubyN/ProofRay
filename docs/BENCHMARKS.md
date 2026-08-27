@@ -32,6 +32,7 @@ Do not compare values across rows without their protocol label. In particular:
 | Structured causal execution | Exact reopenable execution on frozen, typed inputs | Universal natural-language understanding |
 | LoCoMo personal recall | 90.77% annotated-turn hit at the measured high-recall cut | Final-answer accuracy or an independent cohort result |
 | MemGym EOP | 6/120 closed proof dossiers in a runtime-only consumed-development replay | MemGym answer accuracy |
+| MemGym consumer-endpoint (polish, local vs. cloud) | A consumed-development paired judge scored Horizon unpolished at 0.80, Horizon + cloud polish at 0.61, traditional BM25+cloud-LLM RAG (no Horizon) at 0.56, and Horizon + local 8-bit Qwen3-1.7B polish at 0.50 | A sealed, pre-registered, or product-advertised MemGym score, or a general small-model-amplification claim |
 | LongMemEval reader/composer | A consumed-development paired judge compared plain 0.7750 with proof-first 0.9375 | Current universal accuracy or an independent holdout result |
 
 The LongMemEval **0.7750** is not a score for the current engine. It is the

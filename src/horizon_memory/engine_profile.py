@@ -52,8 +52,15 @@ class EngineProfile:
     lexical_bm25_delta: float = 0.0
     sublexical_bm25_delta: float = 0.0
 
-    # Candidate-routing budget.
-    claim_limit: int = 800
+    # Candidate-routing budget. Raised from 800 to 8,192 (2026-08-26) after a fresh MemGym-DR
+    # pilot (`lab/runners/run_fresh_horizon_standalone_pilot.py`, 120 hop-mapped episodes,
+    # judged by `gemini-3.5-flash-lite`) found the old 800 ceiling silently truncated the
+    # candidate pool on this large-corpus benchmark before the precision-focused answer selector
+    # (`_pick_clean_answer`) ever got to choose among the full pool -- a general-purpose fix
+    # (candidate-pool sizing), not a MemGym-DR-specific tuning constant, and distinct from
+    # `MEMGYM_REFERENCE_PROFILE`'s `full_dossier` render mode, which is not adopted here since it
+    # bypasses `_pick_clean_answer` entirely.
+    claim_limit: int = 8_192
 
     # Dossier / composition budgets -- the exact values the published 0.95 judge-score result
     # (MemGym-DR, D144) was measured at.
