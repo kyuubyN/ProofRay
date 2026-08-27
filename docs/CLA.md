@@ -30,6 +30,22 @@ circumstance, and are not for sale or negotiation via this document. The
 founding role and technical-decision process described there apply
 regardless of who has signed this CLA or how much they have contributed.
 
+## Who must sign
+
+This CLA applies to **external contributors**: people or organizations
+submitting a contribution without acting as a project maintainer. It does not
+apply to the project's founder or its co-founders when they contribute in their
+maintainer capacity. Their work is governed by their founding/maintainer role,
+the repository's license policy and the project's internal contributor
+arrangements, rather than by the external-contributor CLA process.
+
+That exemption does not reduce the standard for an internal change. Founders,
+co-founders and other maintainers must still have the right to submit their
+work, preserve the applicable license expression and follow the same review,
+security and provenance rules. Conversely, co-authorship, a collaborator title
+or access to a discussion does not by itself make someone a maintainer or
+exempt an external contribution from this CLA.
+
 ## What you keep
 
 You keep full copyright ownership and authorship of your own contribution.
@@ -82,14 +98,18 @@ license grant `LICENSE_POLICY.md`'s own commercial-licensing option requires.
 
 ## How this is recorded
 
-A pull request from a first-time contributor is checked automatically (see
-`.github/workflows/cla.yml`); signing once covers every future contribution
-from that same account unless this document changes materially, in which
-case a re-signature is requested. Signatures are recorded in
+A pull request from a first-time external contributor is checked automatically
+(see `.github/workflows/cla.yml`); signing once covers every future external
+contribution from that same account unless this document changes materially, in
+which case a re-signature is requested. The workflow's maintainer allowlist is
+an operational mirror of official GitHub maintainer accounts and must be kept
+in sync when a co-founder is granted or loses maintainer status; it is not a
+way to grant that status. Signatures are recorded in
 `.github/cla-signatures.json` in this repository — a public, append-only
 record, not a private database.
 
 ## Scope
 
-This agreement applies to contributions submitted once the project accepts
-public contributions. `CONTRIBUTING.md` states the current status.
+This agreement applies to external contributions submitted once the project
+accepts public contributions. `CONTRIBUTING.md` states the current status and
+the maintainer/external boundary.

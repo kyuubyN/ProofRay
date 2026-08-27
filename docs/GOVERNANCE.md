@@ -11,6 +11,15 @@ maintainer. The founding role is historical and cannot be reassigned by a vote
 or contribution. This holds regardless of `CLA.md` — signing it is a license
 grant to the project, never a step toward governance rights.
 
+## Co-founder maintainers
+
+Yuri Yassumura Pecelin (`@YuriPecelin`) and Matheus Geraldi (`@Geraldi2000`)
+are the project's co-founders and internal maintainers. They are not external
+contributors for the purpose of `CLA.md`; their GitHub accounts are therefore
+listed in the CLA workflow's maintainer allowlist. This recognizes their
+internal role without changing Kaue Oliveira Costa's historical founding role,
+research lead or the technical-decision process below.
+
 ## Technical decisions
 
 Before a wider maintainer council exists, the founding maintainer accepts

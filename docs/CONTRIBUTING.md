@@ -29,14 +29,19 @@ review even for the founding maintainer's own pull requests (see
 (`.github/workflows/ci.yml`) and have every review conversation resolved
 before it can merge.
 
-By contributing, you agree to [`CLA.md`](CLA.md) — a license grant covering
+External contributors agree to [`CLA.md`](CLA.md) — a license grant covering
 the AGPL core, the Apache-dual-licensed `adapters/` files, and any future
-commercial license, plus a Developer Certificate of Origin-style
-certification that you have the right to submit your contribution. It is
-checked automatically on your first pull request (`.github/workflows/cla.yml`)
-and only needs signing once. Contributions to dual-licensed adapter files are
-submitted under that file's existing license expression; other code is
-submitted under AGPL-3.0-or-later.
+commercial license, plus a Developer Certificate of Origin-style certification
+that they have the right to submit their contribution. It is checked
+automatically on an external contributor's first pull request
+(`.github/workflows/cla.yml`) and only needs signing once.
+
+The CLA process does not apply to the project's founder or co-founders acting
+as maintainers. They remain subject to the repository's license, review,
+security and provenance rules. The workflow allowlist is maintained only for
+official maintainer GitHub accounts; it does not confer maintainer status.
+Contributions to dual-licensed adapter files are submitted under that file's
+existing license expression; other code is submitted under AGPL-3.0-or-later.
 
 **Signing the CLA does not grant governance rights, maintainership, voting
 power, equity or employment** — see [`GOVERNANCE.md`](GOVERNANCE.md) for how

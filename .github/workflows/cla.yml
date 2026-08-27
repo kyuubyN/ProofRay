@@ -5,7 +5,9 @@ name: CLA Assistant
 # This workflow only ever reads/writes `.github/cla-signatures.json` and posts a PR comment/label
 # via the pinned `contributor-assistant/github-action` -- it never checks out or executes the
 # contributor's own branch code, so it does not carry that trigger's usual "runs untrusted code
-# with repo secrets" risk. See CLA.md / CONTRIBUTING.md for what signing does and does not grant.
+# with repo secrets" risk. The allowlist is only for founder/co-founder
+# maintainer accounts; it must never be used to grant maintainer status. See
+# CLA.md / CONTRIBUTING.md for the external-contributor boundary.
 on:
   issue_comment:
     types: [created]
@@ -31,7 +33,9 @@ jobs:
           path-to-signatures: ".github/cla-signatures.json"
           path-to-document: "https://github.com/${{ github.repository }}/blob/main/docs/CLA.md"
           branch: "cla-signatures"
-          allowlist: kyuubyN
+          # Official founder/co-founder maintainer accounts only. External
+          # contributors must remain outside this list and sign the CLA.
+          allowlist: kyuubyN,YuriPecelin,Geraldi2000
           custom-pr-sign-comment: "I have read the CLA Document and I hereby sign the CLA"
           custom-notsigned-prcomment: >-
             Thanks for the pull request! Before this can be reviewed, please sign the
