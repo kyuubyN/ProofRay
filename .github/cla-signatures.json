@@ -1,1 +1,12 @@
-{"signedContributors":[]}
+{
+  "signedContributors": [
+    {
+      "name": "waylake",
+      "id": 101973534,
+      "comment_id": 5435706015,
+      "created_at": "2026-08-27T07:23:03Z",
+      "repoId": 1332582009,
+      "pullRequestNo": 32
+    }
+  ]
+}
