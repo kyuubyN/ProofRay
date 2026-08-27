@@ -34,10 +34,10 @@ regardless of who has signed this CLA or how much they have contributed.
 
 This CLA applies to **external contributors**: people or organizations
 submitting a contribution without acting as a project maintainer. It does not
-apply to the project's founder or its co-founders when they contribute in their
-maintainer capacity. Their work is governed by their founding/maintainer role
-and the repository's applicable license policy, rather than by the
-external-contributor CLA process.
+apply to the project's founder or to internal maintainers appointed by the
+founder when they contribute in that maintainer capacity. Their work is
+governed by their maintainer role and the repository's applicable license
+policy, rather than by the external-contributor CLA process.
 
 This is an operational and governance exemption only. It does **not** create
 or presume a copyright assignment, equity, revenue share, compensation,
@@ -46,8 +46,8 @@ Any such term requires a separate, express agreement signed by the relevant
 parties; it must not be inferred from this repository document or the CLA
 allowlist.
 
-That exemption does not reduce the standard for an internal change. Founders,
-co-founders and other maintainers must still have the right to submit their
+That exemption does not reduce the standard for an internal change. The
+founder and internal maintainers must still have the right to submit their
 work, preserve the applicable license expression and follow the same review,
 security and provenance rules. Conversely, co-authorship, a collaborator title
 or access to a discussion does not by itself make someone a maintainer or
@@ -109,9 +109,9 @@ A pull request from a first-time external contributor is checked automatically
 (see `.github/workflows/cla.yml`); signing once covers every future external
 contribution from that same account unless this document changes materially, in
 which case a re-signature is requested. The workflow's maintainer allowlist is
-an operational mirror of official GitHub maintainer accounts and must be kept
-in sync when a co-founder is granted or loses maintainer status; it is not a
-way to grant that status. Signatures are recorded in
+an operational mirror of internal maintainer GitHub accounts and must be kept
+in sync when the founder appoints or removes a maintainer; it is not a way to
+grant that status. Signatures are recorded in
 `.github/cla-signatures.json` in this repository — a public, append-only
 record, not a private database.
 

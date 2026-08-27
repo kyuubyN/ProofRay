@@ -11,14 +11,29 @@ maintainer. The founding role is historical and cannot be reassigned by a vote
 or contribution. This holds regardless of `CLA.md` — signing it is a license
 grant to the project, never a step toward governance rights.
 
-## Co-founder maintainers
+## Final decision authority
+
+The founding maintainer holds final decision authority for the project. This
+includes its technical direction, architecture, roadmap, releases, maintainer
+appointments, public positioning, name and trademark policy, and the
+resolution of disputes. Co-maintainers may review, advise, object and carry
+out decisions, but their approval or objection does not create a vote or veto
+over a final decision by the founding maintainer.
+
+This governance rule does not override rights already granted under an
+applicable software license, nor any separate agreement expressly signed by
+the relevant parties. It is a repository governance policy, not a corporate,
+employment, equity, compensation or ownership agreement.
+
+## Internal maintainers
 
 Yuri Yassumura Pecelin (`@YuriPecelin`) and Matheus Geraldi (`@Geraldi2000`)
-are the project's co-founders and internal maintainers. They are not external
-contributors for the purpose of `CLA.md`; their GitHub accounts are therefore
-listed in the CLA workflow's maintainer allowlist. This recognizes their
-internal role without changing Kaue Oliveira Costa's historical founding role,
-research lead or the technical-decision process below.
+are invited internal maintainers. They are not external contributors for the
+purpose of `CLA.md`; their GitHub accounts are therefore listed in the CLA
+workflow's maintainer allowlist. This recognizes their operational maintainer
+role without granting founding status, ownership, a vote, a veto, or any right
+that changes Kaue Oliveira Costa's historical founding role, research lead or
+final-decision authority.
 
 ## Technical decisions
 
