@@ -173,6 +173,16 @@ from testing it against messy, real-world data are worth knowing before you conn
 - **Ask one thing at a time when you can.** ProofRay can and does answer questions that need facts
   from more than one place, but a single, focused question is the easiest case for it to get
   completely right.
+- **If your question is unavoidably multi-part, tell ProofRay where each part's own evidence
+  lives.** A single long question that bundles several sub-questions together dilutes ranking: the
+  engine has no way to tell which part of your wording belongs to which document. If you're calling
+  `HorizonAnswerEngine.answer()` directly and you already know the sub-question and the documents
+  behind each part (a multi-turn conversation, a form with several fields, a multi-step research
+  question), pass one `AnswerContextIntent` per part via the `context_intents` argument, each
+  scoped to that part's own `fact_ids`. This is zero-oracle: it only needs you to know which
+  documents go with which part of the question, never the answer itself. On a real multi-hop
+  benchmark, adding this raised the engine's own mean score by real, measured points over sending
+  the whole composite question as one string.
 
 **You don't need to write carefully.** Every number above, and every real-corpus result in
 [Benchmarks](../docs/BENCHMARKS.md), was measured against genuinely casual, typo-laden questions,

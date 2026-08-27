@@ -24,7 +24,10 @@ class DefaultProfileTests(unittest.TestCase):
         self.assertEqual(DEFAULT_PROFILE.global_sort_alpha, 0.3)
         self.assertEqual(DEFAULT_PROFILE.anchor_bonus, 0.3)
         self.assertEqual(DEFAULT_PROFILE.specificity_bonus, 0.5)
-        self.assertEqual(DEFAULT_PROFILE.claim_limit, 800)
+        # claim_limit raised 800 -> 8,192 (2026-08-26): the old ceiling silently truncated the
+        # candidate pool on a large-corpus benchmark before the answer selector could act on the
+        # full pool; see EngineProfile's own field comment for the fresh evidence behind this.
+        self.assertEqual(DEFAULT_PROFILE.claim_limit, 8_192)
         self.assertEqual(DEFAULT_PROFILE.claim_weights, CLAIM_GENERATOR_DEFAULT_WEIGHTS)
         self.assertEqual(DEFAULT_PROFILE.conformal_weights, LEXICAL_SUBLEXICAL_WEIGHTS)
         self.assertEqual(DEFAULT_PROFILE.lexical_bm25_delta, 0.0)
@@ -180,7 +183,10 @@ class NamedPresetTests(unittest.TestCase):
         self.assertEqual(CONVERSATIONAL_HIGH_RECALL_PROFILE.claim_limit, 64)
         self.assertEqual(CONVERSATIONAL_HIGH_RECALL_PROFILE.answer_bytes, 24_576)
         self.assertEqual(CONVERSATIONAL_HIGH_RECALL_PROFILE.acquisition_bytes, 65_536)
-        self.assertEqual(DEFAULT_PROFILE.claim_limit, 800)
+        # This preset's own frozen 64-cut is independent of DEFAULT_PROFILE's own claim_limit
+        # (raised to 8,192, 2026-08-26); assert only that they remain distinct values.
+        self.assertNotEqual(CONVERSATIONAL_HIGH_RECALL_PROFILE.claim_limit,
+                            DEFAULT_PROFILE.claim_limit)
 
     def test_team_memory_is_a_real_middle_ground_not_default_or_personal(self):
         self.assertLess(TEAM_MEMORY_PROFILE.answer_relevance_gate_ratio,
