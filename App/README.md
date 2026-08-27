@@ -111,6 +111,8 @@ Env vars `config.Load` reads:
 - `HORIZON_API_BASE_URL` (default `http://127.0.0.1:8420`) — where `api/server.py` is listening.
 - `INCLUDE_SOURCES` (`1` to enable) — requests the full verified claim list, not just the
   compressed answer.
+- `PROOFRAY_API_TOKEN` / `HORIZON_API_TOKEN` (optional) — see "Authenticating with HorizonAPI"
+  below; usually unnecessary, `horizonclient` finds the token on its own.
 - Per-backend (all optional except where noted; see each connector's `New` for full details):
   - `postgres`: `POSTGRES_DSN` (required), `POSTGRES_TABLE` (default `articles`)
   - `sqlite`: `SQLITE_PATH` (required), `SQLITE_TABLE` (default `support_articles`)
@@ -136,7 +138,9 @@ selected backend show, via a small inline script), type a question, submit. Same
 `horizonclient`, same HorizonAPI underneath — this is `cmd/horizon-connect`'s form-driven twin, not
 a different pipeline. `HORIZON_API_BASE_URL` (default `http://127.0.0.1:8420`) and `WEB_ADDR`
 (default `127.0.0.1:8080`, bind only to a trusted interface — see "Not done here" below) are its
-only env vars; everything else comes from the form on each request. For `dynamodb`, credentials
+main env vars; everything else comes from the form on each request. `PROOFRAY_API_TOKEN` /
+`HORIZON_API_TOKEN` and the credentials-path overrides from "Authenticating with HorizonAPI" below
+also apply here, though they're normally unnecessary. For `dynamodb`, credentials
 still come from the process environment (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) — not a form
 field, same reasoning as `api/server.py` never taking a polish API key in the request body (see
 `../api/README.md`).
@@ -153,6 +157,24 @@ button. This page's whole look (dark palette, serif heading, monospace labels/bu
 1-2px corners) is deliberately copied from `website/templates/index.html`'s CSS variables and
 type scale, not just the nav bar, so the two feel like one product wearing two different forms
 rather than two unrelated tools bolted together.
+
+### Authenticating with HorizonAPI
+
+`api/server.py` requires a bearer token on every route except `GET /v1/health` (added after this
+Go client was first written — see `api/machine_auth.py`). `horizonclient` handles this
+automatically and needs no configuration in the common case: on every request it looks for
+`PROOFRAY_API_TOKEN` or `HORIZON_API_TOKEN` in the environment first, and otherwise reads the token
+straight out of the same credentials file `api/server.py` itself generates on first run
+(`~/.config/proofray/api_credentials.json`, or `~/.config/horizon-memory/api_credentials.json` for
+an installation predating the rebrand; `%APPDATA%\proofray\api_credentials.json` on Windows).
+`horizonclient` only ever reads that file — it never creates or rotates the token, so if
+`api/server.py` has never been run, there is nothing to read yet and requests will 401 until it has
+been started at least once.
+
+Set `PROOFRAY_API_CREDENTIALS_PATH` / `HORIZON_API_CREDENTIALS_PATH` to point at a non-default
+credentials file (mirrors the same override `api/machine_auth.py` supports), or `PROOFRAY_API_TOKEN`
+to skip the file lookup entirely (e.g. in CI, or when the API and the Go client don't share a
+filesystem).
 
 ### Testing against real backends locally
 
@@ -219,6 +241,46 @@ same "no auth, trusted network only" tradeoff `../api/README.md` already made fo
 just showing up again here because these connectors are, by design, "connect to whatever
 DSN/URI/host the caller gives you." See the entries below for exactly what that means and where
 the line is.
+
+## Security audit (Round 4, Maestri terminals) — auth integration
+
+After `origin/main` added `api/machine_auth.py` (bearer-token auth on every route but
+`GET /v1/health`), this client was updated to send that token automatically — see
+"Authenticating with HorizonAPI" above. That small diff (`auth.go`, new; `client.go`, the header)
+plus the one-line fix to `api/machine_auth.py::verify_bearer_token` (see `../api/README.md` or its
+own docstring — `secrets.compare_digest` raised `TypeError` instead of failing cleanly on a
+non-ASCII bearer token) went through the same multi-terminal workflow again.
+
+Antigravity refused the scope again, same guardrail as every prior round; redirected to Codex this
+time (the user switched to Codex Plus specifically because Antigravity had stopped being useful).
+Codex reviewed the `machine_auth.py` fix and found nothing wrong — its own test with non-ASCII and
+emoji tokens confirmed a clean 401, no exception, matching what was already verified by hand before
+asking for the audit. OpenCode reviewed `auth.go`/`client.go`: 7 findings, 0 Critical/High, 4
+Medium, 3 Low. Three were cheap and worth taking:
+
+- Falling back to the pre-rebrand `~/.config/horizon-memory/api_credentials.json` path now logs a
+  warning instead of silently using a possibly-stale token.
+- A credentials file readable by users other than its owner (looser than the `0600`
+  `api/machine_auth.py` itself writes) now logs a warning.
+- No token found at all now returns a distinct `ErrNoToken` instead of sending the request without
+  an `Authorization` header and letting the server's own 401 stand in for it — that 401 looked
+  identical to "wrong token," which made a simple misconfiguration (a typoed env var name) harder
+  to tell apart from an actual bad credential.
+
+Two were checked and are not real issues, not applied:
+
+- A CRLF/control character in the token "could inject an HTTP header" — tested directly: Go's
+  `net/http` rejects any request with such a header value outright (`invalid header field value`)
+  before it reaches the wire. There's no smuggling path here to fix.
+- Re-reading the credentials file on every request (rather than caching it once) was flagged as a
+  TOCTOU race. The described attacker already needs local write access to this process's own
+  `~/.config/proofray/` — at that point they can read the token file directly; re-reading it
+  doesn't hand them a new capability. Reading fresh on every request is also what lets a
+  long-running `horizon-web` process pick up the token once `api/server.py` generates it, without
+  needing a restart, so it stays as-is on purpose.
+
+Token rotation/refresh and custom TLS/mTLS support were flagged again as gaps but are scope
+decisions, not bugs (the TLS one is the same one named below since Round 3).
 
 ## Not done here (named on purpose)
 

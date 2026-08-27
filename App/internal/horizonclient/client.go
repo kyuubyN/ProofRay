@@ -7,11 +7,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 )
+
+// ErrNoToken is returned instead of making the request when no bearer token could be resolved
+// (see auth.go) -- distinct from an *APIError so a 401 that HorizonAPI itself rejected (bad or
+// stale token) isn't confused with this client never having found one to send.
+var ErrNoToken = errors.New(
+	"horizonclient: no bearer token found (set PROOFRAY_API_TOKEN/HORIZON_API_TOKEN, or start " +
+		"api/server.py at least once so it generates its credentials file)")
 
 // Client talks to one running HorizonAPI instance (api/server.py, default
 // http://127.0.0.1:8420).
@@ -78,6 +86,15 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	// GET /v1/health is the one route api/server.py leaves open for monitoring tools; every
+	// other route 401s without this (api/machine_auth.py, added after this client was written).
+	if path != "/v1/health" {
+		token := resolveToken()
+		if token == "" {
+			return ErrNoToken
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
