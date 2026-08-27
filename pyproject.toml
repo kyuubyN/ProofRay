@@ -29,9 +29,9 @@ proofray = "horizon_memory._cli:main"
 horizon = "horizon_memory._cli:main"
 
 [project.urls]
-Homepage = "https://github.com/kyuubyN/HorizonMemory"
-Repository = "https://github.com/kyuubyN/HorizonMemory"
-Issues = "https://github.com/kyuubyN/HorizonMemory/issues"
+Homepage = "https://github.com/kyuubyN/ProofRay"
+Repository = "https://github.com/kyuubyN/ProofRay"
+Issues = "https://github.com/kyuubyN/ProofRay/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
