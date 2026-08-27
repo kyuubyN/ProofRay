@@ -12,18 +12,21 @@
 The founding role above is historical and cannot be reassigned by a vote or
 contribution (see `GOVERNANCE.md`). It is distinct from co-authorship below.
 
-## Co-authors
+## Co-founders and co-authors
 
-- **Yuri Yassumura Pecelin** — co-author.
+- **Yuri Yassumura Pecelin** — co-founder, co-author and maintainer
+  (`@YuriPecelin`).
   - ORCID: <https://orcid.org/0009-0007-9766-9809>
   - Public contact: <yuripecelin@gmail.com>
 
-- **Matheus Geraldi** — co-author.
+- **Matheus Geraldi** — co-founder, co-author and maintainer
+  (`@Geraldi2000`).
   - ORCID: <https://orcid.org/0009-0009-9059-7827>
   - Public contact: <Matheus.ge.si@gmail.com>
 
-Co-authors are credited here and in `CITATION.cff`, in the order they joined
-the project.
+Co-founders/co-authors are credited here and in `CITATION.cff`, in the order
+they joined the project. Their maintainer role does not alter the founding
+credit or technical-decision process described in `GOVERNANCE.md`.
 
 Future contributions are recorded by Git history and release notes. A
 contribution does not transfer the project's name, origin, or founding credit.
