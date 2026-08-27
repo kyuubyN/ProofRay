@@ -35,9 +35,16 @@ regardless of who has signed this CLA or how much they have contributed.
 This CLA applies to **external contributors**: people or organizations
 submitting a contribution without acting as a project maintainer. It does not
 apply to the project's founder or its co-founders when they contribute in their
-maintainer capacity. Their work is governed by their founding/maintainer role,
-the repository's license policy and the project's internal contributor
-arrangements, rather than by the external-contributor CLA process.
+maintainer capacity. Their work is governed by their founding/maintainer role
+and the repository's applicable license policy, rather than by the
+external-contributor CLA process.
+
+This is an operational and governance exemption only. It does **not** create
+or presume a copyright assignment, equity, revenue share, compensation,
+commercial-license grant or other financial arrangement between maintainers.
+Any such term requires a separate, express agreement signed by the relevant
+parties; it must not be inferred from this repository document or the CLA
+allowlist.
 
 That exemption does not reduce the standard for an internal change. Founders,
 co-founders and other maintainers must still have the right to submit their

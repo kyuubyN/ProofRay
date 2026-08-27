@@ -39,7 +39,10 @@ automatically on an external contributor's first pull request
 The CLA process does not apply to the project's founder or co-founders acting
 as maintainers. They remain subject to the repository's license, review,
 security and provenance rules. The workflow allowlist is maintained only for
-official maintainer GitHub accounts; it does not confer maintainer status.
+official maintainer GitHub accounts; it does not confer maintainer status or
+create a copyright assignment, equity, compensation, revenue share or
+commercial-license arrangement. Any such agreement must be separate, express
+and signed by the relevant parties.
 Contributions to dual-licensed adapter files are submitted under that file's
 existing license expression; other code is submitted under AGPL-3.0-or-later.
 
