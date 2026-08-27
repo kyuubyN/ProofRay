@@ -1,8 +1,5 @@
 # Contributing
 
-The project is not accepting public contributions during the private alpha.
-This file defines the policy intended for the first public release.
-
 Contributions must include tests, preserve provenance and abstention semantics,
 and distinguish measured results from hypotheses. Do not submit confidential
 information, benchmark answer keys, personal data or code you cannot license.
@@ -46,8 +43,7 @@ such agreement must be separate, express and signed by the relevant parties.
 Contributions to dual-licensed adapter files are submitted under that file's
 existing license expression; other code is submitted under AGPL-3.0-or-later.
 
-**Signing the CLA does not grant governance rights, maintainership, voting
-power, equity or employment** — see [`GOVERNANCE.md`](GOVERNANCE.md) for how
+**Signing the CLA does not grant governance rights, maintainership or equity** — see [`GOVERNANCE.md`](GOVERNANCE.md) for how
 technical decisions are actually made; contributing code never changes that
 by itself.
 
