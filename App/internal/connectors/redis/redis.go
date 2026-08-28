@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"horizonmemory/connector/internal/connectors"
+	"horizonmemory/connector/internal/document"
 )
 
 func init() {
@@ -23,8 +24,9 @@ func init() {
 const defaultKeyPrefix = "articles:"
 
 type Connector struct {
-	client *redis.Client
-	prefix string
+	client       *redis.Client
+	prefix       string
+	maxDocuments int
 }
 
 // New builds a Redis connector from opts/env: url (REDIS_URL, required, e.g.
@@ -51,7 +53,13 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 
 	prefix := opts.Get("prefix", "REDIS_KEY_PREFIX", defaultKeyPrefix)
 
-	return &Connector{client: client, prefix: prefix}, nil
+	maxDocuments, err := connectors.MaxDocuments(opts)
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("redis: %w", err)
+	}
+
+	return &Connector{client: client, prefix: prefix, maxDocuments: maxDocuments}, nil
 }
 
 func (c *Connector) Name() string { return "redis" }
@@ -59,7 +67,7 @@ func (c *Connector) Name() string { return "redis" }
 // FetchDocuments scans keys under the configured prefix (SCAN, not KEYS -- safe against a large
 // keyspace) and GETs each value, the same pattern redis_documents_example.py's scan_iter loop
 // follows. Keys are sorted for a stable, reproducible document order.
-func (c *Connector) FetchDocuments(ctx context.Context) ([]string, error) {
+func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, error) {
 	var keys []string
 	iter := c.client.Scan(ctx, 0, c.prefix+"*", 0).Iterator()
 	for iter.Next(ctx) {
@@ -70,7 +78,17 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(keys)
 
-	documents := make([]string, 0, len(keys))
+	if len(keys) > c.maxDocuments {
+		return nil, fmt.Errorf(
+			"redis: prefix %q matches more than %d keys: %w -- narrow the prefix or raise the "+
+				"ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
+			c.prefix, c.maxDocuments, connectors.ErrCorpusTooLarge)
+	}
+
+	// The key itself is the record's identity here -- it is already the primary key, so it needs
+	// no derivation to be reopenable.
+	session := "redis:" + c.prefix
+	documents := make([]document.Document, 0, len(keys))
 	for _, key := range keys {
 		value, err := c.client.Get(ctx, key).Result()
 		if err == redis.Nil {
@@ -79,7 +97,7 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("redis: getting key %q: %w", key, err)
 		}
-		documents = append(documents, value)
+		documents = append(documents, document.New(session, key, value, len(documents)))
 	}
 	return documents, nil
 }

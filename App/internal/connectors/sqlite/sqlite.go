@@ -11,6 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"horizonmemory/connector/internal/connectors"
+	"horizonmemory/connector/internal/document"
 )
 
 func init() {
@@ -20,8 +21,9 @@ func init() {
 const defaultTable = "support_articles"
 
 type Connector struct {
-	db    *sql.DB
-	table string
+	db           *sql.DB
+	table        string
+	maxDocuments int
 }
 
 // New builds a SQLite connector from opts["path"] or SQLITE_PATH, the path to an existing
@@ -52,27 +54,42 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("sqlite: table name: %w", err)
 	}
 
-	return &Connector{db: db, table: table}, nil
+	maxDocuments, err := connectors.MaxDocuments(opts)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("sqlite: %w", err)
+	}
+
+	return &Connector{db: db, table: table, maxDocuments: maxDocuments}, nil
 }
 
 func (c *Connector) Name() string { return "sqlite" }
 
-// FetchDocuments runs "SELECT body FROM <table> ORDER BY id", matching the
-// (id, body) shape sqlite_documents_example.py's fixture uses.
-func (c *Connector) FetchDocuments(ctx context.Context) ([]string, error) {
-	rows, err := c.db.QueryContext(ctx, fmt.Sprintf("SELECT body FROM %s ORDER BY id", c.table))
+// FetchDocuments runs "SELECT id, body FROM <table> ORDER BY id", matching the (id, body) shape
+// sqlite_documents_example.py's fixture uses. The id is selected, not just ordered by: it becomes
+// the document's identity, so a claim verified from this row can be traced back to it (see
+// internal/document).
+func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, error) {
+	rows, err := c.db.QueryContext(ctx, fmt.Sprintf("SELECT id, body FROM %s ORDER BY id", c.table))
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: query: %w", err)
 	}
 	defer rows.Close()
 
-	var documents []string
+	session := "sqlite:" + c.table
+	var documents []document.Document
 	for rows.Next() {
-		var body string
-		if err := rows.Scan(&body); err != nil {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
 			return nil, fmt.Errorf("sqlite: scanning row: %w", err)
 		}
-		documents = append(documents, body)
+		documents = append(documents, document.New(session, id, body, len(documents)))
+		if len(documents) > c.maxDocuments {
+			return nil, fmt.Errorf(
+				"sqlite: table %q holds more than %d documents: %w -- narrow the table or raise "+
+					"the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
+				c.table, c.maxDocuments, connectors.ErrCorpusTooLarge)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("sqlite: reading rows: %w", err)

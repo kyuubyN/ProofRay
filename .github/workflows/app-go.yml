@@ -1,0 +1,82 @@
+name: App (Go connector)
+
+# The Go connector in App/ is a separate module from the Python package, with its own toolchain.
+# It is not covered by ci.yml (Python) or proofray-app.yml (the Flutter/Python native app), so
+# without this workflow nothing checks it on a pull request.
+on:
+  pull_request:
+    paths:
+      - "App/**"
+      - ".github/workflows/app-go.yml"
+  push:
+    branches: [main]
+    paths:
+      - "App/**"
+      - ".github/workflows/app-go.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: app-go-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: App
+
+jobs:
+  build-and-test:
+    name: Build, vet and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: App/go.mod
+          cache-dependency-path: App/go.sum
+
+      # Fails the run if any file is not gofmt'd. `gofmt -l` exits 0 either way and only prints
+      # offending paths, so the file list has to be turned into the failure signal explicitly.
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Verify go.mod and go.sum are tidy
+        run: |
+          go mod tidy -diff
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # -race catches data races in the web server's concurrent request handling, which a plain
+      # `go test` would not surface.
+      - name: Test
+        run: go test -race ./...
+
+  vulnerabilities:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: App/go.mod
+          cache-dependency-path: App/go.sum
+
+      # Reports only vulnerabilities actually reachable from this module's code, so a finding
+      # here is a real exposure rather than a dependency-tree advisory.
+      - name: Scan dependencies for known vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

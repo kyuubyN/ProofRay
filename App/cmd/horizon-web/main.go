@@ -18,6 +18,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 
@@ -35,10 +36,20 @@ import (
 	_ "horizonmemory/connector/internal/connectors/sqlite"
 )
 
+// allowRemoteEnv opts a deployment out of the loopback-only bind check below. It is deliberately
+// a separate variable from WEB_ADDR: binding a public interface then becomes something an
+// operator states outright, not something that happens by editing an address.
+const allowRemoteEnv = "HORIZON_WEB_ALLOW_REMOTE"
+
 func main() {
 	apiBaseURL := getenvDefault("HORIZON_API_BASE_URL", "http://127.0.0.1:8420")
 	addr := getenvDefault("WEB_ADDR", "127.0.0.1:8080")
 	benchmarkURL := getenvDefault("HORIZON_BENCHMARK_URL", "http://127.0.0.1:5050")
+
+	if err := checkBindAddr(addr, os.Getenv(allowRemoteEnv) != ""); err != nil {
+		fmt.Fprintln(os.Stderr, "horizon-web:", err)
+		os.Exit(1)
+	}
 
 	server := webui.New(horizonclient.New(apiBaseURL), apiBaseURL, benchmarkURL)
 
@@ -47,6 +58,59 @@ func main() {
 		fmt.Fprintln(os.Stderr, "horizon-web:", err)
 		os.Exit(1)
 	}
+}
+
+// checkBindAddr refuses to start on a non-loopback interface unless the operator opted in.
+//
+// This server has no authentication, no CSRF token, and no rate limiting, and every connector is
+// an intentional SSRF surface: whoever reaches /ask can make this process open a connection to
+// any host it can route to. On loopback that is bounded by who can already run code on the
+// machine. On any other interface it is bounded by the network -- so reaching a public bind by
+// accident (a stray WEB_ADDR=0.0.0.0:8080 in a compose file) would silently publish all of it.
+// README's "Not done here" already documents the risk; documentation alone does not stop the
+// accident, so the unsafe bind has to be stated rather than merely reached.
+func checkBindAddr(addr string, allowRemote bool) error {
+	if allowRemote {
+		return nil
+	}
+
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("WEB_ADDR %q is not a valid host:port address: %w", addr, err)
+	}
+
+	// An empty host (":8080") means every interface -- the same exposure as 0.0.0.0.
+	if host != "" {
+		if ip := net.ParseIP(host); ip != nil {
+			if ip.IsLoopback() {
+				return nil
+			}
+		} else {
+			// A hostname rather than a literal: loopback only if every address it resolves to is.
+			addrs, resolveErr := net.LookupIP(host)
+			if resolveErr != nil {
+				return fmt.Errorf("WEB_ADDR %q: cannot resolve host %q: %w", addr, host, resolveErr)
+			}
+			allLoopback := len(addrs) > 0
+			for _, ip := range addrs {
+				if !ip.IsLoopback() {
+					allLoopback = false
+					break
+				}
+			}
+			if allLoopback {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf(
+		"refusing to bind %q: it is not a loopback address, and this server has no auth, no CSRF\n"+
+			"protection, and no rate limiting -- anyone who can reach it can make this process\n"+
+			"connect to any database host it can route to (see App/README.md, \"Not done here\").\n"+
+			"Bind 127.0.0.1 instead, or set %s=1 to accept that exposure deliberately.",
+		addr, allowRemoteEnv,
+	)
 }
 
 func getenvDefault(key, fallback string) string {

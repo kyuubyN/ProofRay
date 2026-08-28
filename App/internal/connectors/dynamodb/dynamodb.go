@@ -15,8 +15,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"horizonmemory/connector/internal/connectors"
+	"horizonmemory/connector/internal/document"
 )
 
 func init() {
@@ -26,8 +28,9 @@ func init() {
 const defaultTable = "articles"
 
 type Connector struct {
-	client *dynamodb.Client
-	table  string
+	client       *dynamodb.Client
+	table        string
+	maxDocuments int
 }
 
 type item struct {
@@ -66,38 +69,72 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 
 	table := opts.Get("table", "DYNAMODB_TABLE", defaultTable)
 
+	maxDocuments, err := connectors.MaxDocuments(opts)
+	if err != nil {
+		return nil, fmt.Errorf("dynamodb: %w", err)
+	}
+
 	if _, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: aws.String(table)}); err != nil {
 		return nil, fmt.Errorf("dynamodb: describing table %q: %w", table, err)
 	}
 
-	return &Connector{client: client, table: table}, nil
+	return &Connector{client: client, table: table, maxDocuments: maxDocuments}, nil
 }
 
 func (c *Connector) Name() string { return "dynamodb" }
 
-// FetchDocuments runs a Scan over the whole table, the same operation
-// dynamodb_documents_example.py runs, sorts items by id (matching the Python example's
-// `sorted(response["Items"], key=lambda x: x["id"])`), and returns each item's body as one
-// document.
-func (c *Connector) FetchDocuments(ctx context.Context) ([]string, error) {
-	output, err := c.client.Scan(ctx, &dynamodb.ScanInput{TableName: aws.String(c.table)})
-	if err != nil {
-		return nil, fmt.Errorf("dynamodb: scan: %w", err)
+// FetchDocuments Scans the whole table, sorts items by id (matching
+// dynamodb_documents_example.py's `sorted(response["Items"], key=lambda x: x["id"])`), and
+// returns each item's body as one document.
+//
+// A Scan returns at most 1 MB per call, so a single call covers only the first page of any table
+// larger than that. This follows LastEvaluatedKey until the table is exhausted -- stopping at the
+// first page would hand Horizon a partial corpus while reporting nothing, and an answer composed
+// from a silently truncated corpus is exactly the kind of unearned confidence this project
+// refuses elsewhere. A table larger than the ceiling fails with ErrCorpusTooLarge rather than
+// returning what happened to fit.
+func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, error) {
+	var items []item
+	var startKey map[string]types.AttributeValue
+
+	for {
+		output, err := c.client.Scan(ctx, &dynamodb.ScanInput{
+			TableName:         aws.String(c.table),
+			ExclusiveStartKey: startKey,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("dynamodb: scan: %w", err)
+		}
+
+		for _, raw := range output.Items {
+			var it item
+			if err := attributevalue.UnmarshalMap(raw, &it); err != nil {
+				return nil, fmt.Errorf("dynamodb: unmarshaling item: %w", err)
+			}
+			items = append(items, it)
+		}
+
+		if len(items) > c.maxDocuments {
+			return nil, fmt.Errorf(
+				"dynamodb: table %q holds more than %d documents: %w -- narrow the table or raise "+
+					"the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
+				c.table, c.maxDocuments, connectors.ErrCorpusTooLarge,
+			)
+		}
+
+		// An empty LastEvaluatedKey means this was the final page.
+		if len(output.LastEvaluatedKey) == 0 {
+			break
+		}
+		startKey = output.LastEvaluatedKey
 	}
 
-	items := make([]item, 0, len(output.Items))
-	for _, raw := range output.Items {
-		var it item
-		if err := attributevalue.UnmarshalMap(raw, &it); err != nil {
-			return nil, fmt.Errorf("dynamodb: unmarshaling item: %w", err)
-		}
-		items = append(items, it)
-	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 
-	documents := make([]string, 0, len(items))
+	session := "dynamodb:" + c.table
+	documents := make([]document.Document, 0, len(items))
 	for _, it := range items {
-		documents = append(documents, it.Body)
+		documents = append(documents, document.New(session, it.ID, it.Body, len(documents)))
 	}
 	return documents, nil
 }

@@ -1,12 +1,12 @@
 // Package connectors defines the shape every database backend plugs into. Horizon itself has no
-// database of its own -- every call to HorizonAnswerEngine (and its HTTP twin, POST /v1/answers)
-// takes a plain []string of documents. A Connector's only job is: reach into one specific
-// database, run one specific query, and hand back that []string. Everything downstream (routing,
+// database of its own: a Connector's only job is to reach into one specific database, run one
+// specific query, and hand back the documents it found. Everything downstream (routing,
 // verification, composition) stays in the Python engine behind api/server.py.
 //
-// This mirrors HorizonAI Engine/examples/*_documents_example.py one-to-one: each example is a
-// query against one backend, printed instead of shipped over HTTP. A Connector is the same query,
-// wired to the real API instead.
+// Each connector mirrors HorizonAI Engine/examples/*_documents_example.py -- the same query,
+// wired to the real API instead of printed. It differs from those examples in one way that
+// matters: a connector carries each record's identity along with its text (see
+// internal/document), so a verified claim can be traced back to the row that produced it.
 package connectors
 
 import (
@@ -14,6 +14,9 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
+
+	"horizonmemory/connector/internal/document"
 )
 
 // Connector fetches the current corpus from one database backend.
@@ -21,9 +24,10 @@ type Connector interface {
 	// Name identifies the backend for logging (e.g. "postgres", "sqlite").
 	Name() string
 
-	// FetchDocuments runs the backend-specific query and returns the resulting rows as plain
-	// text, in the same []string shape POST /v1/answers expects for its "documents" field.
-	FetchDocuments(ctx context.Context) ([]string, error)
+	// FetchDocuments runs the backend-specific query and returns the resulting rows as
+	// structured documents -- each carrying the identity of the record it came from, so an
+	// answer's provenance can be reopened against this database (see internal/document).
+	FetchDocuments(ctx context.Context) ([]document.Document, error)
 
 	// Close releases any held connection/pool. Safe to call on a Connector that never
 	// connected successfully.
@@ -79,6 +83,39 @@ func Names() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// DefaultMaxDocuments bounds how many documents a paginating connector accumulates in one fetch.
+// It mirrors MAX_DOCUMENTS in api/_engine_bridge.py: fetching more than the API will accept only
+// trades a clear "this corpus is too large" for a rejected POST after all the work is done.
+//
+// A connector that hits this ceiling reports ErrCorpusTooLarge rather than quietly returning a
+// truncated corpus (see MaxDocuments).
+const DefaultMaxDocuments = 2000
+
+// ErrCorpusTooLarge is returned when a backend holds more documents than the configured ceiling.
+// Failing here is deliberate: Horizon answers only from the documents it is given, so a silently
+// truncated corpus would produce answers that look verified while resting on a partial view of
+// the data. The caller is told to either narrow the query or raise the ceiling explicitly.
+var ErrCorpusTooLarge = fmt.Errorf("corpus exceeds the configured document ceiling")
+
+// MaxDocuments resolves the per-fetch document ceiling from opts/env (max_documents,
+// HORIZON_MAX_DOCUMENTS), falling back to DefaultMaxDocuments. A value of 0 or less is rejected
+// rather than treated as "unlimited" -- an unbounded fetch is exactly the failure mode this
+// ceiling exists to prevent.
+func MaxDocuments(opts Options) (int, error) {
+	raw := opts.Get("max_documents", "HORIZON_MAX_DOCUMENTS", "")
+	if raw == "" {
+		return DefaultMaxDocuments, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid max_documents %q: must be a positive integer", raw)
+	}
+	if value <= 0 {
+		return 0, fmt.Errorf("invalid max_documents %d: must be greater than zero", value)
+	}
+	return value, nil
 }
 
 var identifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

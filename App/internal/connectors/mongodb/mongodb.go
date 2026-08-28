@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"horizonmemory/connector/internal/connectors"
+	"horizonmemory/connector/internal/document"
 )
 
 func init() {
@@ -25,8 +26,9 @@ const (
 )
 
 type Connector struct {
-	client     *mongo.Client
-	collection *mongo.Collection
+	client       *mongo.Client
+	collection   *mongo.Collection
+	maxDocuments int
 }
 
 // New builds a MongoDB connector from opts/env: uri (MONGODB_URI, required), database
@@ -53,17 +55,26 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 	database := opts.Get("database", "MONGODB_DATABASE", defaultDatabase)
 	collectionName := opts.Get("collection", "MONGODB_COLLECTION", defaultCollection)
 
+	maxDocuments, err := connectors.MaxDocuments(opts)
+	if err != nil {
+		client.Disconnect(ctx)
+		return nil, fmt.Errorf("mongodb: %w", err)
+	}
+
 	return &Connector{
-		client:     client,
-		collection: client.Database(database).Collection(collectionName),
+		client:       client,
+		collection:   client.Database(database).Collection(collectionName),
+		maxDocuments: maxDocuments,
 	}, nil
 }
 
 func (c *Connector) Name() string { return "mongodb" }
 
-// FetchDocuments runs Find({}) projected to just body, sorted by _id ascending -- the same
-// query mongodb_documents_example.py runs -- and returns each document's body as one document.
-func (c *Connector) FetchDocuments(ctx context.Context) ([]string, error) {
+// FetchDocuments runs Find({}) projected to _id and body, sorted by _id ascending -- the same
+// query mongodb_documents_example.py runs -- and returns each record as one document. The _id is
+// kept rather than discarded: it becomes the document's identity, so a verified claim can be
+// traced back to the record that produced it.
+func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, error) {
 	findOptions := options.Find().
 		SetProjection(bson.D{{Key: "_id", Value: 1}, {Key: "body", Value: 1}}).
 		SetSort(bson.D{{Key: "_id", Value: 1}})
@@ -74,15 +85,26 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]string, error) {
 	}
 	defer cursor.Close(ctx)
 
-	var documents []string
+	session := fmt.Sprintf("mongodb:%s.%s", c.collection.Database().Name(), c.collection.Name())
+	var documents []document.Document
 	for cursor.Next(ctx) {
 		var row struct {
+			ID   any    `bson:"_id"`
 			Body string `bson:"body"`
 		}
 		if err := cursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("mongodb: decoding document: %w", err)
 		}
-		documents = append(documents, row.Body)
+		// _id is an ObjectID by default but may be any BSON type in a user's own collection;
+		// %v renders each of them to the same string the driver would print.
+		documents = append(documents, document.New(
+			session, fmt.Sprintf("%v", row.ID), row.Body, len(documents)))
+		if len(documents) > c.maxDocuments {
+			return nil, fmt.Errorf(
+				"mongodb: collection %q holds more than %d documents: %w -- narrow the collection "+
+					"or raise the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
+				c.collection.Name(), c.maxDocuments, connectors.ErrCorpusTooLarge)
+		}
 	}
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("mongodb: reading cursor: %w", err)

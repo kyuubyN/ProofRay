@@ -1,13 +1,19 @@
 package horizonclient
 
-// AnswerRequest is the body of POST /v1/answers -- see api/README.md. Documents is the plain
-// []string a Connector produces; Horizon never sees the originating database.
+import "horizonmemory/connector/internal/document"
+
+// AnswerRequest is the body of POST /v1/answers -- see api/README.md.
+//
+// Documents uses the structured schema api/_engine_bridge.py validates, not the legacy []string
+// form: the legacy form makes the server synthesize an identity per document ("doc:1", "doc:2",
+// keyed to array position), which discards the primary key the connector actually read and makes
+// an answer's provenance impossible to reopen against the source database.
 type AnswerRequest struct {
-	Question       string   `json:"question"`
-	Documents      []string `json:"documents"`
-	IncludeSources bool     `json:"include_sources,omitempty"`
-	Polish         bool     `json:"polish,omitempty"`
-	PolishModel    string   `json:"polish_model,omitempty"`
+	Question       string              `json:"question"`
+	Documents      []document.Document `json:"documents"`
+	IncludeSources bool                `json:"include_sources,omitempty"`
+	Polish         bool                `json:"polish,omitempty"`
+	PolishModel    string              `json:"polish_model,omitempty"`
 }
 
 // AnswerLine is one composed line of an answer, or one entry of the full verified pool when

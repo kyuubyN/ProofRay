@@ -1,15 +1,24 @@
 # App — Horizon database connector (Go)
 
 A Go-side companion to `HorizonAI Engine/examples/*_documents_example.py`. HorizonMemory itself
-has no database backend — every call to `HorizonAnswerEngine`, and its HTTP twin
-`POST /v1/answers` (see `../api/README.md`), takes a plain `[]string` of documents. "Connecting a
-database" is entirely the caller's own query; this app is that caller, written in Go instead of
-Python, so a single compiled binary can pull from a real database and hit the running Horizon API
-without a Python runtime on the connector side.
+has no database backend — "connecting a database" is entirely the caller's own query, and this app
+is that caller, written in Go instead of Python, so a single compiled binary can pull from a real
+database and hit the running Horizon API without a Python runtime on the connector side.
 
 The Python engine (`../api/server.py`) still does all the actual work — routing, verification,
 composition. This binary's only job is: fetch rows from one backend, hand them to
 `POST /v1/answers` as `documents`, print (or render) the answer.
+
+**Documents keep their provenance.** `POST /v1/answers` accepts two shapes (see
+`build_documents` in `../api/_engine_bridge.py`): a legacy `[]string`, and a structured object
+carrying each document's identity. This app sends the structured form. The legacy form makes the
+server synthesize an identity from array position (`fact_id` = index, `source` = `"doc:N"`), which
+throws away the primary key the connector just read — a row that shifts position between two
+fetches silently changes identity, and a verified claim cannot be traced back to the record it
+came from. Instead, each connector selects its table's key alongside the text and emits it as
+`fact_id`/`source` (see `internal/document`), so `source` reads `postgres:articles:42` rather than
+`doc:1`. Each document also carries a `text_sha256` the server recomputes, making the text's
+integrity verifiable end to end across the connector, the network hop, and the JSON encoding.
 
 ## Layout
 
@@ -20,8 +29,10 @@ App/
   internal/config/                env-var configuration (CLI only)
   internal/horizonclient/         HTTP client for api/server.py (types.go mirrors its JSON contract)
   internal/webui/                 the /ask form handler + embedded html/template
+  internal/document/              the structured document type sent to POST /v1/answers
   internal/connectors/
-    connector.go                  the Connector interface, Options, ValidateIdentifier, registry
+    connector.go                  the Connector interface, Options, ValidateIdentifier, registry,
+                                  and MaxDocuments (the per-fetch corpus ceiling)
     postgres/                     github.com/jackc/pgx/v5
     sqlite/                       modernc.org/sqlite (pure Go, no cgo)
     mysql/                        github.com/go-sql-driver/mysql
@@ -203,6 +214,41 @@ Maestri browser portal) for all seven backends, each one screenshotted showing t
 badge and correct answer rendered in the page — not just a curl response. The test containers were
 torn down afterward (ephemeral, `--rm`); `testdata/` is what's left for reproducing the same setup.
 
+## Automated tests and CI
+
+```bash
+cd App
+go test ./...            # add -race to match CI
+gofmt -l . && go vet ./...
+```
+
+`.github/workflows/app-go.yml` runs `gofmt`, `go mod tidy -diff`, `go build`, `go vet`,
+`go test -race`, and `govulncheck` on any pull request touching `App/`. This module is not covered
+by `ci.yml` (Python) or `proofray-app.yml` (the Flutter/Python native app), so without that
+workflow nothing checked it.
+
+The tests deliberately cover the parts that can be exercised without a live database, which is
+also where the security-relevant logic lives:
+
+- `internal/document` — that a `fact_id` follows the record's key rather than its position, stays
+  inside the server's identity domain, and that the wire format matches the schema
+  `api/_engine_bridge.py` validates (it rejects unknown fields, so a rename breaks every request).
+- `internal/connectors` — `ValidateIdentifier` against the injection payloads it exists to reject,
+  and `MaxDocuments` rejecting a zero/negative ceiling rather than reading it as "unlimited".
+- `internal/connectors/mysql` — a regression guard for the DSN-parameter injection fixed in Round
+  3: a `database` field containing `?allowAllFiles=true` must not enable that flag.
+- `internal/webui` — that a submitted password/DSN/URI never survives into the re-rendered page.
+- `internal/horizonclient` — that `GET /v1/health` stays unauthenticated, every other route sends
+  the bearer token, a missing token fails before the request rather than as an ambiguous 401, and
+  no error path echoes the token back to the caller (it would land in the page's error message).
+- `cmd/horizon-web` — that the loopback bind check refuses `0.0.0.0`, `:8080`, `[::]` and LAN/public
+  literals, while honoring the explicit opt-out.
+
+Connector query logic against real backends is still verified by hand (see above), not in CI:
+those tests need live servers. `.github/workflows/proofray-app.yml` already provisions Postgres,
+MySQL and Elasticsearch services for the Python connector contracts, so that is the natural place
+to grow Go integration tests later.
+
 ## Security audit (Round 3, Maestri terminals)
 
 The connector code went through the project's established multi-terminal audit workflow
@@ -285,9 +331,13 @@ decisions, not bugs (the TLS one is the same one named below since Round 3).
 ## Not done here (named on purpose)
 
 - **Auth, CSRF, rate limiting, TLS.** `api/server.py` itself has none yet (see
-  `../api/README.md`'s "Deferred" section); neither client adds any on top. `cmd/horizon-web`
-  binds to `127.0.0.1` by default for this reason — don't bind `WEB_ADDR` to a public or shared
-  interface without adding auth (and a CSRF token on `/ask`, and rate limiting) first.
+  `../api/README.md`'s "Deferred" section); neither client adds any on top. Because of this,
+  `cmd/horizon-web` **refuses to start on a non-loopback address**: `WEB_ADDR` must resolve to
+  loopback, or `HORIZON_WEB_ALLOW_REMOTE=1` must be set to accept the exposure deliberately. The
+  risk was documented here long before it was enforced, which did nothing to prevent a stray
+  `WEB_ADDR=0.0.0.0:8080` in a compose file from publishing an unauthenticated server that will
+  dial any database host it is handed. Setting the opt-out does not add auth — it only records
+  that the operator meant it.
 - **No host allowlist — every connector is an intentional SSRF surface.** Each connector connects
   to whatever host/DSN/URI the caller provides (`POSTGRES_DSN`, `MYSQL_HOST`, `MONGODB_URI`,
   `REDIS_URL`, `ELASTICSEARCH_URL`, `SQLITE_PATH`) — that's the entire point of a generic "bring
@@ -308,10 +358,15 @@ decisions, not bugs (the TLS one is the same one named below since Round 3).
   the connector behaves differently under the CLI vs. the web server, breaking the one-`Connector`
   abstraction both entry points share. Mitigation is operational: don't attach a broad IAM role to
   a host running `cmd/horizon-web` outside a trusted network.
-- **Streaming/paging large corpora.** Every `FetchDocuments` loads the whole result set into
-  memory, same as the Python examples. `POST /v1/answers` also caps documents at `MAX_DOCUMENTS`
-  and each body at 1 MiB — a real large-corpus deployment needs chunking on both sides, not built
-  here.
+- **Streaming large corpora.** Every `FetchDocuments` still accumulates the whole result set in
+  memory before sending it, same as the Python examples; nothing here streams. What it no longer
+  does is return a *partial* corpus silently — `dynamodb` follows `LastEvaluatedKey` to the end of
+  the table and `elasticsearch` scrolls the whole index, rather than reading one page and
+  presenting it as everything. Both stop at a ceiling (`max_documents` /
+  `HORIZON_MAX_DOCUMENTS`, default 2000, mirroring the API's own `MAX_DOCUMENTS`) and fail with
+  `ErrCorpusTooLarge` instead of truncating: an answer composed from a quietly truncated corpus
+  would look exactly as verified as one composed from the whole thing. A corpus genuinely larger
+  than the API accepts needs chunking on both sides, which is not built here.
 - **In-process mocks for mongodb/redis/dynamodb.** The Python examples can run with zero setup
   via `mongomock`/`fakeredis`/`moto`; these Go connectors always need a real endpoint (DynamoDB
   Local counts as "real" here, since it speaks the actual wire protocol).

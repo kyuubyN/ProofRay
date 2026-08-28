@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"horizonmemory/connector/internal/connectors"
+	"horizonmemory/connector/internal/document"
 )
 
 func init() {
@@ -20,8 +21,9 @@ func init() {
 const defaultTable = "articles"
 
 type Connector struct {
-	pool  *pgxpool.Pool
-	table string
+	pool         *pgxpool.Pool
+	table        string
+	maxDocuments int
 }
 
 // New builds a Postgres connector from opts["dsn"] or POSTGRES_DSN, e.g.
@@ -51,29 +53,45 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("postgres: table name: %w", err)
 	}
 
-	return &Connector{pool: pool, table: table}, nil
+	maxDocuments, err := connectors.MaxDocuments(opts)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres: %w", err)
+	}
+
+	return &Connector{pool: pool, table: table, maxDocuments: maxDocuments}, nil
 }
 
 func (c *Connector) Name() string { return "postgres" }
 
 // FetchDocuments runs "SELECT id, body FROM <table> ORDER BY id", the same query
-// postgres_documents_example.py runs, and returns each row's body as one document. The caller
-// owns the query -- swap the table/columns via POSTGRES_TABLE or by editing this method for a
-// schema that doesn't match the example's (id, body) shape.
-func (c *Connector) FetchDocuments(ctx context.Context) ([]string, error) {
-	rows, err := c.pool.Query(ctx, fmt.Sprintf("SELECT body FROM %s ORDER BY id", c.table))
+// postgres_documents_example.py runs, and returns each row as one document. The caller owns the
+// query -- swap the table/columns via POSTGRES_TABLE or by editing this method for a schema that
+// doesn't match the example's (id, body) shape.
+//
+// The id is selected, not just ordered by: it becomes the document's identity, so a claim
+// verified from this row can be traced back to it (see internal/document).
+func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, error) {
+	rows, err := c.pool.Query(ctx, fmt.Sprintf("SELECT id, body FROM %s ORDER BY id", c.table))
 	if err != nil {
 		return nil, fmt.Errorf("postgres: query: %w", err)
 	}
 	defer rows.Close()
 
-	var documents []string
+	session := "postgres:" + c.table
+	var documents []document.Document
 	for rows.Next() {
-		var body string
-		if err := rows.Scan(&body); err != nil {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
 			return nil, fmt.Errorf("postgres: scanning row: %w", err)
 		}
-		documents = append(documents, body)
+		documents = append(documents, document.New(session, id, body, len(documents)))
+		if len(documents) > c.maxDocuments {
+			return nil, fmt.Errorf(
+				"postgres: table %q holds more than %d documents: %w -- narrow the table or raise "+
+					"the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
+				c.table, c.maxDocuments, connectors.ErrCorpusTooLarge)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("postgres: reading rows: %w", err)
