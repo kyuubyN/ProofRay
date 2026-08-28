@@ -53,7 +53,18 @@ type Document struct {
 	Sequence *int `json:"sequence,omitempty"`
 
 	// EventTime is the record's own timestamp (Unix seconds) when the backend carries one.
+	//
+	// NOT POPULATED YET. No connector fills this in: the schemas these connectors mirror
+	// (`articles(id, body)`) have no timestamp column, and which column should supply it is a
+	// schema decision, not something to guess at per backend. The field and WithEventTime exist
+	// so that decision does not require reshaping the type.
 	EventTime *int64 `json:"event_time,omitempty"`
+
+	// NOTE: the server's schema also accepts `span`, `role` and `speaker`, which this type does
+	// not carry. `span` marks a subrange of a larger source text; here each record IS one whole
+	// document, so there is no enclosing text to offset into -- the spans that appear in an
+	// answer's `source` are computed by the engine during verification, not supplied here.
+	// `role`/`speaker` describe conversation turns, which a database row is not.
 
 	// TextSHA256 lets the server verify the text arrived intact -- api/_engine_bridge.py
 	// recomputes it and rejects a mismatch, so this is an end-to-end integrity check across the
@@ -82,7 +93,8 @@ func New(session, primaryKey, text string, sequence int) Document {
 	}
 }
 
-// WithEventTime returns a copy carrying the record's own timestamp.
+// WithEventTime returns a copy carrying the record's own timestamp. Currently unused -- see the
+// note on the EventTime field.
 func (d Document) WithEventTime(unixSeconds int64) Document {
 	d.EventTime = &unixSeconds
 	return d

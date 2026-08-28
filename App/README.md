@@ -370,3 +370,14 @@ decisions, not bugs (the TLS one is the same one named below since Round 3).
 - **In-process mocks for mongodb/redis/dynamodb.** The Python examples can run with zero setup
   via `mongomock`/`fakeredis`/`moto`; these Go connectors always need a real endpoint (DynamoDB
   Local counts as "real" here, since it speaks the actual wire protocol).
+- **`event_time` on a document is never populated.** The structured schema accepts a per-record
+  timestamp and `internal/document` carries the field, but no connector fills it: the schemas
+  these connectors mirror (`articles(id, body)`) have no timestamp column, and picking one per
+  backend is a schema decision rather than something to infer. `span`, `role` and `speaker` are
+  not sent either — `span` marks a subrange of a larger source text, but here each record is one
+  whole document (the spans in an answer's `source` are computed by the engine during
+  verification), and `role`/`speaker` describe conversation turns, which a database row is not.
+- **No sample corpus for the demo.** `website/web_app.py` now locates `mock_dataset.jsonl`
+  wherever it sits and explains what is missing when it is absent, but the file itself is ~1.1 GB
+  and gitignored — so a fresh clone still cannot run the demo without obtaining it separately. A
+  small versioned sample would fix that; none is committed here.
