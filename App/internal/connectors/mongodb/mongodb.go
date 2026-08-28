@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -95,10 +96,8 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		if err := cursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("mongodb: decoding document: %w", err)
 		}
-		// _id is an ObjectID by default but may be any BSON type in a user's own collection;
-		// %v renders each of them to the same string the driver would print.
 		documents = append(documents, document.New(
-			session, fmt.Sprintf("%v", row.ID), row.Body, len(documents)))
+			session, formatID(row.ID), row.Body, len(documents)))
 		if len(documents) > c.maxDocuments {
 			return nil, fmt.Errorf(
 				"mongodb: collection %q holds more than %d documents: %w -- narrow the collection "+
@@ -114,4 +113,18 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 
 func (c *Connector) Close() error {
 	return c.client.Disconnect(context.Background())
+}
+
+// formatID renders a record's _id as the string a reader would use to look it up again.
+//
+// _id is an ObjectID by default but may be any BSON type in a user's own collection. A plain %v
+// on an ObjectID prints `ObjectID("6a91...")` -- quotes and wrapper included -- which is not
+// something you can paste into a query, and embeds quote characters in the document's `source`.
+// The hex is the form every Mongo client and shell accepts, so ObjectIDs are unwrapped and
+// everything else falls back to its default rendering.
+func formatID(id any) string {
+	if oid, ok := id.(primitive.ObjectID); ok {
+		return oid.Hex()
+	}
+	return fmt.Sprintf("%v", id)
 }

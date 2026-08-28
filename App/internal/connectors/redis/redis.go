@@ -85,9 +85,10 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 			c.prefix, c.maxDocuments, connectors.ErrCorpusTooLarge)
 	}
 
-	// The key itself is the record's identity here -- it is already the primary key, so it needs
-	// no derivation to be reopenable.
-	session := "redis:" + c.prefix
+	// The Redis key is already the record's full identity, and it carries the prefix itself --
+	// so the session stays a bare "redis" rather than repeating the prefix, and `source` comes
+	// out as "redis:articles:1": literally the key to GET.
+	const session = "redis"
 	documents := make([]document.Document, 0, len(keys))
 	for _, key := range keys {
 		value, err := c.client.Get(ctx, key).Result()
