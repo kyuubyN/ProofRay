@@ -136,6 +136,9 @@ def verify_bearer_token(authorization_header: str | None, credentials: dict) -> 
     if not authorization_header or not authorization_header.startswith("Bearer "):
         return False
     presented = authorization_header[len("Bearer "):].strip()
-    if not secrets.compare_digest(presented, credentials["token"]):
+    # Encoded to bytes because compare_digest raises TypeError on two `str` operands unless both
+    # are pure ASCII -- a client sending a non-ASCII bearer token (malformed or malicious) would
+    # otherwise crash this check with a 500 instead of failing it with a clean 401.
+    if not secrets.compare_digest(presented.encode("utf-8"), credentials["token"].encode("utf-8")):
         return False
     return current_machine_matches(credentials["machine_fingerprint"])
