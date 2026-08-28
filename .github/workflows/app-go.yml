@@ -31,9 +31,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinning to go.mod's `go` directive would install exactly that patch release, and Go
+      # ships security fixes for the standard library in patches -- a scan on 1.25.0 reports
+      # every stdlib CVE fixed in 1.25.x as if this code were vulnerable. The directive still
+      # declares the minimum language version; the toolchain used to build and scan should be
+      # the current one, which is also what a developer running this locally would have.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: App/go.mod
+          go-version: stable
+          check-latest: true
           cache-dependency-path: App/go.sum
 
       # Fails the run if any file is not gofmt'd. `gofmt -l` exits 0 either way and only prints
@@ -69,9 +75,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinning to go.mod's `go` directive would install exactly that patch release, and Go
+      # ships security fixes for the standard library in patches -- a scan on 1.25.0 reports
+      # every stdlib CVE fixed in 1.25.x as if this code were vulnerable. The directive still
+      # declares the minimum language version; the toolchain used to build and scan should be
+      # the current one, which is also what a developer running this locally would have.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: App/go.mod
+          go-version: stable
+          check-latest: true
           cache-dependency-path: App/go.sum
 
       # Reports only vulnerabilities actually reachable from this module's code, so a finding
