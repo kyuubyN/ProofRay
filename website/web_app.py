@@ -15,6 +15,7 @@ import random
 import re
 import threading
 import time
+from pathlib import Path
 
 import requests
 from flask import Flask, jsonify, render_template, request, send_from_directory
@@ -27,7 +28,52 @@ from horizon_memory import (
 app = Flask(__name__)
 
 SCOPE = 7
-DATASET = "demo_dataset.jsonl"
+
+_HERE = Path(__file__).resolve().parent
+_REPO_ROOT = _HERE.parent
+
+# The raw, uncurated corpus -- loaded directly, never a separate curated "demo" subset.
+#
+# This file is NOT in the repository: it is ~1.1 GB and both plausible locations are gitignored
+# (`/mock_dataset.jsonl` and `/website/*.jsonl`), so a fresh clone never has it and different
+# checkouts legitimately keep it in different places. Rather than hard-code one path and fail
+# with a bare FileNotFoundError on every other setup, look in both known locations and let an
+# explicit env var override -- and when nothing is found, say what was missing and where it was
+# looked for. All paths resolve relative to this file, not the process CWD, so it works
+# regardless of where `web_app.py` is launched from.
+DATASET_ENV_VAR = "PROOFRAY_DATASET"
+DATASET_SEARCH_PATHS = (_REPO_ROOT / "mock_dataset.jsonl", _HERE / "mock_dataset.jsonl")
+
+
+def _resolve_dataset():
+    """Returns the corpus path, or raises with instructions when it cannot be found."""
+    override = os.environ.get(DATASET_ENV_VAR) or os.environ.get("HORIZON_DATASET")
+    if override:
+        path = Path(override).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"{DATASET_ENV_VAR}={override} does not point at a readable file.")
+        return path
+
+    for candidate in DATASET_SEARCH_PATHS:
+        if candidate.is_file():
+            return candidate
+
+    looked_in = "\n".join(f"  - {candidate}" for candidate in DATASET_SEARCH_PATHS)
+    raise FileNotFoundError(
+        "The demo corpus 'mock_dataset.jsonl' was not found. It is gitignored (~1.1 GB), so it "
+        "is never part of a clone and has to be placed manually.\n"
+        f"Looked in:\n{looked_in}\n"
+        f"Put the file in either location, or point {DATASET_ENV_VAR} at it:\n"
+        f"  {DATASET_ENV_VAR}=/path/to/mock_dataset.jsonl python3 website/web_app.py")
+
+
+DATASET = _resolve_dataset()
+
+# Where the "Database Connector" nav button links -- App/cmd/horizon-web's Go web UI, a separate
+# process/port. The two front ends stay independent (different language, different runtime);
+# this is just a cross-link so a visitor can jump between them.
+CONNECTOR_URL = os.environ.get("HORIZON_CONNECTOR_URL", "http://127.0.0.1:8080")
 
 # The exact budgets the published 0.95 result was measured at -- read off DEFAULT_PROFILE
 # (the same profile ENGINE runs with below) rather than duplicated as separate constants, so
@@ -48,31 +94,49 @@ BY_QUESTION = {}
 def _load_dataset():
     """Indexes the corpus WITHOUT holding it in memory.
 
-    Each row's `context` is ~600 KB; keeping all 120 resident cost ~209 MB per process, which
-    multiplied by every warm-up worker and crashed a 15 GB machine. Only the light fields stay
-    in RAM; the context is read back from its byte offset on demand.
+    Each mock_dataset.jsonl record's `turns[].documents[].text` totals hundreds of KB; keeping
+    every record resident would repeat the ~209 MB-per-process blowup this loader was already
+    rewritten once to avoid (see git history). Only light per-question fields stay in RAM --
+    the full record is read back from its byte offset on demand (see _record_of).
+
+    mock_dataset.jsonl has no pre-computed judge score for this project's pipeline (that only
+    exists for the older, separately-curated evaluation corpus) -- horizon_judge_score and
+    baseline_judge_score stay `None` here rather than a fabricated number; the frontend hides
+    that comparison when they're absent instead of showing a false score.
     """
     offset = 0
+    ordinal = 0
     with open(DATASET, "rb") as handle:
         for raw in handle:
             length = len(raw)
             if raw.strip():
-                row = json.loads(raw)
-                row.pop("context", None)          # never keep the heavy field resident
-                row["_offset"] = offset
-                row["_length"] = length
+                record = json.loads(raw)
+                documents_count = sum(
+                    len(turn.get("documents", [])) for turn in record.get("turns", []))
+                row = {
+                    "ordinal": ordinal,
+                    "question": record["question"],
+                    "answer": record.get("answer", ""),
+                    "documents": documents_count,
+                    "horizon_judge_score": None,
+                    "baseline_judge_score": None,
+                    "_offset": offset,
+                    "_length": length,
+                }
                 ROWS.append(row)
                 BY_QUESTION[row["question"].strip()] = row
+                ordinal += 1
             offset += length
-    print(f"[proofray] indexed {len(ROWS)} questions from {DATASET} (contexts read on demand)")
+    print(f"[proofray] indexed {len(ROWS)} questions from {DATASET.name} (records read on demand)")
 
 
-def _context_of(row):
-    """Reads one row's context back from disk. Not cached: it is only needed while a query is
-    being computed, and holding it is exactly what exhausted memory before."""
+def _record_of(row):
+    """Reads one row's full mock_dataset.jsonl record back from disk, by byte offset. Not
+    cached: it is only needed while a query is being computed, and holding it resident is
+    exactly what the memory-conscious design above avoids."""
     with open(DATASET, "rb") as handle:
         handle.seek(row["_offset"])
-        return json.loads(handle.read(row["_length"]))["context"]
+        return json.loads(handle.read(row["_length"]))
 
 
 _load_dataset()
@@ -86,10 +150,19 @@ def _unwrap(text):
 
 
 def _documents(row):
-    parts = [_unwrap(p).strip() for p in _context_of(row).split("\n\n")]
+    """Every turn's documents become one RouteDocument each -- mock_dataset.jsonl already gives
+    each document as a distinct unit, so (unlike the older curated corpus, which stored one
+    flattened context string split back into paragraphs) there's no join/split round trip here."""
+    record = _record_of(row)
+    parts = []
+    for turn in record.get("turns", []):
+        for doc in turn.get("documents", []):
+            text = _unwrap(doc.get("text", "")).strip()
+            if len(text) > 60:
+                parts.append(text)
     return tuple(
         RouteDocument(i + 1, p, SCOPE, "s1", 1, f"doc:{i + 1}")
-        for i, p in enumerate(p for p in parts if len(p) > 60)
+        for i, p in enumerate(parts)
     )
 
 
@@ -231,7 +304,7 @@ def _warm_cache():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", connector_url=CONNECTOR_URL)
 
 
 @app.route("/api/status", methods=["GET"])
