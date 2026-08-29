@@ -160,10 +160,25 @@
 
   footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--line-soft);
            font-family: var(--mono); font-size: .68rem; color: var(--dim); line-height: 1.9; }
+
+  /* ---------- test nav ---------- */
+  .testnav { display: flex; justify-content: center; gap: .5rem; margin-bottom: 1.75rem; }
+  .testnav-btn {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .05em; text-transform: uppercase;
+    padding: .5rem 1.1rem; border: 1px solid var(--line); border-radius: 2px; color: var(--muted);
+    text-decoration: none;
+  }
+  a.testnav-btn:hover { border-color: var(--muted); color: var(--text); }
+  .testnav-btn.active { border-color: var(--text); color: var(--text); cursor: default; }
 </style>
 </head>
 <body>
 <div class="wrap">
+
+  <nav class="testnav">
+    <span class="testnav-btn active">Benchmark Demo</span>
+    <a class="testnav-btn" href="{{ connector_url }}">Database Connector</a>
+  </nav>
 
   <div class="hero">
     <img src="/assets/ProofRay.jpeg" alt="ProofRay — a ray crossing an event horizon">
@@ -179,7 +194,7 @@
   </div>
   <div class="subrow">
     <button class="ghost" onclick="loadRandom()">Random question</button>
-    <span class="corpus" id="corpus">MemGym-DR benchmark (MIT licensed)</span>
+    <span class="corpus" id="corpus">Loading corpus&hellip;</span>
   </div>
 
   <div class="grid">
@@ -214,9 +229,9 @@
   <footer>
     ProofRay runs live on every query: the documents are ingested into a real memory store, every
     sentence shown is re-opened and verified against its own source span before it is displayed,
-    and the answer is composed deterministically with zero LLM calls.<br>
-    Across all 120 questions in this corpus, ProofRay averages 0.95 against 0.73 for an
-    LLM-reader baseline on the same evidence budget (independent LLM judge, 95% CI excludes zero).
+    and the answer is composed deterministically with zero LLM calls. No independent LLM-judge
+    run exists yet for this corpus, so no aggregate score is claimed here -- only what each query
+    actually measures live: verified claims, and gold-content overlap when a gold answer exists.
   </footer>
 
 </div>
@@ -228,8 +243,7 @@ async function loadRandom() {
   const res = await fetch('/api/random_question');
   const d = await res.json();
   $('q').value = d.question;
-  $('corpus').textContent =
-    `MemGym-DR (MIT licensed) · ${d.total} questions · ~370 source documents each`;
+  $('corpus').textContent = `${d.total} questions · mock_dataset.jsonl`;
 }
 
 $('q').addEventListener('keypress', e => { if (e.key === 'Enter') run(); });
@@ -325,17 +339,25 @@ async function runControl(query) {
 
 function renderScores(d) {
   const k = v => v >= 0.7 ? '' : ' low';
-  $('scores').innerHTML = `
-    <div class="score"><span class="k">ProofRay · judged</span>
-      <span class="v${k(d.judge_score)}">${d.judge_score.toFixed(2)}</span></div>
-    <div class="score"><span class="k">Baseline · judged</span>
-      <span class="v${k(d.baseline_judge_score)}">${d.baseline_judge_score.toFixed(2)}</span></div>
+  let scoresHtml = '';
+  if (d.judge_score !== null && d.baseline_judge_score !== null) {
+    scoresHtml += `
+      <div class="score"><span class="k">ProofRay · judged</span>
+        <span class="v${k(d.judge_score)}">${d.judge_score.toFixed(2)}</span></div>
+      <div class="score"><span class="k">Baseline · judged</span>
+        <span class="v${k(d.baseline_judge_score)}">${d.baseline_judge_score.toFixed(2)}</span></div>`;
+  }
+  scoresHtml += `
     <div class="score"><span class="k">Gold content surfaced</span>
       <span class="v">${d.coverage.toFixed(0)}%</span></div>`;
-  $('judgeNote').textContent =
-    'Judged scores come from a prior independent LLM-judge run over this corpus on the full ' +
-    'pipeline, not a live score of the answer above. "Gold content surfaced" is computed live ' +
-    'and is a token-overlap measure, not an accuracy score.';
+  $('scores').innerHTML = scoresHtml;
+  $('judgeNote').textContent = (d.judge_score !== null)
+    ? 'Judged scores come from a prior independent LLM-judge run over this corpus on the full ' +
+      'pipeline, not a live score of the answer above. "Gold content surfaced" is computed live ' +
+      'and is a token-overlap measure, not an accuracy score.'
+    : 'No prior LLM-judge run exists for this corpus, so no judged score is shown. "Gold ' +
+      'content surfaced" is computed live and is a token-overlap measure against the gold ' +
+      'answer, not an accuracy score.';
 }
 
 function esc(s) {
