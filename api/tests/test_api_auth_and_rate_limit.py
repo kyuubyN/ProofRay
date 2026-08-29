@@ -104,6 +104,63 @@ class MachineFingerprintTests(unittest.TestCase):
             machine_auth.raw_machine_identifier = original
 
 
+class NonAsciiBearerTokenTests(unittest.TestCase):
+    """`secrets.compare_digest` raises TypeError on two `str` operands unless both are pure
+    ASCII, so comparing the presented token as `str` turned any non-ASCII Authorization header
+    into an unhandled exception -- a 500 where the answer is 401. An unauthenticated caller could
+    therefore turn a rejected credential into a server error. These pin the byte comparison."""
+
+    def setUp(self):
+        self._original = machine_auth.raw_machine_identifier
+        machine_auth.raw_machine_identifier = lambda: None  # skip the fingerprint check
+
+    def tearDown(self):
+        machine_auth.raw_machine_identifier = self._original
+
+    def test_non_ascii_token_is_rejected_without_raising(self):
+        credentials = {"token": "abc123", "machine_fingerprint": "unused"}
+        for presented in ("nãø-ascii", "🔒", "café", "токен"):
+            with self.subTest(token=presented):
+                self.assertFalse(
+                    machine_auth.verify_bearer_token(f"Bearer {presented}", credentials))
+
+    def test_non_ascii_token_matching_the_stored_one_still_authenticates(self):
+        # Rejecting every non-ASCII token outright would also "fix" the crash -- this pins that
+        # the comparison stays a real equality check rather than a blanket refusal.
+        credentials = {"token": "tôken-com-acento", "machine_fingerprint": "unused"}
+        self.assertTrue(
+            machine_auth.verify_bearer_token("Bearer tôken-com-acento", credentials))
+
+    def test_non_ascii_stored_token_rejects_a_different_presented_token(self):
+        credentials = {"token": "tôken-com-acento", "machine_fingerprint": "unused"}
+        self.assertFalse(
+            machine_auth.verify_bearer_token("Bearer outro-tôken", credentials))
+
+    def test_tokens_differing_only_past_the_ascii_range_are_distinguished(self):
+        # Two strings of equal length whose difference is non-ASCII must not compare equal.
+        credentials = {"token": "tokén", "machine_fingerprint": "unused"}
+        self.assertFalse(machine_auth.verify_bearer_token("Bearer tokèn", credentials))
+
+
+class NonAsciiBearerTokenEndpointTests(unittest.TestCase):
+    """The same input through the Flask gate: the caller must see 401, not 500."""
+
+    def setUp(self):
+        STORE.clear()
+        server_module.RATE_LIMITER.reset()
+        app.testing = True
+        self.client = app.test_client()
+
+    def test_non_ascii_token_returns_401_not_500(self):
+        for presented in ("nãø-ascii", "🔒"):
+            with self.subTest(token=presented):
+                self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {presented}"
+                response = self.client.post(
+                    "/v1/answers", json={"question": QUESTION, "documents": DOCUMENTS})
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.get_json()["error"]["type"], "auth_error")
+
+
 class TokenBucketUnitTests(unittest.TestCase):
     """Direct unit tests of the refill math, independent of Flask or wall-clock sleeps."""
 
