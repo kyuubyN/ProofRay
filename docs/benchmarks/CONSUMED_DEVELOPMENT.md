@@ -90,15 +90,17 @@ the *polish step* or specific to the *small local model*.
 | (C) Traditional RAG (BM25 + gemini-3.1-flash-lite, no Horizon) | 120/120 | 0.5583 | 0.55 |
 | (B) Horizon + local polish (Qwen3-1.7B, 8-bit) | 120/120 | 0.4975 | 0.50 |
 
-**In-sample status of these figures.** All four arms are measured on the
-same first-120-episode development slice (already inspected during earlier
-development) with the shipped `DEFAULT_PROFILE` used as-is — a profile whose
-`claim_limit`, `answer_relevance_gate_ratio`, and dossier/composition budgets
-were calibrated on this same MemGym-DR family (see
-`src/horizon_memory/engine_profile.py`). The numbers are therefore in-sample
-with respect to both the data and the shipped configuration: strong engineering
-evidence, but not by themselves an independent generalisation estimate for the
-shipped default on a fresh, previously unopened corpus.
+**Consumed-development and configuration status.** All four arms were
+measured on the same first-120-episode development slice, already inspected
+during earlier development. Arms A, B and D use the shipped public
+`DEFAULT_PROFILE` in its `clean` render mode; arm C is the independent BM25 +
+Gemini baseline and does not use a Horizon profile. The public default is
+distinct from the historical D144 `full_dossier` reference configuration that
+produced the separately documented 0.950 result. Some of its current parameters
+were informed by earlier MemGym-DR engineering pilots, including the current
+`claim_limit`. These figures are therefore consumed-development engineering
+evidence, not by themselves an independent generalization estimate on a fresh,
+previously unopened corpus.
 
 Every episode that failed to produce a parseable judge score (a small,
 recurring parser limitation, not an answer-quality signal: the judge's own
