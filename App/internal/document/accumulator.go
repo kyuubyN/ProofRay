@@ -41,12 +41,20 @@ func (a *Accumulator) Add(doc Document) error {
 		limit = MaxDocuments
 	}
 
-	size := doc.EncodedSize()
-	if size > MaxDocumentBytes {
+	// MaxDocumentBytes is measured against the TEXT, not the encoded document: the server
+	// checks `_utf8_size(text)` alone (api/_engine_bridge.py), so comparing the JSON -- which
+	// also carries fact_id, source, session, the digest and every field name -- would reject
+	// records the server accepts. The encoded size is used only for the request-body budget.
+	if len(doc.Text) > MaxDocumentBytes {
 		return fmt.Errorf(
-			"%s: record %q is %d bytes, over the %d-byte per-document limit: %w",
-			a.Origin, doc.Source, size, MaxDocumentBytes, ErrDocumentTooLarge)
+			"%s: record %q has %d bytes of text, over the %d-byte per-document limit: %w",
+			a.Origin, doc.Source, len(doc.Text), MaxDocumentBytes, ErrDocumentTooLarge)
 	}
+	if err := checkMetadata(doc); err != nil {
+		return fmt.Errorf("%s: %w", a.Origin, err)
+	}
+
+	size := doc.EncodedSize()
 
 	if len(a.docs)+1 > limit {
 		return fmt.Errorf(
@@ -93,15 +101,22 @@ func CheckPayload(docs []Document, envelopeBytes int) error {
 			len(docs), MaxDocuments, ErrCorpusTooLarge)
 	}
 
-	total := envelopeBytes
-	for _, doc := range docs {
-		size := doc.EncodedSize()
-		if size > MaxDocumentBytes {
+	// The array brackets and the n-1 separators between documents, so this measures the body
+	// that will actually be sent rather than an approximation of it.
+	total := envelopeBytes + 2
+	for i, doc := range docs {
+		if len(doc.Text) > MaxDocumentBytes {
 			return fmt.Errorf(
-				"record %q is %d bytes, over the %d-byte per-document limit: %w",
-				doc.Source, size, MaxDocumentBytes, ErrDocumentTooLarge)
+				"record %q has %d bytes of text, over the %d-byte per-document limit: %w",
+				doc.Source, len(doc.Text), MaxDocumentBytes, ErrDocumentTooLarge)
 		}
-		total += size
+		if err := checkMetadata(doc); err != nil {
+			return err
+		}
+		total += doc.EncodedSize() - 1 // EncodedSize includes a separator; count them below
+		if i > 0 {
+			total++
+		}
 	}
 
 	if total > MaxRequestBytes {
@@ -109,6 +124,42 @@ func CheckPayload(docs []Document, envelopeBytes int) error {
 			"the request body would be %d bytes, over the API's %d-byte limit: %w -- "+
 				"narrow the query so it returns fewer or smaller records",
 			total, MaxRequestBytes, ErrCorpusTooLarge)
+	}
+	return nil
+}
+
+// ErrInvalidMetadata reports a source/session string the server will reject: over
+// MAX_METADATA_BYTES, or carrying a control character. Both checks live in `_text_field`
+// (api/_engine_bridge.py) and apply to every field except `text`.
+var ErrInvalidMetadata = errors.New("document metadata is oversized or contains control characters")
+
+// MaxMetadataBytes mirrors MAX_METADATA_BYTES in api/_engine_bridge.py, the cap on every string
+// field other than the text itself.
+const MaxMetadataBytes = 4 * 1024
+
+// checkMetadata rejects a source/session the server would refuse.
+//
+// These are built from data the backend supplies -- a Redis key, a Mongo _id, a table name -- so
+// they are not automatically well-formed: a 5 KiB Redis key, or one containing a newline, is
+// perfectly legal in Redis and produces a document the API answers with 400. Catching it here
+// keeps the promise that a payload passing these checks is actually sendable.
+func checkMetadata(doc Document) error {
+	for _, field := range []struct {
+		name  string
+		value string
+	}{{"source", doc.Source}, {"session", doc.Session}} {
+		if len(field.value) > MaxMetadataBytes {
+			return fmt.Errorf(
+				"%s is %d bytes, over the %d-byte metadata limit: %w",
+				field.name, len(field.value), MaxMetadataBytes, ErrInvalidMetadata)
+		}
+		for _, r := range field.value {
+			if r < 32 || r == 127 {
+				return fmt.Errorf(
+					"%s contains a control character (%q), which the API rejects: %w",
+					field.name, r, ErrInvalidMetadata)
+			}
+		}
 	}
 	return nil
 }

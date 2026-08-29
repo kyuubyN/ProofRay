@@ -75,21 +75,27 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("dynamodb: %w", err)
 	}
 
-	if _, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: aws.String(table)}); err != nil {
+	described, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: aws.String(table)})
+	if err != nil {
 		return nil, fmt.Errorf("dynamodb: describing table %q: %w", table, err)
 	}
 
-	// The endpoint distinguishes a local table from the same table name in real AWS; the region
-	// distinguishes two real accounts' regions. Neither carries a credential.
+	// Prefer the table's ARN, which names the AWS account as well as the region and table --
+	// region+table alone is identical across two accounts, so rows with the same key in each
+	// would share a fact_id. DynamoDB Local returns an ARN with a dummy account, so the endpoint
+	// is appended there to keep two local instances apart. No credential appears in either.
 	origin := region
+	if described.Table != nil && described.Table.TableArn != nil {
+		origin = *described.Table.TableArn
+	}
 	if endpoint != "" {
-		origin = endpoint
+		origin = fmt.Sprintf("%s@%s", origin, endpoint)
 	}
 
 	return &Connector{
 		client:       client,
 		table:        table,
-		source:       fmt.Sprintf("dynamodb:%s/%s", origin, table),
+		source:       fmt.Sprintf("dynamodb:%s", origin),
 		maxDocuments: maxDocuments,
 	}, nil
 }
@@ -109,6 +115,10 @@ func (c *Connector) Name() string { return "dynamodb" }
 func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, error) {
 	var items []item
 	var startKey map[string]types.AttributeValue
+	budget := &document.Accumulator{
+		Origin:       fmt.Sprintf("dynamodb: table %q", c.table),
+		MaxDocuments: c.maxDocuments,
+	}
 
 	for {
 		output, err := c.client.Scan(ctx, &dynamodb.ScanInput{
@@ -124,17 +134,14 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 			if err := attributevalue.UnmarshalMap(raw, &it); err != nil {
 				return nil, fmt.Errorf("dynamodb: unmarshaling item: %w", err)
 			}
+			// Charged against the budget as it is read, so a table far past the request limit
+			// stops being paged rather than being pulled down in full and rejected at the end.
+			// The result is discarded: the documents are rebuilt below in sorted order, and only
+			// the running total matters here.
+			if err := budget.Add(document.New(c.source, it.ID, it.Body, budget.Len())); err != nil {
+				return nil, err
+			}
 			items = append(items, it)
-		}
-
-		// Bound the in-memory item list while paging, before any of it is turned into documents:
-		// a table far past the ceiling should stop being read, not be read in full and rejected.
-		if len(items) > c.maxDocuments {
-			return nil, fmt.Errorf(
-				"dynamodb: table %q holds more than %d documents, the most the API accepts in one "+
-					"request: %w -- narrow the table so it returns fewer",
-				c.table, c.maxDocuments, connectors.ErrCorpusTooLarge,
-			)
 		}
 
 		// An empty LastEvaluatedKey means this was the final page.
@@ -144,18 +151,16 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		startKey = output.LastEvaluatedKey
 	}
 
+	// Sorted by id to match dynamodb_documents_example.py's
+	// `sorted(response["Items"], key=lambda x: x["id"])`. Scan returns items in no useful order,
+	// and the order is only known once every page has been read -- hence the rebuild.
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 
-	acc := &document.Accumulator{
-		Origin:       fmt.Sprintf("dynamodb: table %q", c.table),
-		MaxDocuments: c.maxDocuments,
-	}
+	documents := make([]document.Document, 0, len(items))
 	for _, it := range items {
-		if err := acc.Add(document.New(c.source, it.ID, it.Body, acc.Len())); err != nil {
-			return nil, err
-		}
+		documents = append(documents, document.New(c.source, it.ID, it.Body, len(documents)))
 	}
-	return acc.Documents(), nil
+	return documents, nil
 }
 
 func (c *Connector) Close() error {

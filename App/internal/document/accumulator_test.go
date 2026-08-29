@@ -2,6 +2,7 @@ package document
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 func TestAccumulatorAcceptsANormalCorpus(t *testing.T) {
 	acc := &Accumulator{Origin: "sqlite: table \"articles\""}
 	for i := 0; i < 100; i++ {
-		if err := acc.Add(New("sqlite:/tmp/db/articles", string(rune('a'+i%26))+string(rune(i)), "some text", acc.Len())); err != nil {
+		if err := acc.Add(New("sqlite:/tmp/db/articles", string(rune('a'+i%26))+strconv.Itoa(i), "some text", acc.Len())); err != nil {
 			t.Fatalf("unexpected error at %d: %v", i, err)
 		}
 	}
@@ -21,7 +22,7 @@ func TestAccumulatorAcceptsANormalCorpus(t *testing.T) {
 func TestAccumulatorStopsAtTheDocumentCount(t *testing.T) {
 	acc := &Accumulator{Origin: "test", MaxDocuments: 3}
 	for i := 0; i < 3; i++ {
-		if err := acc.Add(New("src", string(rune('a'+i)), "text", i)); err != nil {
+		if err := acc.Add(New("src", strconv.Itoa(i), "text", i)); err != nil {
 			t.Fatalf("unexpected error at %d: %v", i, err)
 		}
 	}
@@ -55,7 +56,7 @@ func TestAccumulatorStopsOnTotalBytesWellBeforeTheDocumentCount(t *testing.T) {
 	var added int
 	var err error
 	for i := 0; i < MaxDocuments; i++ {
-		if err = acc.Add(New("src", string(rune(i)), big, i)); err != nil {
+		if err = acc.Add(New("src", strconv.Itoa(i), big, i)); err != nil {
 			break
 		}
 		added++
@@ -107,7 +108,7 @@ func TestCheckPayloadAcceptsASendableRequest(t *testing.T) {
 func TestCheckPayloadRejectsTooManyDocuments(t *testing.T) {
 	docs := make([]Document, MaxDocuments+1)
 	for i := range docs {
-		docs[i] = New("src", string(rune(i)), "t", i)
+		docs[i] = New("src", strconv.Itoa(i), "t", i)
 	}
 	if err := CheckPayload(docs, 0); !errors.Is(err, ErrCorpusTooLarge) {
 		t.Errorf("got %v, want ErrCorpusTooLarge", err)
@@ -118,7 +119,7 @@ func TestCheckPayloadRejectsAnOversizedBody(t *testing.T) {
 	big := strings.Repeat("x", 32*1024)
 	docs := make([]Document, 40) // ~1.3 MiB, over the 1 MiB cap
 	for i := range docs {
-		docs[i] = New("src", string(rune(i)), big, i)
+		docs[i] = New("src", strconv.Itoa(i), big, i)
 	}
 	if err := CheckPayload(docs, 0); !errors.Is(err, ErrCorpusTooLarge) {
 		t.Errorf("got %v, want ErrCorpusTooLarge", err)
@@ -131,7 +132,7 @@ func TestCheckPayloadCountsTheEnvelope(t *testing.T) {
 	big := strings.Repeat("x", 60*1024)
 	var docs []Document
 	for i := 0; i < 16; i++ {
-		docs = append(docs, New("src", string(rune(i)), big, i))
+		docs = append(docs, New("src", strconv.Itoa(i), big, i))
 	}
 	if err := CheckPayload(docs, 0); err != nil {
 		t.Fatalf("baseline should fit: %v", err)

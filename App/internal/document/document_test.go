@@ -2,8 +2,11 @@ package document
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -207,6 +210,68 @@ func TestUnsetOptionalFieldsAreOmitted(t *testing.T) {
 	for _, field := range []string{"event_time", "role", "speaker", "span"} {
 		if _, present := decoded[field]; present {
 			t.Errorf("unset optional field %q was serialized", field)
+		}
+	}
+}
+
+// Every other fact_id test asserts a property (stability, separation, range) that FNV-1a also
+// satisfies -- so all of them would keep passing if the hash silently reverted. This pins the
+// actual algorithm to a computed vector: SHA-256 over the length-prefixed source and key, first
+// 8 bytes big-endian, masked to 62 bits.
+func TestFactIDIsSHA256OverTheLengthPrefixedInput(t *testing.T) {
+	const source = "postgres:db.internal:5432/prod/public/articles"
+	const key = "42"
+
+	h := sha256.New()
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(source)))
+	h.Write(length[:])
+	h.Write([]byte(source))
+	h.Write([]byte(key))
+	want := int64(binary.BigEndian.Uint64(h.Sum(nil)[:8]) & (uint64(1<<62) - 1))
+
+	if got := New(source, key, "text", 0).FactID; got != want {
+		t.Errorf("FactID = %d, want %d -- the hash is no longer SHA-256 over this input", got, want)
+	}
+}
+
+// A text of exactly MAX_DOCUMENT_BYTES is valid at the server (it measures the text alone), so
+// the client must not reject it for the metadata that surrounds it in JSON.
+func TestDocumentAtExactlyTheServerTextLimitIsAccepted(t *testing.T) {
+	text := strings.Repeat("x", MaxDocumentBytes)
+	doc := New("postgres:db.internal:5432/prod/public/articles", "42", text, 0)
+
+	if doc.EncodedSize() <= MaxDocumentBytes {
+		t.Fatal("this test is not exercising the case it describes: the encoding is not larger than the text")
+	}
+
+	acc := &Accumulator{Origin: "test"}
+	if err := acc.Add(doc); err != nil {
+		t.Errorf("a document the server accepts was rejected locally: %v", err)
+	}
+}
+
+func TestDocumentOneByteOverTheTextLimitIsRejected(t *testing.T) {
+	doc := New("src", "42", strings.Repeat("x", MaxDocumentBytes+1), 0)
+	acc := &Accumulator{Origin: "test"}
+	if err := acc.Add(doc); !errors.Is(err, ErrDocumentTooLarge) {
+		t.Errorf("got %v, want ErrDocumentTooLarge", err)
+	}
+}
+
+// Metadata the backend supplies is not automatically well-formed: a Redis key may be arbitrarily
+// long or contain a newline, both of which the server rejects with 400.
+func TestMetadataLimitsMirrorTheServer(t *testing.T) {
+	acc := &Accumulator{Origin: "test"}
+
+	oversized := New("src", strings.Repeat("k", MaxMetadataBytes), "text", 0)
+	if err := acc.Add(oversized); !errors.Is(err, ErrInvalidMetadata) {
+		t.Errorf("an oversized source was accepted: %v", err)
+	}
+
+	for _, bad := range []string{"key\nwith-newline", "key\x00with-nul", "key\x7fwith-del"} {
+		if err := acc.Add(New("src", bad, "text", 0)); !errors.Is(err, ErrInvalidMetadata) {
+			t.Errorf("a control character in %q was accepted: %v", bad, err)
 		}
 	}
 }

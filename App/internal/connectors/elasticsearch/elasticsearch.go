@@ -163,6 +163,14 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		MaxDocuments: c.maxDocuments,
 	}
 	for {
+		// Adopt this page's cursor before processing its hits: the cluster may return a new
+		// scroll ID per page, and an error raised mid-page would otherwise leave the deferred
+		// cleanup holding the previous page's ID while the current one leaks until keep-alive
+		// expires.
+		if page.ScrollID != "" {
+			scrollID = page.ScrollID
+		}
+
 		for _, hit := range page.Hits.Hits {
 			if err := acc.Add(document.New(
 				c.source, hit.ID, hit.Source.Body, acc.Len())); err != nil {
@@ -174,10 +182,9 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		if len(page.Hits.Hits) == 0 {
 			break
 		}
-		if page.ScrollID == "" {
+		if scrollID == "" {
 			return nil, fmt.Errorf("elasticsearch: scroll cursor missing before the index was exhausted")
 		}
-		scrollID = page.ScrollID
 
 		next, err := c.client.Scroll(
 			c.client.Scroll.WithContext(ctx),

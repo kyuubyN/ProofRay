@@ -39,36 +39,54 @@ func redactError(err error, submitted map[string]string) string {
 }
 
 func redactMessage(message string, submitted map[string]string) string {
-	for _, secret := range secretValues(submitted) {
+	long, short := secretValues(submitted)
+	for _, secret := range long {
 		message = strings.ReplaceAll(message, secret, redactedPlaceholder)
+	}
+	// A very short secret is matched only as a whole token. Replacing every occurrence of "xy"
+	// would also hit "proxy" and shred the message, but skipping short values entirely would
+	// leak them -- and a weak password is still the visitor's password.
+	for _, secret := range short {
+		message = wholeTokenPattern(secret).ReplaceAllString(message, "${1}"+redactedPlaceholder+"${2}")
 	}
 	message = userinfoPattern.ReplaceAllString(message, "${1}"+redactedPlaceholder+"@")
 	message = keyValueSecretPattern.ReplaceAllString(message, "${1}="+redactedPlaceholder)
 	return message
 }
 
-// secretValues collects the submitted values that must never appear in output, longest first.
-//
-// Longest first matters: if a DSN and the password inside it are both submitted, replacing the
-// password first would leave the DSN unmatched (its text no longer contains the password), and
-// the rest of the DSN would survive. Replacing the longer DSN first removes both.
-//
-// Very short values are skipped -- a one or two character password would match everywhere in the
-// message and turn it into placeholders, destroying the diagnostic without protecting anything
-// the pattern pass does not already cover.
-func secretValues(submitted map[string]string) []string {
-	const minRedactableLength = 3
+// wholeTokenPattern matches secret only where it is not part of a longer alphanumeric run, so a
+// two-character password cannot be redacted out of the middle of an unrelated word.
+func wholeTokenPattern(secret string) *regexp.Regexp {
+	return regexp.MustCompile(`([^\p{L}\p{N}]|^)` + regexp.QuoteMeta(secret) + `([^\p{L}\p{N}]|$)`)
+}
 
-	var values []string
+// secretValues splits the submitted secrets into those safe to remove as plain substrings and
+// those short enough to need whole-token matching. Nothing is discarded: every submitted secret
+// is redacted one way or the other.
+//
+// Longest first matters for the substring group: if a DSN and the password inside it are both
+// submitted, replacing the password first would leave the DSN unmatched (its text no longer
+// contains the password) and the rest of the DSN would survive. Replacing the longer DSN first
+// removes both.
+func secretValues(submitted map[string]string) (long, short []string) {
+	// Below this length a substring replacement starts hitting unrelated words, so those values
+	// go through wholeTokenPattern instead of being replaced blindly.
+	const substringSafeLength = 4
+
 	for formKey, value := range submitted {
-		if len(value) < minRedactableLength {
+		if value == "" {
 			continue
 		}
 		_, key, ok := strings.Cut(formKey, "_")
-		if ok && sensitiveFormKeys[key] {
-			values = append(values, value)
+		if !ok || !sensitiveFormKeys[key] {
+			continue
+		}
+		if len(value) >= substringSafeLength {
+			long = append(long, value)
+		} else {
+			short = append(short, value)
 		}
 	}
-	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
-	return values
+	sort.Slice(long, func(i, j int) bool { return len(long[i]) > len(long[j]) })
+	return long, short
 }

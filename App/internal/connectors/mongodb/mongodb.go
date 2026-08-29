@@ -121,16 +121,24 @@ func (c *Connector) Close() error {
 	return c.client.Disconnect(context.Background())
 }
 
-// formatID renders a record's _id as the string a reader would use to look it up again.
+// formatID renders a record's _id as a string that is both readable and unambiguous.
 //
-// _id is an ObjectID by default but may be any BSON type in a user's own collection. A plain %v
-// on an ObjectID prints `ObjectID("6a91...")` -- quotes and wrapper included -- which is not
-// something you can paste into a query, and embeds quote characters in the document's `source`.
-// The hex is the form every Mongo client and shell accepts, so ObjectIDs are unwrapped and
-// everything else falls back to its default rendering.
+// _id is an ObjectID by default but may be any BSON type in a user's own collection, and Mongo
+// treats {_id: 42} and {_id: "42"} as two distinct records. Rendering both with %v yields "42"
+// for each, giving them the same source and the same fact_id -- the server then rejects the whole
+// corpus for duplicate fact_ids, on a collection that is perfectly valid. So every type except
+// ObjectID is tagged with its type name.
+//
+// ObjectID is left bare (its hex is already unambiguous, and it is the form every Mongo client
+// and shell accepts) rather than tagged, since it is the overwhelmingly common case and a plain
+// %v on it would print `ObjectID("6a91...")` -- quotes included -- into the document's source.
 func formatID(id any) string {
-	if oid, ok := id.(primitive.ObjectID); ok {
-		return oid.Hex()
+	switch value := id.(type) {
+	case primitive.ObjectID:
+		return value.Hex()
+	case string:
+		return "string(" + value + ")"
+	default:
+		return fmt.Sprintf("%T(%v)", id, id)
 	}
-	return fmt.Sprintf("%v", id)
 }

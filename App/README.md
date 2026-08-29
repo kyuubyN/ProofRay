@@ -343,11 +343,19 @@ Three limits apply, all mirrored from the API in `internal/document` so a corpus
 sent fails while it is being read rather than as an HTTP 413 after the whole thing has been pulled
 out of the database:
 
-| Limit | Value | Mirrors |
-| --- | --- | --- |
-| Documents per request | 2000 | `MAX_DOCUMENTS` (`api/_engine_bridge.py`) |
-| Bytes per document | 64 KiB | `MAX_DOCUMENT_BYTES` (`api/_engine_bridge.py`) |
-| Bytes per request body | 1 MiB | `MAX_CONTENT_LENGTH` (`api/server.py`) |
+| Limit | Value | Applies to | Mirrors |
+| --- | --- | --- | --- |
+| Documents per request | 2000 | count | `MAX_DOCUMENTS` (`api/_engine_bridge.py`) |
+| Bytes per document | 64 KiB | the **text** only | `MAX_DOCUMENT_BYTES` (`api/_engine_bridge.py`) |
+| Bytes per metadata field | 4 KiB | `source`, `session` | `MAX_METADATA_BYTES` (`api/_engine_bridge.py`) |
+| Bytes per request body | 1 MiB | the whole encoded body | `MAX_CONTENT_LENGTH` (`api/server.py`) |
+
+The per-document limit is measured against the text alone, matching the server's
+`_utf8_size(text)` check — measuring the encoded document instead would reject records the server
+accepts, since the JSON also carries `fact_id`, `source`, `session`, the digest and every field
+name. Metadata is validated too (length, and the control characters the server rejects), because
+`source` is built from backend-supplied data: a 5 KiB Redis key, or one containing a newline, is
+legal in Redis and would otherwise be answered with a 400.
 
 The **byte budget is the one that binds in practice**: 2000 documents at 64 KiB each would be
 128 MiB, so a document count alone never establishes that a corpus is sendable. A fetch stops as

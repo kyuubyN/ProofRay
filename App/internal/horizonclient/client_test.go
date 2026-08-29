@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -211,7 +212,7 @@ func TestCreateAnswerRejectsAnOversizedPayloadWithoutSending(t *testing.T) {
 	big := strings.Repeat("x", 32*1024)
 	var docs []document.Document
 	for i := 0; i < 64; i++ { // ~2 MiB, over the API's 1 MiB cap
-		docs = append(docs, document.New("src", string(rune(i)), big, i))
+		docs = append(docs, document.New("src", strconv.Itoa(i), big, i))
 	}
 
 	_, err := New(server.URL).CreateAnswer(context.Background(), AnswerRequest{
@@ -237,7 +238,7 @@ func TestCreateAnswerRejectsTooManyDocumentsWithoutSending(t *testing.T) {
 
 	docs := make([]document.Document, document.MaxDocuments+1)
 	for i := range docs {
-		docs[i] = document.New("src", string(rune(i)), "t", i)
+		docs[i] = document.New("src", strconv.Itoa(i), "t", i)
 	}
 
 	_, err := New(server.URL).CreateAnswer(context.Background(), AnswerRequest{
@@ -265,7 +266,7 @@ func TestCreateAnswerSendsANormalPayload(t *testing.T) {
 
 	var docs []document.Document
 	for i := 0; i < 200; i++ {
-		docs = append(docs, document.New("src", string(rune(i)), "a normal sized document", i))
+		docs = append(docs, document.New("src", strconv.Itoa(i), "a normal sized document", i))
 	}
 
 	if _, err := New(server.URL).CreateAnswer(context.Background(), AnswerRequest{

@@ -125,15 +125,40 @@ func TestRedactErrorHandlesOverlappingSecrets(t *testing.T) {
 	}
 }
 
-// A one or two character value would match all over the message and reduce it to placeholders,
-// destroying the diagnostic without protecting anything the pattern pass misses.
-func TestRedactErrorIgnoresVeryShortValues(t *testing.T) {
+// A short password is still the visitor's password: it must never be left in the output just
+// because redacting it is awkward. It is matched as a whole token so it cannot be cut out of the
+// middle of an unrelated word, but it IS redacted.
+func TestRedactErrorRedactsShortPasswords(t *testing.T) {
+	submitted := map[string]string{"mysql_password": "xy"}
+
+	got := redactMessage(`Access denied: supplied credential "xy" was rejected`, submitted)
+
+	if strings.Contains(got, `"xy"`) {
+		t.Errorf("a two-character password was left in the message:\n%s", got)
+	}
+	if !strings.Contains(got, redactedPlaceholder) {
+		t.Errorf("nothing was redacted:\n%s", got)
+	}
+}
+
+func TestRedactErrorShortPasswordDoesNotShredUnrelatedWords(t *testing.T) {
+	submitted := map[string]string{"mysql_password": "xy"}
+
+	// "xy" appears inside "proxy" and "oxygen"; neither is the secret.
+	got := redactMessage("proxy error reaching oxygen.internal", submitted)
+
+	if !strings.Contains(got, "proxy") || !strings.Contains(got, "oxygen.internal") {
+		t.Errorf("a short password was cut out of unrelated words:\n%s", got)
+	}
+}
+
+func TestRedactErrorRedactsSingleCharacterPassword(t *testing.T) {
 	submitted := map[string]string{"mysql_password": "a"}
 
-	got := redactMessage("connection to host a.b.c failed: no route to host", submitted)
+	got := redactMessage("rejected credential: a", submitted)
 
-	if !strings.Contains(got, "a.b.c") {
-		t.Errorf("a one-character password shredded the message:\n%s", got)
+	if strings.HasSuffix(got, ": a") {
+		t.Errorf("a one-character password survived:\n%s", got)
 	}
 }
 

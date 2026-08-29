@@ -62,22 +62,40 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("postgres: %w", err)
 	}
 
+	source, err := sourceOf(ctx, pool, table)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres: %w", err)
+	}
+
 	return &Connector{
 		pool:         pool,
 		table:        table,
-		source:       sourceOf(pool, table),
+		source:       source,
 		maxDocuments: maxDocuments,
 	}, nil
 }
 
-// sourceOf names the physical origin: which server, which database, which table. Built from the
-// parsed connection config rather than the DSN string, so the user and password in the DSN are
-// never part of it -- this value is rendered in the web UI and travels to the API inside every
-// document's `source`.
-func sourceOf(pool *pgxpool.Pool, table string) string {
+// sourceOf names the physical origin: which server, which database, which schema, which table.
+//
+// Built from the parsed connection config rather than the DSN string, so the user and password in
+// the DSN are never part of it -- this value is rendered in the web UI and travels to the API
+// inside every document's `source`.
+//
+// The schema is resolved rather than assumed: two DSNs differing only in `search_path` select
+// physically different tables of the same name (the usual schema-per-tenant layout), and without
+// it both would produce the same identity for row 42.
+func sourceOf(ctx context.Context, pool *pgxpool.Pool, table string) (string, error) {
 	config := pool.Config().ConnConfig
-	return fmt.Sprintf("postgres:%s/%s/%s",
-		net.JoinHostPort(config.Host, strconv.Itoa(int(config.Port))), config.Database, table)
+
+	var schema string
+	if err := pool.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
+		return "", fmt.Errorf("resolving current schema: %w", err)
+	}
+
+	return fmt.Sprintf("postgres:%s/%s/%s/%s",
+		net.JoinHostPort(config.Host, strconv.Itoa(int(config.Port))),
+		config.Database, schema, table), nil
 }
 
 func (c *Connector) Name() string { return "postgres" }
