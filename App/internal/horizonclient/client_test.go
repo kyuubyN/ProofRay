@@ -278,3 +278,50 @@ func TestCreateAnswerSendsANormalPayload(t *testing.T) {
 		t.Error("the request never reached the server")
 	}
 }
+
+// This pins the preflight to the exact bytes encoding/json sends. The request at the limit must
+// pass and the same request one byte larger must fail; an approximation (including the old
+// documents:null envelope) fails the first assertion by four bytes.
+func TestCheckRequestSizeMatchesTheRealJSONAtTheExactBoundary(t *testing.T) {
+	docs := make([]document.Document, 16)
+	for i := 0; i < len(docs)-1; i++ {
+		docs[i] = document.New("src", strconv.Itoa(i), strings.Repeat("x", document.MaxDocumentBytes), i)
+	}
+	docs[len(docs)-1] = document.New("src", "last", "", len(docs)-1)
+	req := AnswerRequest{Question: "q", Documents: docs}
+
+	baseline, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := document.MaxRequestBytes - len(baseline)
+	if remaining <= 0 || remaining > document.MaxDocumentBytes {
+		t.Fatalf("boundary fixture needs %d bytes in the final document", remaining)
+	}
+	req.Documents[len(req.Documents)-1] = document.New(
+		"src", "last", strings.Repeat("x", remaining), len(req.Documents)-1)
+
+	exact, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exact) != document.MaxRequestBytes {
+		t.Fatalf("fixture encoded to %d bytes, want exactly %d", len(exact), document.MaxRequestBytes)
+	}
+	if err := checkRequestSize(req); err != nil {
+		t.Errorf("exactly-at-limit request was rejected: %v", err)
+	}
+
+	req.Documents[len(req.Documents)-1] = document.New(
+		"src", "last", strings.Repeat("x", remaining+1), len(req.Documents)-1)
+	over, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(over) != document.MaxRequestBytes+1 {
+		t.Fatalf("oversized fixture encoded to %d bytes, want %d", len(over), document.MaxRequestBytes+1)
+	}
+	if err := checkRequestSize(req); !errors.Is(err, document.ErrCorpusTooLarge) {
+		t.Errorf("got %v, want ErrCorpusTooLarge", err)
+	}
+}

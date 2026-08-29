@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // redactedPlaceholder replaces anything removed from an error message.
@@ -47,17 +49,70 @@ func redactMessage(message string, submitted map[string]string) string {
 	// would also hit "proxy" and shred the message, but skipping short values entirely would
 	// leak them -- and a weak password is still the visitor's password.
 	for _, secret := range short {
-		message = wholeTokenPattern(secret).ReplaceAllString(message, "${1}"+redactedPlaceholder+"${2}")
+		message = redactWholeTokens(message, secret)
 	}
 	message = userinfoPattern.ReplaceAllString(message, "${1}"+redactedPlaceholder+"@")
 	message = keyValueSecretPattern.ReplaceAllString(message, "${1}="+redactedPlaceholder)
 	return message
 }
 
-// wholeTokenPattern matches secret only where it is not part of a longer alphanumeric run, so a
-// two-character password cannot be redacted out of the middle of an unrelated word.
-func wholeTokenPattern(secret string) *regexp.Regexp {
-	return regexp.MustCompile(`([^\p{L}\p{N}]|^)` + regexp.QuoteMeta(secret) + `([^\p{L}\p{N}]|$)`)
+// redactWholeTokens replaces every occurrence of secret that is not part of a longer Unicode
+// letter/number run. It checks boundaries without consuming them, so adjacent occurrences such
+// as "xy xy" and "xy,xy" are both removed in a single pass.
+func redactWholeTokens(message, secret string) string {
+	if secret == "" {
+		return message
+	}
+
+	var matches [][2]int
+	for offset := 0; offset <= len(message)-len(secret); {
+		relative := strings.Index(message[offset:], secret)
+		if relative < 0 {
+			break
+		}
+		start := offset + relative
+		end := start + len(secret)
+		if isTokenBoundaryBefore(message, start) && isTokenBoundaryAfter(message, end) {
+			matches = append(matches, [2]int{start, end})
+			offset = end
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(message[start:])
+		if size == 0 {
+			size = 1
+		}
+		offset = start + size
+	}
+	if len(matches) == 0 {
+		return message
+	}
+
+	var redacted strings.Builder
+	redacted.Grow(len(message))
+	previous := 0
+	for _, match := range matches {
+		redacted.WriteString(message[previous:match[0]])
+		redacted.WriteString(redactedPlaceholder)
+		previous = match[1]
+	}
+	redacted.WriteString(message[previous:])
+	return redacted.String()
+}
+
+func isTokenBoundaryBefore(value string, byteOffset int) bool {
+	if byteOffset == 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(value[:byteOffset])
+	return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+}
+
+func isTokenBoundaryAfter(value string, byteOffset int) bool {
+	if byteOffset == len(value) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(value[byteOffset:])
+	return !unicode.IsLetter(r) && !unicode.IsNumber(r)
 }
 
 // secretValues splits the submitted secrets into those safe to remove as plain substrings and
@@ -70,8 +125,12 @@ func wholeTokenPattern(secret string) *regexp.Regexp {
 // removes both.
 func secretValues(submitted map[string]string) (long, short []string) {
 	// Below this length a substring replacement starts hitting unrelated words, so those values
-	// go through wholeTokenPattern instead of being replaced blindly.
+	// go through whole-token matching instead of being replaced blindly. Count runes, not bytes:
+	// a two-character password such as "éé" occupies four UTF-8 bytes but is still too short for
+	// safe substring replacement.
 	const substringSafeLength = 4
+	seenLong := make(map[string]bool)
+	seenShort := make(map[string]bool)
 
 	for formKey, value := range submitted {
 		if value == "" {
@@ -81,10 +140,14 @@ func secretValues(submitted map[string]string) (long, short []string) {
 		if !ok || !sensitiveFormKeys[key] {
 			continue
 		}
-		if len(value) >= substringSafeLength {
-			long = append(long, value)
-		} else {
+		if utf8.RuneCountInString(value) >= substringSafeLength {
+			if !seenLong[value] {
+				long = append(long, value)
+				seenLong[value] = true
+			}
+		} else if !seenShort[value] {
 			short = append(short, value)
+			seenShort[value] = true
 		}
 	}
 	sort.Slice(long, func(i, j int) bool { return len(long[i]) > len(long[j]) })

@@ -126,6 +126,56 @@ func TestCheckPayloadRejectsAnOversizedBody(t *testing.T) {
 	}
 }
 
+func TestCheckPayloadUsesTheTextLimitNotTheEncodedDocumentSize(t *testing.T) {
+	exact := New("postgres:db:5432/prod/public/articles", "42", strings.Repeat("x", MaxDocumentBytes), 0)
+	if exact.EncodedSize() <= MaxDocumentBytes {
+		t.Fatal("fixture does not distinguish encoded size from text size")
+	}
+	if err := CheckPayload([]Document{exact}, 0); err != nil {
+		t.Errorf("text exactly at the API limit was rejected: %v", err)
+	}
+
+	over := New("src", "42", strings.Repeat("x", MaxDocumentBytes+1), 0)
+	if err := CheckPayload([]Document{over}, 0); !errors.Is(err, ErrDocumentTooLarge) {
+		t.Errorf("got %v, want ErrDocumentTooLarge", err)
+	}
+}
+
+func TestCheckPayloadRechecksMetadata(t *testing.T) {
+	doc := New("src", "42", "text", 0)
+	doc.Source = strings.Repeat("s", MaxMetadataBytes+1)
+
+	if err := CheckPayload([]Document{doc}, 0); !errors.Is(err, ErrInvalidMetadata) {
+		t.Errorf("got %v, want ErrInvalidMetadata", err)
+	}
+}
+
+func TestPayloadChecksRejectInvalidUTF8BeforeJSONCanRewriteIt(t *testing.T) {
+	invalid := string([]byte{'o', 'k', 0xff})
+
+	t.Run("text through accumulator", func(t *testing.T) {
+		doc := New("src", "42", invalid, 0)
+		if err := (&Accumulator{Origin: "test"}).Add(doc); !errors.Is(err, ErrInvalidUTF8) {
+			t.Errorf("got %v, want ErrInvalidUTF8", err)
+		}
+	})
+
+	t.Run("text through final preflight", func(t *testing.T) {
+		doc := New("src", "42", invalid, 0)
+		if err := CheckPayload([]Document{doc}, 0); !errors.Is(err, ErrInvalidUTF8) {
+			t.Errorf("got %v, want ErrInvalidUTF8", err)
+		}
+	})
+
+	t.Run("metadata through final preflight", func(t *testing.T) {
+		doc := New("src", "42", "text", 0)
+		doc.Source = invalid
+		if err := CheckPayload([]Document{doc}, 0); !errors.Is(err, ErrInvalidUTF8) {
+			t.Errorf("got %v, want ErrInvalidUTF8", err)
+		}
+	})
+}
+
 // The question and flags count against the same 1 MiB cap as the documents, so a corpus that
 // just fits on its own can still overflow once the envelope is added.
 func TestCheckPayloadCountsTheEnvelope(t *testing.T) {

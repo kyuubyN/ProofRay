@@ -106,8 +106,12 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		if err := cursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("mongodb: decoding document: %w", err)
 		}
+		primaryKey, err := formatID(row.ID)
+		if err != nil {
+			return nil, fmt.Errorf("mongodb: encoding _id: %w", err)
+		}
 		if err := acc.Add(document.New(
-			c.source, formatID(row.ID), row.Body, acc.Len())); err != nil {
+			c.source, primaryKey, row.Body, acc.Len())); err != nil {
 			return nil, err
 		}
 	}
@@ -121,24 +125,24 @@ func (c *Connector) Close() error {
 	return c.client.Disconnect(context.Background())
 }
 
-// formatID renders a record's _id as a string that is both readable and unambiguous.
+// formatID renders a record's _id as a stable, type-preserving string.
 //
 // _id is an ObjectID by default but may be any BSON type in a user's own collection, and Mongo
-// treats {_id: 42} and {_id: "42"} as two distinct records. Rendering both with %v yields "42"
-// for each, giving them the same source and the same fact_id -- the server then rejects the whole
-// corpus for duplicate fact_ids, on a collection that is perfectly valid. So every type except
-// ObjectID is tagged with its type name.
+// treats {_id: 42}, {_id: "42"}, and nested documents containing those values as distinct.
+// Canonical Extended JSON preserves BSON types recursively and is a MongoDB interchange format,
+// so identity does not depend on Go driver type names or fmt's display representation.
 //
 // ObjectID is left bare (its hex is already unambiguous, and it is the form every Mongo client
-// and shell accepts) rather than tagged, since it is the overwhelmingly common case and a plain
-// %v on it would print `ObjectID("6a91...")` -- quotes included -- into the document's source.
-func formatID(id any) string {
+// and shell accepts) rather than wrapped, since it is the overwhelmingly common case.
+func formatID(id any) (string, error) {
 	switch value := id.(type) {
 	case primitive.ObjectID:
-		return value.Hex()
-	case string:
-		return "string(" + value + ")"
-	default:
-		return fmt.Sprintf("%T(%v)", id, id)
+		return value.Hex(), nil
 	}
+
+	encoded, err := bson.MarshalExtJSON(bson.D{{Key: "_id", Value: id}}, true, false)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }

@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	neturl "net/url"
@@ -41,6 +42,8 @@ const scrollPageSize = 1000
 // scrollKeepAlive is how long the cluster holds the scroll cursor open between pages. It is a
 // per-page idle timeout, not a budget for the whole walk, so it does not cap total fetch time.
 const scrollKeepAlive = 2 * time.Minute
+
+var errScrollCursorMissing = errors.New("scroll cursor missing before the index was exhausted")
 
 // New builds an Elasticsearch connector from opts/env: url (ELASTICSEARCH_URL, required, e.g.
 // "http://localhost:9200"), index (ELASTICSEARCH_INDEX, default "articles") -- the same
@@ -167,8 +170,9 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		// scroll ID per page, and an error raised mid-page would otherwise leave the deferred
 		// cleanup holding the previous page's ID while the current one leaks until keep-alive
 		// expires.
-		if page.ScrollID != "" {
-			scrollID = page.ScrollID
+		scrollID, err = scrollIDForPage(scrollID, page.ScrollID, len(page.Hits.Hits))
+		if err != nil {
+			return nil, fmt.Errorf("elasticsearch: %w", err)
 		}
 
 		for _, hit := range page.Hits.Hits {
@@ -182,10 +186,6 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		if len(page.Hits.Hits) == 0 {
 			break
 		}
-		if scrollID == "" {
-			return nil, fmt.Errorf("elasticsearch: scroll cursor missing before the index was exhausted")
-		}
-
 		next, err := c.client.Scroll(
 			c.client.Scroll.WithContext(ctx),
 			c.client.Scroll.WithScrollID(scrollID),
@@ -200,6 +200,20 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 	}
 
 	return acc.Documents(), nil
+}
+
+// scrollIDForPage adopts a new cursor for deferred cleanup before any hit is processed, while
+// still requiring this specific non-empty page to carry one. Reusing previous after a response
+// omits _scroll_id would otherwise ask for the wrong next page and conceal a malformed response.
+func scrollIDForPage(previous, current string, hitCount int) (string, error) {
+	cleanupID := previous
+	if current != "" {
+		cleanupID = current
+	}
+	if hitCount > 0 && current == "" {
+		return cleanupID, errScrollCursorMissing
+	}
+	return cleanupID, nil
 }
 
 // clearScroll releases a scroll cursor. Failing to clear it is not fatal to a fetch that already

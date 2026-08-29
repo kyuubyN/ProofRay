@@ -10,6 +10,7 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"horizonmemory/connector/internal/connectors"
@@ -88,14 +89,37 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 func sourceOf(ctx context.Context, pool *pgxpool.Pool, table string) (string, error) {
 	config := pool.Config().ConnConfig
 
-	var schema string
-	if err := pool.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
-		return "", fmt.Errorf("resolving current schema: %w", err)
+	schema, relation, err := resolveRelation(ctx, pool, table)
+	if err != nil {
+		return "", err
 	}
 
 	return fmt.Sprintf("postgres:%s/%s/%s/%s",
 		net.JoinHostPort(config.Host, strconv.Itoa(int(config.Port))),
-		config.Database, schema, table), nil
+		config.Database, schema, relation), nil
+}
+
+// queryRower is the small pgx surface relation resolution needs. Keeping it narrow lets the
+// search-path behavior be regression-tested without starting a PostgreSQL server.
+type queryRower interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+const relationLookupSQL = `
+SELECT n.nspname, c.relname
+FROM pg_catalog.pg_class AS c
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+WHERE c.oid = pg_catalog.to_regclass($1)`
+
+// resolveRelation asks PostgreSQL which relation the unqualified table name actually resolves
+// to. current_schema() only reports the first existing schema in search_path; it can be
+// "tenant_a" even when articles is absent there and the query resolves to public.articles.
+func resolveRelation(ctx context.Context, queryer queryRower, table string) (string, string, error) {
+	var schema, relation string
+	if err := queryer.QueryRow(ctx, relationLookupSQL, table).Scan(&schema, &relation); err != nil {
+		return "", "", fmt.Errorf("resolving table %q through search_path: %w", table, err)
+	}
+	return schema, relation, nil
 }
 
 func (c *Connector) Name() string { return "postgres" }

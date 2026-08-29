@@ -1,6 +1,7 @@
 package connectors
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -145,7 +146,7 @@ func TestErrCorpusTooLargeIsMatchable(t *testing.T) {
 }
 
 func TestRegistry(t *testing.T) {
-	Register("test-backend", nil)
+	t.Cleanup(Register("test-backend", nil))
 
 	if _, ok := Get("test-backend"); !ok {
 		t.Error("Get did not find a just-registered backend")
@@ -162,5 +163,26 @@ func TestRegistry(t *testing.T) {
 	}
 	if !found {
 		t.Error("Names() omitted a registered backend")
+	}
+}
+
+func TestRegisterCleanupRestoresThePreviousFactory(t *testing.T) {
+	first := func(context.Context, Options) (Connector, error) { return nil, nil }
+	second := func(context.Context, Options) (Connector, error) { return nil, errors.New("second") }
+
+	removeFirst := Register("cleanup-test", first)
+	restoreFirst := Register("cleanup-test", second)
+	restoreFirst()
+	got, ok := Get("cleanup-test")
+	if !ok || got == nil {
+		t.Fatal("cleanup removed the previous registration instead of restoring it")
+	}
+	if _, err := got(context.Background(), nil); err != nil {
+		t.Errorf("cleanup left the replacement factory installed: %v", err)
+	}
+
+	removeFirst()
+	if _, ok := Get("cleanup-test"); ok {
+		t.Error("cleanup did not remove a registration that had no predecessor")
 	}
 }

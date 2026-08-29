@@ -64,10 +64,19 @@ type Factory func(ctx context.Context, opts Options) (Connector, error)
 
 var registry = map[string]Factory{}
 
-// Register adds a backend under the given name. Called from each connector subpackage's init(),
-// the same self-registration pattern database/sql drivers use.
-func Register(name string, factory Factory) {
+// Register adds a backend under the given name and returns a function that restores the previous
+// registration (or removes the new one). Connector init functions ignore the return value; tests
+// use it for cleanup so temporary factories cannot leak into later tests through the global map.
+func Register(name string, factory Factory) func() {
+	previous, existed := registry[name]
 	registry[name] = factory
+	return func() {
+		if existed {
+			registry[name] = previous
+			return
+		}
+		delete(registry, name)
+	}
 }
 
 // Get looks up a previously registered backend by name.

@@ -17,25 +17,38 @@ import (
 // handleAsk went back to rendering err.Error() verbatim. These drive the actual HTTP handler and
 // assert on the bytes it writes, which is the only thing that proves the page cannot leak.
 
-// failingConnector fails at connect time with an error quoting the DSN it was handed -- the shape
-// every SQL driver produces for an unreachable or malformed connection string.
-func registerFailingConnector(t *testing.T, name string) {
+// registerFailingConnector temporarily replaces a real connector name. Using a real name matters:
+// its inputs exist in the production template, so the tests exercise both the error panel and the
+// value="..." attributes that a re-render can leak through.
+func registerFailingConnector(t *testing.T, name string, message func(connectors.Options) string) {
 	t.Helper()
-	connectors.Register(name, func(ctx context.Context, opts connectors.Options) (connectors.Connector, error) {
-		return nil, &dsnError{dsn: opts.Get("dsn", "", "")}
+	cleanup := connectors.Register(name, func(ctx context.Context, opts connectors.Options) (connectors.Connector, error) {
+		return nil, &driverError{message: message(opts)}
 	})
-	// handleAsk only forwards the form fields listed here, so without this the fake connector
-	// receives an empty DSN and the test asserts against a message that never contained a
-	// credential in the first place.
-	connectorFields[name] = []string{"dsn", "password"}
-	t.Cleanup(func() { delete(connectorFields, name) })
+	t.Cleanup(cleanup)
 }
 
-type dsnError struct{ dsn string }
+func TestRegisterFailingConnectorCleansTheGlobalRegistry(t *testing.T) {
+	const name = "handler-cleanup-test"
+	if _, exists := connectors.Get(name); exists {
+		t.Fatalf("%q was already registered before the test", name)
+	}
 
-func (e *dsnError) Error() string {
-	return "failed to connect to `" + e.dsn + "`: connection refused"
+	t.Run("temporary registration", func(t *testing.T) {
+		registerFailingConnector(t, name, func(connectors.Options) string { return "failure" })
+		if _, exists := connectors.Get(name); !exists {
+			t.Fatal("temporary factory was not registered")
+		}
+	})
+
+	if _, exists := connectors.Get(name); exists {
+		t.Errorf("%q leaked from the completed subtest", name)
+	}
 }
+
+type driverError struct{ message string }
+
+func (e *driverError) Error() string { return e.message }
 
 func postAsk(t *testing.T, form url.Values) string {
 	t.Helper()
@@ -50,13 +63,15 @@ func postAsk(t *testing.T, form url.Values) string {
 }
 
 func TestHandleAskNeverRendersACredentialFromADriverError(t *testing.T) {
-	registerFailingConnector(t, "testfail")
+	registerFailingConnector(t, "postgres", func(opts connectors.Options) string {
+		return "failed to connect to `" + opts["dsn"] + "`: connection refused"
+	})
 	const password = "SENHA-ULTRA-SECRETA-XYZ789"
 	dsn := "postgres://app:" + password + "@db.internal:5432/prod"
 
 	body := postAsk(t, url.Values{
-		"connector":    {"testfail"},
-		"testfail_dsn": {dsn},
+		"connector":    {"postgres"},
+		"postgres_dsn": {dsn},
 		"question":     {"anything"},
 	})
 
@@ -73,44 +88,75 @@ func TestHandleAskNeverRendersACredentialFromADriverError(t *testing.T) {
 }
 
 func TestHandleAskRedactsAShortPasswordFromADriverError(t *testing.T) {
-	registerFailingConnector(t, "testfailshort")
-
-	body := postAsk(t, url.Values{
-		"connector":              {"testfailshort"},
-		"testfailshort_dsn":      {"host=db"},
-		"testfailshort_password": {"xy"},
-		"question":               {"anything"},
+	registerFailingConnector(t, "mysql", func(opts connectors.Options) string {
+		return `authentication failed: supplied credential "` + opts["password"] + `" was rejected`
 	})
 
-	if strings.Contains(body, "`host=db`") && strings.Contains(body, ">xy<") {
-		t.Error("a short password reached the page")
+	body := postAsk(t, url.Values{
+		"connector":      {"mysql"},
+		"mysql_password": {"xy"},
+		"question":       {"anything"},
+	})
+
+	panel := firstError(body)
+	if strings.Contains(panel, "xy") {
+		t.Errorf("a short password reached the error panel:\n%s", panel)
+	}
+	if !strings.Contains(panel, "was rejected") {
+		t.Errorf("the fake driver error did not reach the error panel:\n%s", panel)
 	}
 }
 
 // The submitted values must not come back in the form's value="..." attributes either -- this is
 // the pre-existing protection, asserted here against the real response body rather than the map.
 func TestHandleAskDoesNotEchoCredentialsIntoTheForm(t *testing.T) {
-	registerFailingConnector(t, "testfailecho")
+	registerFailingConnector(t, "postgres", func(opts connectors.Options) string {
+		return "connection refused"
+	})
 	const password = "ECHO-TEST-PASSWORD-123"
+	dsn := "postgres://u:" + password + "@h:5432/d"
 
 	body := postAsk(t, url.Values{
-		"connector":             {"testfailecho"},
-		"testfailecho_dsn":      {"postgres://u:" + password + "@h:5432/d"},
-		"testfailecho_password": {password},
-		"question":              {"anything"},
+		"connector":    {"postgres"},
+		"postgres_dsn": {dsn},
+		"question":     {"anything"},
 	})
 
-	if strings.Contains(body, password) {
-		t.Error("a submitted credential was echoed into the rendered form")
+	if !strings.Contains(body, `name="postgres_dsn"`) {
+		t.Fatal("the production DSN input is absent, so this test cannot exercise form re-rendering")
+	}
+	if strings.Contains(body, password) || strings.Contains(body, dsn) {
+		t.Error("a submitted DSN was echoed into the rendered form")
+	}
+}
+
+func TestHandleAskDoesNotEchoDynamoDBEndpointCredentials(t *testing.T) {
+	registerFailingConnector(t, "dynamodb", func(opts connectors.Options) string {
+		return "failed to connect to " + opts["endpoint"]
+	})
+	const endpoint = "http://local-user:local-pass@localhost:8000"
+
+	body := postAsk(t, url.Values{
+		"connector":         {"dynamodb"},
+		"dynamodb_region":   {"us-east-1"},
+		"dynamodb_endpoint": {endpoint},
+		"question":          {"anything"},
+	})
+
+	if !strings.Contains(body, `name="dynamodb_endpoint"`) {
+		t.Fatal("the production endpoint input is absent, so this test cannot exercise form re-rendering")
+	}
+	if strings.Contains(body, "local-user") || strings.Contains(body, "local-pass") || strings.Contains(body, endpoint) {
+		t.Error("DynamoDB endpoint credentials reached the rendered page")
 	}
 }
 
 // A connector whose fetch exceeds the API's request budget must surface that as a readable
 // message, not as a 413 from the server later.
 func TestHandleAskReportsAnOversizedCorpus(t *testing.T) {
-	connectors.Register("testbig", func(ctx context.Context, opts connectors.Options) (connectors.Connector, error) {
+	t.Cleanup(connectors.Register("testbig", func(ctx context.Context, opts connectors.Options) (connectors.Connector, error) {
 		return &oversizedConnector{}, nil
-	})
+	}))
 
 	body := postAsk(t, url.Values{
 		"connector": {"testbig"},
@@ -138,7 +184,7 @@ func (c *oversizedConnector) FetchDocuments(ctx context.Context) ([]document.Doc
 }
 
 func firstError(body string) string {
-	start := strings.Index(body, `class="error"`)
+	start := strings.Index(body, `class="error-panel"`)
 	if start < 0 {
 		return "(no error block rendered)"
 	}
@@ -147,4 +193,11 @@ func firstError(body string) string {
 		end = len(body)
 	}
 	return body[start:end]
+}
+
+func TestFirstErrorFindsTheProductionErrorPanel(t *testing.T) {
+	body := `<main><div class="error-panel">driver diagnosis</div></main>`
+	if got := firstError(body); !strings.Contains(got, "driver diagnosis") {
+		t.Errorf("firstError did not find the production error panel: %s", got)
+	}
 }

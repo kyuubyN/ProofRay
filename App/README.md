@@ -17,8 +17,9 @@ throws away the primary key the connector just read — a row that shifts positi
 fetches silently changes identity, and a verified claim cannot be traced back to the record it
 came from. Instead, each connector selects its table's key alongside the text and emits it as
 `fact_id`/`source` (see `internal/document`), so `source` reads
-`postgres:db.internal:5432/prod/articles:42` rather than `doc:1` — host, port, database and table,
-so two servers holding the same table name never share a document identity. The `fact_id` is
+`postgres:db.internal:5432/prod/public/articles:42` rather than `doc:1` — host, port, database,
+schema and table, so two servers or schemas holding the same table name never share a document
+identity. The `fact_id` is
 SHA-256 of that source plus the primary key, truncated to the server's 62-bit domain. The source
 is always built from the driver's *parsed* connection config, never the DSN string, so a password
 in a DSN never reaches the page or the API. Each document also carries a `text_sha256` the server
@@ -339,7 +340,7 @@ decisions, not bugs (the TLS one is the same one named below since Round 3).
 
 ## Corpus limits
 
-Three limits apply, all mirrored from the API in `internal/document` so a corpus that cannot be
+Four limits apply, all mirrored from the API in `internal/document` so a corpus that cannot be
 sent fails while it is being read rather than as an HTTP 413 after the whole thing has been pulled
 out of the database:
 
@@ -355,7 +356,9 @@ The per-document limit is measured against the text alone, matching the server's
 accepts, since the JSON also carries `fact_id`, `source`, `session`, the digest and every field
 name. Metadata is validated too (length, and the control characters the server rejects), because
 `source` is built from backend-supplied data: a 5 KiB Redis key, or one containing a newline, is
-legal in Redis and would otherwise be answered with a 400.
+legal in Redis and would otherwise be answered with a 400. Text and metadata must also be valid
+UTF-8: Go's JSON encoder replaces invalid bytes with U+FFFD, which would otherwise change both the
+wire size and the text the API hashes after `text_sha256` was calculated.
 
 The **byte budget is the one that binds in practice**: 2000 documents at 64 KiB each would be
 128 MiB, so a document count alone never establishes that a corpus is sendable. A fetch stops as
@@ -369,12 +372,14 @@ rather than promising something the server will not honor.
 
 ## Not done here (named on purpose)
 
-- **Auth, CSRF, rate limiting, TLS.** `api/server.py` itself has none yet (see
-  `../api/README.md`'s "Deferred" section); neither client adds any on top. Because of this,
+- **Inbound auth, CSRF protection, rate limiting, and TLS for the web UI.** The Python API has its
+  own machine bearer-token authentication and per-peer rate limiting, and `horizonclient` resolves
+  and sends that bearer token. `cmd/horizon-web` itself still has no authentication, CSRF token,
+  request rate limiter, or TLS listener. Because that browser-facing database dialer is open,
   `cmd/horizon-web` **refuses to start on a non-loopback address**: `WEB_ADDR` must resolve to
   loopback, or `HORIZON_WEB_ALLOW_REMOTE=1` must be set to accept the exposure deliberately. The
   risk was documented here long before it was enforced, which did nothing to prevent a stray
-  `WEB_ADDR=0.0.0.0:8080` in a compose file from publishing an unauthenticated server that will
+  `WEB_ADDR=0.0.0.0:8080` in a compose file from publishing an unauthenticated web UI that will
   dial any database host it is handed. Setting the opt-out does not add auth — it only records
   that the operator meant it.
 - **No host allowlist — every connector is an intentional SSRF surface.** Each connector connects

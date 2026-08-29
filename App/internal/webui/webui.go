@@ -152,7 +152,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 }
 
 // sensitiveFormKeys are the per-connector option keys that carry credentials outright
-// (password) or bundle them into a connection string (dsn/uri/url commonly follow
+// (password) or may bundle them into a connection string (dsn/uri/url/endpoint commonly follow
 // scheme://user:pass@host). These are used to build the connector for this one request but
 // never copied into viewData.Fields, so a submitted password/DSN never comes back in the
 // page's HTML -- unlike a masked <input type="password">, the raw value in a "value=..."
@@ -162,6 +162,7 @@ var sensitiveFormKeys = map[string]bool{
 	"dsn":      true,
 	"uri":      true,
 	"url":      true,
+	"endpoint": true,
 }
 
 func redactSensitiveFields(raw map[string]string) map[string]string {

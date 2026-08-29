@@ -141,6 +141,31 @@ func TestRedactErrorRedactsShortPasswords(t *testing.T) {
 	}
 }
 
+func TestRedactErrorRedactsEveryRepeatedShortPassword(t *testing.T) {
+	submitted := map[string]string{"mysql_password": "xy"}
+	for _, message := range []string{"xy xy", "xy,xy", "xy xy xy", "(xy)(xy)"} {
+		t.Run(message, func(t *testing.T) {
+			got := redactMessage(message, submitted)
+			if strings.Contains(got, "xy") {
+				t.Errorf("a repeated short password survived:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestRedactErrorCountsShortPasswordsInRunes(t *testing.T) {
+	submitted := map[string]string{"mysql_password": "éé"}
+
+	got := redactMessage(`driver said "éé" while handling réécrire`, submitted)
+
+	if strings.Contains(got, `"éé"`) {
+		t.Errorf("the standalone password survived:\n%s", got)
+	}
+	if !strings.Contains(got, "réécrire") {
+		t.Errorf("a two-rune password was removed from inside an unrelated word:\n%s", got)
+	}
+}
+
 func TestRedactErrorShortPasswordDoesNotShredUnrelatedWords(t *testing.T) {
 	submitted := map[string]string{"mysql_password": "xy"}
 

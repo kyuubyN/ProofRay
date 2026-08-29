@@ -71,12 +71,15 @@ func (c *Client) CreateAnswer(ctx context.Context, req AnswerRequest) (*AnswerRe
 // documents to document.CheckPayload with that envelope accounted for.
 func checkRequestSize(req AnswerRequest) error {
 	envelope := req
-	envelope.Documents = nil
+	// Encode an empty array rather than nil/null, then remove those two bracket bytes. That gives
+	// CheckPayload exactly the bytes outside the documents array; it adds the real brackets,
+	// elements and n-1 commas back. Passing documents:null here would overcount by four bytes.
+	envelope.Documents = []document.Document{}
 	encoded, err := json.Marshal(envelope)
 	if err != nil {
 		return fmt.Errorf("horizonclient: encoding request: %w", err)
 	}
-	if err := document.CheckPayload(req.Documents, len(encoded)); err != nil {
+	if err := document.CheckPayload(req.Documents, len(encoded)-len("[]")); err != nil {
 		return fmt.Errorf("horizonclient: %w", err)
 	}
 	return nil

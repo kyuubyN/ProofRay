@@ -8,7 +8,10 @@ package dynamodb
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"net/url"
 	"sort"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -83,13 +86,14 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 	// Prefer the table's ARN, which names the AWS account as well as the region and table --
 	// region+table alone is identical across two accounts, so rows with the same key in each
 	// would share a fact_id. DynamoDB Local returns an ARN with a dummy account, so the endpoint
-	// is appended there to keep two local instances apart. No credential appears in either.
+	// is appended there to keep two local instances apart. Endpoint userinfo/query/fragment are
+	// stripped below so no credential appears in either form.
 	origin := region
 	if described.Table != nil && described.Table.TableArn != nil {
 		origin = *described.Table.TableArn
 	}
 	if endpoint != "" {
-		origin = fmt.Sprintf("%s@%s", origin, endpoint)
+		origin = fmt.Sprintf("%s@%s", origin, endpointIdentity(endpoint))
 	}
 
 	return &Connector{
@@ -98,6 +102,33 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		source:       fmt.Sprintf("dynamodb:%s", origin),
 		maxDocuments: maxDocuments,
 	}, nil
+}
+
+// endpointIdentity keeps DynamoDB Local instances distinct without putting credentials into
+// document metadata. Userinfo, query parameters and fragments are configuration, not the
+// physical network endpoint, and are common places for secrets. If the endpoint is malformed,
+// retain a stable distinction through a digest instead of falling back to the sensitive input.
+func endpointIdentity(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return hashedEndpointIdentity("invalid-endpoint-sha256:", raw)
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	sanitized := parsed.String()
+	// Leave ample room under the API's 4 KiB source/session ceiling for the table ARN and key.
+	// A pathological URL path remains distinguishable without making every fetched row invalid.
+	if len(sanitized) > 1024 {
+		return hashedEndpointIdentity("endpoint-sha256:", sanitized)
+	}
+	return sanitized
+}
+
+func hashedEndpointIdentity(prefix, value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return prefix + hex.EncodeToString(digest[:])
 }
 
 func (c *Connector) Name() string { return "dynamodb" }

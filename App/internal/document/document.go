@@ -59,7 +59,8 @@ type Document struct {
 	Text string `json:"text"`
 
 	// Source names the originating record precisely enough to read it again, e.g.
-	// "postgres:articles:42" or "mongodb:horizon.articles:507f1f77bcf86cd799439011".
+	// "postgres:db.internal:5432/prod/public/articles:42" or
+	// "mongodb:db.internal:27017/horizon.articles:507f1f77bcf86cd799439011".
 	Source string `json:"source"`
 
 	Scope   int    `json:"scope"`
@@ -93,10 +94,10 @@ type Document struct {
 // New builds a Document from a backend's own identifiers.
 //
 // source identifies the physical origin, precisely enough to tell two of them apart: it must
-// carry the host/port, database and table (or the absolute file path) the record was read from,
-// not just the backend name -- see the Source method on each connector. primaryKey is the
-// record's key within it, in whatever form the backend uses: an integer id, a Mongo ObjectID, a
-// Redis key.
+// carry the host/port and backend namespace (database/schema/table, or absolute file path) the
+// record was read from, not just the backend name -- see each connector's source-building code.
+// primaryKey is the record's key within it, in whatever form the backend uses: an integer id, a
+// Mongo ObjectID, a Redis key.
 //
 // FactID is derived from source+primaryKey rather than from the record's position, so the same
 // row keeps the same identity across fetches even when rows are inserted, deleted, or returned

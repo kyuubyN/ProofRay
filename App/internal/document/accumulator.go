@@ -3,6 +3,7 @@ package document
 import (
 	"errors"
 	"fmt"
+	"unicode/utf8"
 )
 
 // ErrCorpusTooLarge reports a corpus the API cannot accept. Failing here is deliberate: Horizon
@@ -41,14 +42,8 @@ func (a *Accumulator) Add(doc Document) error {
 		limit = MaxDocuments
 	}
 
-	// MaxDocumentBytes is measured against the TEXT, not the encoded document: the server
-	// checks `_utf8_size(text)` alone (api/_engine_bridge.py), so comparing the JSON -- which
-	// also carries fact_id, source, session, the digest and every field name -- would reject
-	// records the server accepts. The encoded size is used only for the request-body budget.
-	if len(doc.Text) > MaxDocumentBytes {
-		return fmt.Errorf(
-			"%s: record %q has %d bytes of text, over the %d-byte per-document limit: %w",
-			a.Origin, doc.Source, len(doc.Text), MaxDocumentBytes, ErrDocumentTooLarge)
+	if err := checkText(doc); err != nil {
+		return fmt.Errorf("%s: %w", a.Origin, err)
 	}
 	if err := checkMetadata(doc); err != nil {
 		return fmt.Errorf("%s: %w", a.Origin, err)
@@ -105,10 +100,8 @@ func CheckPayload(docs []Document, envelopeBytes int) error {
 	// that will actually be sent rather than an approximation of it.
 	total := envelopeBytes + 2
 	for i, doc := range docs {
-		if len(doc.Text) > MaxDocumentBytes {
-			return fmt.Errorf(
-				"record %q has %d bytes of text, over the %d-byte per-document limit: %w",
-				doc.Source, len(doc.Text), MaxDocumentBytes, ErrDocumentTooLarge)
+		if err := checkText(doc); err != nil {
+			return err
 		}
 		if err := checkMetadata(doc); err != nil {
 			return err
@@ -133,9 +126,32 @@ func CheckPayload(docs []Document, envelopeBytes int) error {
 // (api/_engine_bridge.py) and apply to every field except `text`.
 var ErrInvalidMetadata = errors.New("document metadata is oversized or contains control characters")
 
+// ErrInvalidUTF8 reports text or metadata that encoding/json would silently rewrite to U+FFFD.
+// Rejecting it keeps the byte limits and text_sha256 calculated locally identical to the string
+// the API decodes from the JSON body.
+var ErrInvalidUTF8 = errors.New("document contains invalid UTF-8")
+
 // MaxMetadataBytes mirrors MAX_METADATA_BYTES in api/_engine_bridge.py, the cap on every string
 // field other than the text itself.
 const MaxMetadataBytes = 4 * 1024
+
+func checkText(doc Document) error {
+	if !utf8.ValidString(doc.Text) {
+		return fmt.Errorf(
+			"record %q has text that is not valid UTF-8; JSON encoding would change its bytes and digest: %w",
+			doc.Source, ErrInvalidUTF8)
+	}
+	// MaxDocumentBytes is measured against the TEXT, not the encoded document: the server
+	// checks `_utf8_size(text)` alone (api/_engine_bridge.py), so comparing the JSON -- which
+	// also carries fact_id, source, session, the digest and every field name -- would reject
+	// records the server accepts. The encoded size is used only for the request-body budget.
+	if len(doc.Text) > MaxDocumentBytes {
+		return fmt.Errorf(
+			"record %q has %d bytes of text, over the %d-byte per-document limit: %w",
+			doc.Source, len(doc.Text), MaxDocumentBytes, ErrDocumentTooLarge)
+	}
+	return nil
+}
 
 // checkMetadata rejects a source/session the server would refuse.
 //
@@ -148,6 +164,11 @@ func checkMetadata(doc Document) error {
 		name  string
 		value string
 	}{{"source", doc.Source}, {"session", doc.Session}} {
+		if !utf8.ValidString(field.value) {
+			return fmt.Errorf(
+				"%s is not valid UTF-8; JSON encoding would change its bytes: %w",
+				field.name, ErrInvalidUTF8)
+		}
 		if len(field.value) > MaxMetadataBytes {
 			return fmt.Errorf(
 				"%s is %d bytes, over the %d-byte metadata limit: %w",

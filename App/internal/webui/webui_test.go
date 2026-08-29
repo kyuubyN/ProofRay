@@ -16,6 +16,7 @@ func TestRedactSensitiveFieldsDropsCredentials(t *testing.T) {
 		"mongodb_uri":       "mongodb://user:secret@db.internal:27017",
 		"elasticsearch_url": "http://user:secret@es.internal:9200",
 		"redis_url":         "redis://:secret@cache.internal:6379",
+		"dynamodb_endpoint": "http://user:secret@localhost:8000",
 		"mysql_host":        "db.internal",
 		"mysql_user":        "app",
 		"postgres_table":    "articles",
@@ -26,6 +27,7 @@ func TestRedactSensitiveFieldsDropsCredentials(t *testing.T) {
 
 	droppedKeys := []string{
 		"mysql_password", "postgres_dsn", "mongodb_uri", "elasticsearch_url", "redis_url",
+		"dynamodb_endpoint",
 	}
 	for _, key := range droppedKeys {
 		if _, present := redacted[key]; present {
