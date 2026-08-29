@@ -57,6 +57,7 @@ lab/datasets/raw/
 /cache/
 /logs/
 /tmp/
+/scratch/
 /.agents/
 
 # Demo webapp: code is versioned, generated/derived corpora and the original

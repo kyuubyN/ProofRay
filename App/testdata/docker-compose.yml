@@ -1,0 +1,40 @@
+# Local test instances for every connector in App/internal/connectors -- not part of the app
+# itself, just a reproducible way to bring up something each connector can talk to. Every
+# service is ephemeral (no volumes): stop it and its data is gone, same as `--rm` containers.
+#
+# Usage: docker compose -f App/testdata/docker-compose.yml up -d
+# Then seed each one -- see App/testdata/seed.sh.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: horizon
+      POSTGRES_DB: horizon_example
+    ports: ["5433:5432"]
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: horizon
+      MYSQL_DATABASE: horizon_example
+    ports: ["3306:3306"]
+
+  mongo:
+    image: mongo:7
+    ports: ["27017:27017"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  dynamodb:
+    image: amazon/dynamodb-local
+    ports: ["8000:8000"]
+
+  elasticsearch:
+    image: elasticsearch:8.15.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports: ["9200:9200"]
