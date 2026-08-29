@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	neturl "net/url"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
@@ -29,6 +30,7 @@ const defaultIndex = "articles"
 type Connector struct {
 	client       *elasticsearch.Client
 	index        string
+	source       string
 	maxDocuments int
 }
 
@@ -73,7 +75,23 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("elasticsearch: %w", err)
 	}
 
-	return &Connector{client: client, index: index, maxDocuments: maxDocuments}, nil
+	// Host and port only: a URL may carry credentials in its userinfo, and this value is
+	// rendered in the web UI and sent to the API in every document.
+	return &Connector{
+		client:       client,
+		index:        index,
+		source:       fmt.Sprintf("elasticsearch:%s/%s", hostOf(url), index),
+		maxDocuments: maxDocuments,
+	}, nil
+}
+
+// hostOf reduces a cluster URL to host:port, dropping any user:password in its userinfo.
+func hostOf(raw string) string {
+	parsed, err := neturl.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return "unknown-host"
+	}
+	return parsed.Host
 }
 
 func (c *Connector) Name() string { return "elasticsearch" }
@@ -140,20 +158,16 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		}
 	}()
 
-	session := "elasticsearch:" + c.index
-	var documents []document.Document
+	acc := &document.Accumulator{
+		Origin:       fmt.Sprintf("elasticsearch: index %q", c.index),
+		MaxDocuments: c.maxDocuments,
+	}
 	for {
 		for _, hit := range page.Hits.Hits {
-			documents = append(documents, document.New(
-				session, hit.ID, hit.Source.Body, len(documents)))
-		}
-
-		if len(documents) > c.maxDocuments {
-			return nil, fmt.Errorf(
-				"elasticsearch: index %q holds more than %d documents: %w -- narrow the index or "+
-					"raise the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
-				c.index, c.maxDocuments, connectors.ErrCorpusTooLarge,
-			)
+			if err := acc.Add(document.New(
+				c.source, hit.ID, hit.Source.Body, acc.Len())); err != nil {
+				return nil, err
+			}
 		}
 
 		// A page with no hits means the scroll is exhausted.
@@ -178,7 +192,7 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		}
 	}
 
-	return documents, nil
+	return acc.Documents(), nil
 }
 
 // clearScroll releases a scroll cursor. Failing to clear it is not fatal to a fetch that already

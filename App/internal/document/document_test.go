@@ -8,13 +8,14 @@ import (
 )
 
 func TestNewCarriesProvenance(t *testing.T) {
-	doc := New("postgres:articles", "42", "the text", 3)
+	const source = "postgres:db.internal:5432/prod/articles"
+	doc := New(source, "42", "the text", 3)
 
-	if doc.Source != "postgres:articles:42" {
-		t.Errorf("Source = %q, want %q", doc.Source, "postgres:articles:42")
+	if doc.Source != source+":42" {
+		t.Errorf("Source = %q, want %q", doc.Source, source+":42")
 	}
-	if doc.Session != "postgres:articles" {
-		t.Errorf("Session = %q, want %q", doc.Session, "postgres:articles")
+	if doc.Session != source {
+		t.Errorf("Session = %q, want %q", doc.Session, source)
 	}
 	if doc.Text != "the text" {
 		t.Errorf("Text = %q, want %q", doc.Text, "the text")
@@ -34,7 +35,7 @@ func TestNewCarriesProvenance(t *testing.T) {
 // a wrong one makes the server reject the whole request.
 func TestNewComputesTextDigest(t *testing.T) {
 	const text = "the text"
-	doc := New("postgres:articles", "42", text, 0)
+	doc := New("postgres:db.internal:5432/prod/articles", "42", text, 0)
 
 	want := sha256.Sum256([]byte(text))
 	if doc.TextSHA256 != hex.EncodeToString(want[:]) {
@@ -46,9 +47,10 @@ func TestNewComputesTextDigest(t *testing.T) {
 // structured schema. A row that moves because an earlier row was deleted has to keep its fact_id,
 // or provenance cannot be reopened across two fetches.
 func TestFactIDIsStableAcrossPositionAndText(t *testing.T) {
-	first := New("postgres:articles", "42", "original text", 0)
-	moved := New("postgres:articles", "42", "original text", 97)
-	edited := New("postgres:articles", "42", "the row was edited", 0)
+	const source = "postgres:db.internal:5432/prod/articles"
+	first := New(source, "42", "original text", 0)
+	moved := New(source, "42", "original text", 97)
+	edited := New(source, "42", "the row was edited", 0)
 
 	if first.FactID != moved.FactID {
 		t.Error("fact_id changed when the row moved position")
@@ -59,8 +61,8 @@ func TestFactIDIsStableAcrossPositionAndText(t *testing.T) {
 }
 
 func TestFactIDDistinguishesRecords(t *testing.T) {
-	a := New("postgres:articles", "42", "text", 0)
-	b := New("postgres:articles", "43", "text", 1)
+	a := New("postgres:db:5432/p/articles", "42", "text", 0)
+	b := New("postgres:db:5432/p/articles", "43", "text", 1)
 	if a.FactID == b.FactID {
 		t.Error("two different primary keys produced the same fact_id")
 	}
@@ -68,20 +70,53 @@ func TestFactIDDistinguishesRecords(t *testing.T) {
 
 // Two backends that happen to share a key ("42") must not collide, or documents from one would be
 // silently indistinguishable from the other's.
-func TestFactIDIsNamespacedBySession(t *testing.T) {
-	pg := New("postgres:articles", "42", "text", 0)
-	my := New("mysql:articles", "42", "text", 0)
+func TestFactIDIsNamespacedBySource(t *testing.T) {
+	pg := New("postgres:db:5432/p/articles", "42", "text", 0)
+	my := New("mysql:db:3306/p/articles", "42", "text", 0)
 	if pg.FactID == my.FactID {
 		t.Error("the same key in two backends produced the same fact_id")
 	}
 }
 
-// The separator in factID exists so a session/key boundary shift cannot produce the same hash.
-func TestFactIDSeparatorPreventsBoundaryCollision(t *testing.T) {
-	a := New("ab", "c", "text", 0)
-	b := New("a", "bc", "text", 0)
-	if a.FactID == b.FactID {
-		t.Error("(\"ab\",\"c\") and (\"a\",\"bc\") collided; the separator is not doing its job")
+// factID length-prefixes the source so no source/key boundary shift can produce the same input.
+// A plain separator byte would be ambiguous for any key that may contain it -- and Redis keys
+// contain ':' by convention.
+func TestFactIDBoundaryCannotBeShifted(t *testing.T) {
+	pairs := [][2]string{
+		{"ab", "c"},
+		{"a", "bc"},
+		{"a:b", "c"},
+		{"a", "b:c"},
+	}
+	seen := map[int64][2]string{}
+	for _, pair := range pairs {
+		id := New(pair[0], pair[1], "text", 0).FactID
+		if previous, clash := seen[id]; clash {
+			t.Errorf("%v and %v produced the same fact_id", previous, pair)
+		}
+		seen[id] = pair
+	}
+}
+
+// Two servers holding the same table name and the same row id must not share an identity -- this
+// is why the source carries host/port and database rather than just the backend name.
+func TestFactIDDistinguishesPhysicalSources(t *testing.T) {
+	sources := []string{
+		"postgres:10.0.0.1:5432/prod/articles",
+		"postgres:10.0.0.2:5432/prod/articles",    // different host
+		"postgres:10.0.0.1:5433/prod/articles",    // different port
+		"postgres:10.0.0.1:5432/staging/articles", // different database
+		"postgres:10.0.0.1:5432/prod/notes",       // different table
+		"sqlite:/var/data/a.db/articles",
+		"sqlite:/var/data/b.db/articles", // different file
+	}
+	seen := map[int64]string{}
+	for _, source := range sources {
+		id := New(source, "42", "text", 0).FactID
+		if previous, clash := seen[id]; clash {
+			t.Errorf("%q and %q share a fact_id for the same key", previous, source)
+		}
+		seen[id] = source
 	}
 }
 
@@ -125,7 +160,7 @@ func TestWithEventTime(t *testing.T) {
 // The wire format has to match the schema api/_engine_bridge.py validates: it rejects unknown
 // fields outright and requires these six, so a rename here breaks every request at the server.
 func TestJSONMatchesServerSchema(t *testing.T) {
-	doc := New("postgres:articles", "42", "the text", 0)
+	doc := New("postgres:db.internal:5432/prod/articles", "42", "the text", 0)
 
 	encoded, err := json.Marshal(doc)
 	if err != nil {

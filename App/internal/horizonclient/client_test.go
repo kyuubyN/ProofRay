@@ -194,3 +194,86 @@ func TestNonJSONErrorBodyIsReported(t *testing.T) {
 		t.Errorf("error %q does not mention the status code", err)
 	}
 }
+
+// Werkzeug rejects an oversized body with a bare 413 before api/server.py's handler runs, so
+// without a preflight the caller learns nothing about which limit was hit -- after the whole
+// corpus has already been read out of the database and pushed over the network.
+func TestCreateAnswerRejectsAnOversizedPayloadWithoutSending(t *testing.T) {
+	isolateCredentials(t)
+	t.Setenv("PROOFRAY_API_TOKEN", "tok")
+
+	var reached bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+	}))
+	defer server.Close()
+
+	big := strings.Repeat("x", 32*1024)
+	var docs []document.Document
+	for i := 0; i < 64; i++ { // ~2 MiB, over the API's 1 MiB cap
+		docs = append(docs, document.New("src", string(rune(i)), big, i))
+	}
+
+	_, err := New(server.URL).CreateAnswer(context.Background(), AnswerRequest{
+		Question: "q", Documents: docs,
+	})
+	if !errors.Is(err, document.ErrCorpusTooLarge) {
+		t.Errorf("got %v, want ErrCorpusTooLarge", err)
+	}
+	if reached {
+		t.Error("the oversized request was sent instead of being rejected locally")
+	}
+}
+
+func TestCreateAnswerRejectsTooManyDocumentsWithoutSending(t *testing.T) {
+	isolateCredentials(t)
+	t.Setenv("PROOFRAY_API_TOKEN", "tok")
+
+	var reached bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+	}))
+	defer server.Close()
+
+	docs := make([]document.Document, document.MaxDocuments+1)
+	for i := range docs {
+		docs[i] = document.New("src", string(rune(i)), "t", i)
+	}
+
+	_, err := New(server.URL).CreateAnswer(context.Background(), AnswerRequest{
+		Question: "q", Documents: docs,
+	})
+	if !errors.Is(err, document.ErrCorpusTooLarge) {
+		t.Errorf("got %v, want ErrCorpusTooLarge", err)
+	}
+	if reached {
+		t.Error("the over-count request was sent instead of being rejected locally")
+	}
+}
+
+// The preflight must not reject a corpus that would actually fit.
+func TestCreateAnswerSendsANormalPayload(t *testing.T) {
+	isolateCredentials(t)
+	t.Setenv("PROOFRAY_API_TOKEN", "tok")
+
+	var reached bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		json.NewEncoder(w).Encode(AnswerResponse{ID: "a1", State: "resolved"})
+	}))
+	defer server.Close()
+
+	var docs []document.Document
+	for i := 0; i < 200; i++ {
+		docs = append(docs, document.New("src", string(rune(i)), "a normal sized document", i))
+	}
+
+	if _, err := New(server.URL).CreateAnswer(context.Background(), AnswerRequest{
+		Question: "q", Documents: docs,
+	}); err != nil {
+		t.Fatalf("a sendable payload was rejected: %v", err)
+	}
+	if !reached {
+		t.Error("the request never reached the server")
+	}
+}

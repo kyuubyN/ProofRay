@@ -10,6 +10,7 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -140,7 +141,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.ask(ctx, data.Selected, data.Question, data.IncludeSources, raw)
 	if err != nil {
-		data.ErrorMessage = err.Error()
+		// Never err.Error() directly: a driver's connection/parse error routinely quotes the DSN
+		// or URI back, password included, and this string is rendered into the page.
+		data.ErrorMessage = redactError(err, raw)
 		s.render(w, data)
 		return
 	}
@@ -238,7 +241,10 @@ func (s *Server) render(w http.ResponseWriter, data viewData) {
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("Referrer-Policy", "same-origin")
 	if err := tmpl.Execute(w, data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// A template failure is a bug in this server, not something the visitor can act on, and
+		// its message may quote the data being rendered. Log it; show a fixed string.
+		log.Printf("webui: rendering template: %v", err)
+		http.Error(w, "internal error rendering the page", http.StatusInternalServerError)
 	}
 }
 

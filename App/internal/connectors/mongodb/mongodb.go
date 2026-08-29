@@ -7,6 +7,7 @@ package mongodb
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -29,6 +30,7 @@ const (
 type Connector struct {
 	client       *mongo.Client
 	collection   *mongo.Collection
+	source       string
 	maxDocuments int
 }
 
@@ -44,7 +46,8 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		)
 	}
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	clientOptions := options.Client().ApplyURI(uri)
+	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		return nil, fmt.Errorf("mongodb: connecting: %w", err)
 	}
@@ -62,9 +65,14 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("mongodb: %w", err)
 	}
 
+	// Hosts come from the parsed options, not the URI string: the URI carries credentials, and
+	// this value is rendered in the web UI and sent to the API in every document.
+	hosts := strings.Join(clientOptions.Hosts, ",")
+
 	return &Connector{
 		client:       client,
 		collection:   client.Database(database).Collection(collectionName),
+		source:       fmt.Sprintf("mongodb:%s/%s.%s", hosts, database, collectionName),
 		maxDocuments: maxDocuments,
 	}, nil
 }
@@ -86,8 +94,10 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 	}
 	defer cursor.Close(ctx)
 
-	session := fmt.Sprintf("mongodb:%s.%s", c.collection.Database().Name(), c.collection.Name())
-	var documents []document.Document
+	acc := &document.Accumulator{
+		Origin:       fmt.Sprintf("mongodb: collection %q", c.collection.Name()),
+		MaxDocuments: c.maxDocuments,
+	}
 	for cursor.Next(ctx) {
 		var row struct {
 			ID   any    `bson:"_id"`
@@ -96,19 +106,15 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		if err := cursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("mongodb: decoding document: %w", err)
 		}
-		documents = append(documents, document.New(
-			session, formatID(row.ID), row.Body, len(documents)))
-		if len(documents) > c.maxDocuments {
-			return nil, fmt.Errorf(
-				"mongodb: collection %q holds more than %d documents: %w -- narrow the collection "+
-					"or raise the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
-				c.collection.Name(), c.maxDocuments, connectors.ErrCorpusTooLarge)
+		if err := acc.Add(document.New(
+			c.source, formatID(row.ID), row.Body, acc.Len())); err != nil {
+			return nil, err
 		}
 	}
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("mongodb: reading cursor: %w", err)
 	}
-	return documents, nil
+	return acc.Documents(), nil
 }
 
 func (c *Connector) Close() error {

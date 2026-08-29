@@ -25,6 +25,7 @@ const defaultTable = "articles"
 type Connector struct {
 	db           *sql.DB
 	table        string
+	source       string
 	maxDocuments int
 }
 
@@ -75,7 +76,14 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("mysql: %w", err)
 	}
 
-	return &Connector{db: db, table: table, maxDocuments: maxDocuments}, nil
+	// Built from cfg's parsed fields, never the formatted DSN: that string carries the password,
+	// and this value is rendered in the web UI and sent to the API in every document.
+	return &Connector{
+		db:           db,
+		table:        table,
+		source:       fmt.Sprintf("mysql:%s/%s/%s", cfg.Addr, cfg.DBName, table),
+		maxDocuments: maxDocuments,
+	}, nil
 }
 
 func (c *Connector) Name() string { return "mysql" }
@@ -91,25 +99,23 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 	}
 	defer rows.Close()
 
-	session := "mysql:" + c.table
-	var documents []document.Document
+	acc := &document.Accumulator{
+		Origin:       fmt.Sprintf("mysql: table %q", c.table),
+		MaxDocuments: c.maxDocuments,
+	}
 	for rows.Next() {
 		var id, body string
 		if err := rows.Scan(&id, &body); err != nil {
 			return nil, fmt.Errorf("mysql: scanning row: %w", err)
 		}
-		documents = append(documents, document.New(session, id, body, len(documents)))
-		if len(documents) > c.maxDocuments {
-			return nil, fmt.Errorf(
-				"mysql: table %q holds more than %d documents: %w -- narrow the table or raise "+
-					"the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
-				c.table, c.maxDocuments, connectors.ErrCorpusTooLarge)
+		if err := acc.Add(document.New(c.source, id, body, acc.Len())); err != nil {
+			return nil, err
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("mysql: reading rows: %w", err)
 	}
-	return documents, nil
+	return acc.Documents(), nil
 }
 
 func (c *Connector) Close() error {

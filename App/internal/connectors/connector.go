@@ -85,28 +85,21 @@ func Names() []string {
 	return names
 }
 
-// DefaultMaxDocuments bounds how many documents a paginating connector accumulates in one fetch.
-// It mirrors MAX_DOCUMENTS in api/_engine_bridge.py: fetching more than the API will accept only
-// trades a clear "this corpus is too large" for a rejected POST after all the work is done.
-//
-// A connector that hits this ceiling reports ErrCorpusTooLarge rather than quietly returning a
-// truncated corpus (see MaxDocuments).
-const DefaultMaxDocuments = 2000
-
-// ErrCorpusTooLarge is returned when a backend holds more documents than the configured ceiling.
-// Failing here is deliberate: Horizon answers only from the documents it is given, so a silently
-// truncated corpus would produce answers that look verified while resting on a partial view of
-// the data. The caller is told to either narrow the query or raise the ceiling explicitly.
-var ErrCorpusTooLarge = fmt.Errorf("corpus exceeds the configured document ceiling")
+// ErrCorpusTooLarge is an alias for document.ErrCorpusTooLarge, kept so callers matching on it
+// do not have to import both packages.
+var ErrCorpusTooLarge = document.ErrCorpusTooLarge
 
 // MaxDocuments resolves the per-fetch document ceiling from opts/env (max_documents,
-// HORIZON_MAX_DOCUMENTS), falling back to DefaultMaxDocuments. A value of 0 or less is rejected
-// rather than treated as "unlimited" -- an unbounded fetch is exactly the failure mode this
-// ceiling exists to prevent.
+// HORIZON_MAX_DOCUMENTS).
+//
+// This can only LOWER the API's own ceiling, never raise it: api/_engine_bridge.py rejects more
+// than document.MaxDocuments in one request regardless of what is configured here, so accepting
+// a larger value would just promise something the server refuses. A value of 0 or less is
+// rejected rather than read as "unlimited" -- an unbounded fetch is exactly what this prevents.
 func MaxDocuments(opts Options) (int, error) {
 	raw := opts.Get("max_documents", "HORIZON_MAX_DOCUMENTS", "")
 	if raw == "" {
-		return DefaultMaxDocuments, nil
+		return document.MaxDocuments, nil
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil {
@@ -114,6 +107,12 @@ func MaxDocuments(opts Options) (int, error) {
 	}
 	if value <= 0 {
 		return 0, fmt.Errorf("invalid max_documents %d: must be greater than zero", value)
+	}
+	if value > document.MaxDocuments {
+		return 0, fmt.Errorf(
+			"invalid max_documents %d: the API accepts at most %d documents per request, so this "+
+				"ceiling can only be lowered, not raised",
+			value, document.MaxDocuments)
 	}
 	return value, nil
 }

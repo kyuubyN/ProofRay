@@ -16,9 +16,14 @@ server synthesize an identity from array position (`fact_id` = index, `source` =
 throws away the primary key the connector just read — a row that shifts position between two
 fetches silently changes identity, and a verified claim cannot be traced back to the record it
 came from. Instead, each connector selects its table's key alongside the text and emits it as
-`fact_id`/`source` (see `internal/document`), so `source` reads `postgres:articles:42` rather than
-`doc:1`. Each document also carries a `text_sha256` the server recomputes, making the text's
-integrity verifiable end to end across the connector, the network hop, and the JSON encoding.
+`fact_id`/`source` (see `internal/document`), so `source` reads
+`postgres:db.internal:5432/prod/articles:42` rather than `doc:1` — host, port, database and table,
+so two servers holding the same table name never share a document identity. The `fact_id` is
+SHA-256 of that source plus the primary key, truncated to the server's 62-bit domain. The source
+is always built from the driver's *parsed* connection config, never the DSN string, so a password
+in a DSN never reaches the page or the API. Each document also carries a `text_sha256` the server
+recomputes, making the text's integrity verifiable end to end across the connector, the network
+hop, and the JSON encoding.
 
 ## Layout
 
@@ -230,14 +235,18 @@ workflow nothing checked it.
 The tests deliberately cover the parts that can be exercised without a live database, which is
 also where the security-relevant logic lives:
 
-- `internal/document` — that a `fact_id` follows the record's key rather than its position, stays
-  inside the server's identity domain, and that the wire format matches the schema
-  `api/_engine_bridge.py` validates (it rejects unknown fields, so a rename breaks every request).
+- `internal/document` — that a `fact_id` follows the record's key rather than its position, keeps
+  two physical sources distinct (different host, port, database, table or file), stays inside the
+  server's identity domain, and that the wire format matches the schema `api/_engine_bridge.py`
+  validates (it rejects unknown fields, so a rename breaks every request). Also the corpus
+  limits: that the byte budget stops a fetch long before the document count would.
 - `internal/connectors` — `ValidateIdentifier` against the injection payloads it exists to reject,
   and `MaxDocuments` rejecting a zero/negative ceiling rather than reading it as "unlimited".
 - `internal/connectors/mysql` — a regression guard for the DSN-parameter injection fixed in Round
   3: a `database` field containing `?allowAllFiles=true` must not enable that flag.
-- `internal/webui` — that a submitted password/DSN/URI never survives into the re-rendered page.
+- `internal/webui` — that a submitted password/DSN/URI never survives into the re-rendered page,
+  and that a driver's error message is redacted before it is rendered or logged (a connection or
+  DSN-parse error routinely quotes the connection string back, password included).
 - `internal/horizonclient` — that `GET /v1/health` stays unauthenticated, every other route sends
   the bearer token, a missing token fails before the request rather than as an ambiguous 401, and
   no error path echoes the token back to the caller (it would land in the page's error message).
@@ -328,6 +337,28 @@ Two were checked and are not real issues, not applied:
 Token rotation/refresh and custom TLS/mTLS support were flagged again as gaps but are scope
 decisions, not bugs (the TLS one is the same one named below since Round 3).
 
+## Corpus limits
+
+Three limits apply, all mirrored from the API in `internal/document` so a corpus that cannot be
+sent fails while it is being read rather than as an HTTP 413 after the whole thing has been pulled
+out of the database:
+
+| Limit | Value | Mirrors |
+| --- | --- | --- |
+| Documents per request | 2000 | `MAX_DOCUMENTS` (`api/_engine_bridge.py`) |
+| Bytes per document | 64 KiB | `MAX_DOCUMENT_BYTES` (`api/_engine_bridge.py`) |
+| Bytes per request body | 1 MiB | `MAX_CONTENT_LENGTH` (`api/server.py`) |
+
+The **byte budget is the one that binds in practice**: 2000 documents at 64 KiB each would be
+128 MiB, so a document count alone never establishes that a corpus is sendable. A fetch stops as
+soon as the accumulated body would exceed 1 MiB, and `horizonclient` re-checks the assembled
+payload before sending. Both report `ErrCorpusTooLarge` rather than truncating — an answer
+composed from a quietly truncated corpus looks exactly as verified as one composed from all of it.
+
+`max_documents` / `HORIZON_MAX_DOCUMENTS` can **lower** the document ceiling but never raise it:
+the API rejects more than 2000 per request regardless, so a larger value is refused at startup
+rather than promising something the server will not honor.
+
 ## Not done here (named on purpose)
 
 - **Auth, CSRF, rate limiting, TLS.** `api/server.py` itself has none yet (see
@@ -362,11 +393,8 @@ decisions, not bugs (the TLS one is the same one named below since Round 3).
   memory before sending it, same as the Python examples; nothing here streams. What it no longer
   does is return a *partial* corpus silently — `dynamodb` follows `LastEvaluatedKey` to the end of
   the table and `elasticsearch` scrolls the whole index, rather than reading one page and
-  presenting it as everything. Both stop at a ceiling (`max_documents` /
-  `HORIZON_MAX_DOCUMENTS`, default 2000, mirroring the API's own `MAX_DOCUMENTS`) and fail with
-  `ErrCorpusTooLarge` instead of truncating: an answer composed from a quietly truncated corpus
-  would look exactly as verified as one composed from the whole thing. A corpus genuinely larger
-  than the API accepts needs chunking on both sides, which is not built here.
+  presenting it as everything. A corpus genuinely larger than the API accepts needs chunking on
+  both sides, which is not built here; it is refused rather than truncated (see below).
 - **In-process mocks for mongodb/redis/dynamodb.** The Python examples can run with zero setup
   via `mongomock`/`fakeredis`/`moto`; these Go connectors always need a real endpoint (DynamoDB
   Local counts as "real" here, since it speaks the actual wire protocol).

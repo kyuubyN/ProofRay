@@ -26,6 +26,7 @@ const defaultKeyPrefix = "articles:"
 type Connector struct {
 	client       *redis.Client
 	prefix       string
+	source       string
 	maxDocuments int
 }
 
@@ -59,7 +60,15 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("redis: %w", err)
 	}
 
-	return &Connector{client: client, prefix: prefix, maxDocuments: maxDocuments}, nil
+	// From the parsed options, never the URL string, which may carry a password.
+	redisOptions := client.Options()
+
+	return &Connector{
+		client:       client,
+		prefix:       prefix,
+		source:       fmt.Sprintf("redis:%s/%d", redisOptions.Addr, redisOptions.DB),
+		maxDocuments: maxDocuments,
+	}, nil
 }
 
 func (c *Connector) Name() string { return "redis" }
@@ -78,18 +87,12 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 	}
 	sort.Strings(keys)
 
-	if len(keys) > c.maxDocuments {
-		return nil, fmt.Errorf(
-			"redis: prefix %q matches more than %d keys: %w -- narrow the prefix or raise the "+
-				"ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
-			c.prefix, c.maxDocuments, connectors.ErrCorpusTooLarge)
+	// The Redis key already carries the prefix, so it is used whole as the record key -- the
+	// resulting `source` ends in literally the key to GET.
+	acc := &document.Accumulator{
+		Origin:       fmt.Sprintf("redis: prefix %q", c.prefix),
+		MaxDocuments: c.maxDocuments,
 	}
-
-	// The Redis key is already the record's full identity, and it carries the prefix itself --
-	// so the session stays a bare "redis" rather than repeating the prefix, and `source` comes
-	// out as "redis:articles:1": literally the key to GET.
-	const session = "redis"
-	documents := make([]document.Document, 0, len(keys))
 	for _, key := range keys {
 		value, err := c.client.Get(ctx, key).Result()
 		if err == redis.Nil {
@@ -98,9 +101,11 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		if err != nil {
 			return nil, fmt.Errorf("redis: getting key %q: %w", key, err)
 		}
-		documents = append(documents, document.New(session, key, value, len(documents)))
+		if err := acc.Add(document.New(c.source, key, value, acc.Len())); err != nil {
+			return nil, err
+		}
 	}
-	return documents, nil
+	return acc.Documents(), nil
 }
 
 func (c *Connector) Close() error {

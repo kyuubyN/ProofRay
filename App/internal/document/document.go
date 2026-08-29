@@ -16,14 +16,32 @@ package document
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"hash/fnv"
 )
 
 // Scope is the only scope api/_engine_bridge.py authorizes (SCOPE_ID = 1); a document carrying
 // any other value is rejected by the server.
 const Scope = 1
+
+// The server's own limits, mirrored here so a corpus that cannot be sent is rejected before the
+// work of fetching it, rather than as an HTTP 413 after. Raising any of these without raising
+// the matching value in api/ would just move the failure back to the server.
+const (
+	// MaxDocuments mirrors MAX_DOCUMENTS in api/_engine_bridge.py.
+	MaxDocuments = 2000
+
+	// MaxDocumentBytes mirrors MAX_DOCUMENT_BYTES in api/_engine_bridge.py.
+	MaxDocumentBytes = 64 * 1024
+
+	// MaxRequestBytes mirrors app.config["MAX_CONTENT_LENGTH"] in api/server.py, above which
+	// Werkzeug returns 413 before any handler runs. This is the binding limit in practice:
+	// MaxDocuments documents at MaxDocumentBytes each would be 128 MiB, so the document count
+	// alone never establishes that a corpus is sendable.
+	MaxRequestBytes = 1024 * 1024
+)
 
 // maxFactID mirrors api/_engine_bridge.py's MAX_FACT_ID (1 << 62), which the server enforces as
 // an exclusive upper bound.
@@ -74,19 +92,24 @@ type Document struct {
 
 // New builds a Document from a backend's own identifiers.
 //
-// session identifies the corpus being read (e.g. "postgres:articles"); primaryKey is the
-// record's key within it, in whatever form the backend uses -- an integer id, a Mongo ObjectID,
-// a Redis key. FactID is derived from session+primaryKey rather than from the record's position,
-// so the same row keeps the same identity across fetches even when rows are inserted, deleted, or
-// returned in a different order.
-func New(session, primaryKey, text string, sequence int) Document {
+// source identifies the physical origin, precisely enough to tell two of them apart: it must
+// carry the host/port, database and table (or the absolute file path) the record was read from,
+// not just the backend name -- see the Source method on each connector. primaryKey is the
+// record's key within it, in whatever form the backend uses: an integer id, a Mongo ObjectID, a
+// Redis key.
+//
+// FactID is derived from source+primaryKey rather than from the record's position, so the same
+// row keeps the same identity across fetches even when rows are inserted, deleted, or returned
+// in a different order -- and rows from two different servers that happen to share a key stay
+// distinct.
+func New(source, primaryKey, text string, sequence int) Document {
 	digest := sha256.Sum256([]byte(text))
 	return Document{
-		FactID:     factID(session, primaryKey),
+		FactID:     factID(source, primaryKey),
 		Text:       text,
-		Source:     fmt.Sprintf("%s:%s", session, primaryKey),
+		Source:     fmt.Sprintf("%s:%s", source, primaryKey),
 		Scope:      Scope,
-		Session:    session,
+		Session:    source,
 		Version:    1,
 		Sequence:   &sequence,
 		TextSHA256: hex.EncodeToString(digest[:]),
@@ -100,19 +123,37 @@ func (d Document) WithEventTime(unixSeconds int64) Document {
 	return d
 }
 
-// factID hashes a record's key into the server's identity domain.
+// factID maps a record's key into the server's identity domain.
 //
 // The schema requires an integer fact_id, but most backends here have non-integer keys (Mongo
 // ObjectIDs, Redis keys, DynamoDB string ids), so a hash is the only way to carry a real key into
-// an integer field. FNV-1a is chosen for stability and speed, not collision resistance: this is an
-// identity mapping, not a security boundary. The session is mixed in so two backends sharing a key
-// ("42") do not collide with each other. If two records in one fetch ever do collide, the server
-// rejects the whole request ("structured documents require unique fact_id values") rather than
-// silently merging them -- a loud failure, not a wrong answer.
-func factID(session, primaryKey string) int64 {
-	h := fnv.New64a()
-	h.Write([]byte(session))
-	h.Write([]byte{0}) // separator, so ("ab","c") and ("a","bc") differ
+// an integer field. SHA-256 truncated to the server's 62-bit domain: at that width a birthday
+// collision needs on the order of 2^31 records in one corpus, far beyond the 2000-document
+// ceiling, and unlike a non-cryptographic hash it is not practical to construct two keys that
+// collide on purpose.
+//
+// The source is mixed in with a length prefix rather than a plain separator, so no combination of
+// source and key can be re-split to produce another pair's input -- a separator byte alone is
+// ambiguous for any key that may itself contain that byte (a Redis key contains ':' by
+// convention). If two records in one fetch ever do collide, the server rejects the whole request
+// ("structured documents require unique fact_id values") rather than silently merging them.
+func factID(source, primaryKey string) int64 {
+	h := sha256.New()
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(source)))
+	h.Write(length[:])
+	h.Write([]byte(source))
 	h.Write([]byte(primaryKey))
-	return int64(h.Sum64() & maxFactID)
+	sum := h.Sum(nil)
+	return int64(binary.BigEndian.Uint64(sum[:8]) & maxFactID)
+}
+
+// EncodedSize reports how many bytes this document contributes to the request body, including
+// the comma that separates it from the next one.
+func (d Document) EncodedSize() int {
+	encoded, err := json.Marshal(d)
+	if err != nil {
+		return 0
+	}
+	return len(encoded) + 1
 }

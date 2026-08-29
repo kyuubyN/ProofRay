@@ -7,6 +7,8 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"net"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -23,6 +25,7 @@ const defaultTable = "articles"
 type Connector struct {
 	pool         *pgxpool.Pool
 	table        string
+	source       string
 	maxDocuments int
 }
 
@@ -59,7 +62,22 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("postgres: %w", err)
 	}
 
-	return &Connector{pool: pool, table: table, maxDocuments: maxDocuments}, nil
+	return &Connector{
+		pool:         pool,
+		table:        table,
+		source:       sourceOf(pool, table),
+		maxDocuments: maxDocuments,
+	}, nil
+}
+
+// sourceOf names the physical origin: which server, which database, which table. Built from the
+// parsed connection config rather than the DSN string, so the user and password in the DSN are
+// never part of it -- this value is rendered in the web UI and travels to the API inside every
+// document's `source`.
+func sourceOf(pool *pgxpool.Pool, table string) string {
+	config := pool.Config().ConnConfig
+	return fmt.Sprintf("postgres:%s/%s/%s",
+		net.JoinHostPort(config.Host, strconv.Itoa(int(config.Port))), config.Database, table)
 }
 
 func (c *Connector) Name() string { return "postgres" }
@@ -78,25 +96,23 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 	}
 	defer rows.Close()
 
-	session := "postgres:" + c.table
-	var documents []document.Document
+	acc := &document.Accumulator{
+		Origin:       fmt.Sprintf("postgres: table %q", c.table),
+		MaxDocuments: c.maxDocuments,
+	}
 	for rows.Next() {
 		var id, body string
 		if err := rows.Scan(&id, &body); err != nil {
 			return nil, fmt.Errorf("postgres: scanning row: %w", err)
 		}
-		documents = append(documents, document.New(session, id, body, len(documents)))
-		if len(documents) > c.maxDocuments {
-			return nil, fmt.Errorf(
-				"postgres: table %q holds more than %d documents: %w -- narrow the table or raise "+
-					"the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
-				c.table, c.maxDocuments, connectors.ErrCorpusTooLarge)
+		if err := acc.Add(document.New(c.source, id, body, acc.Len())); err != nil {
+			return nil, err
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("postgres: reading rows: %w", err)
 	}
-	return documents, nil
+	return acc.Documents(), nil
 }
 
 func (c *Connector) Close() error {

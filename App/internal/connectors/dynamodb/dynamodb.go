@@ -30,6 +30,7 @@ const defaultTable = "articles"
 type Connector struct {
 	client       *dynamodb.Client
 	table        string
+	source       string
 	maxDocuments int
 }
 
@@ -78,7 +79,19 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("dynamodb: describing table %q: %w", table, err)
 	}
 
-	return &Connector{client: client, table: table, maxDocuments: maxDocuments}, nil
+	// The endpoint distinguishes a local table from the same table name in real AWS; the region
+	// distinguishes two real accounts' regions. Neither carries a credential.
+	origin := region
+	if endpoint != "" {
+		origin = endpoint
+	}
+
+	return &Connector{
+		client:       client,
+		table:        table,
+		source:       fmt.Sprintf("dynamodb:%s/%s", origin, table),
+		maxDocuments: maxDocuments,
+	}, nil
 }
 
 func (c *Connector) Name() string { return "dynamodb" }
@@ -114,10 +127,12 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 			items = append(items, it)
 		}
 
+		// Bound the in-memory item list while paging, before any of it is turned into documents:
+		// a table far past the ceiling should stop being read, not be read in full and rejected.
 		if len(items) > c.maxDocuments {
 			return nil, fmt.Errorf(
-				"dynamodb: table %q holds more than %d documents: %w -- narrow the table or raise "+
-					"the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
+				"dynamodb: table %q holds more than %d documents, the most the API accepts in one "+
+					"request: %w -- narrow the table so it returns fewer",
 				c.table, c.maxDocuments, connectors.ErrCorpusTooLarge,
 			)
 		}
@@ -131,12 +146,16 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 
-	session := "dynamodb:" + c.table
-	documents := make([]document.Document, 0, len(items))
-	for _, it := range items {
-		documents = append(documents, document.New(session, it.ID, it.Body, len(documents)))
+	acc := &document.Accumulator{
+		Origin:       fmt.Sprintf("dynamodb: table %q", c.table),
+		MaxDocuments: c.maxDocuments,
 	}
-	return documents, nil
+	for _, it := range items {
+		if err := acc.Add(document.New(c.source, it.ID, it.Body, acc.Len())); err != nil {
+			return nil, err
+		}
+	}
+	return acc.Documents(), nil
 }
 
 func (c *Connector) Close() error {

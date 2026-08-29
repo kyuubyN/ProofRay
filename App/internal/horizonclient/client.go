@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"horizonmemory/connector/internal/document"
 )
 
 // ErrNoToken is returned instead of making the request when no bearer token could be resolved
@@ -49,12 +51,35 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 }
 
 // CreateAnswer calls POST /v1/answers with the given request body.
+//
+// The payload is checked against the server's limits before anything is sent. Werkzeug rejects an
+// oversized body with a bare 413 before api/server.py's handler runs, so without this the caller
+// gets "413" with no indication of which limit was hit or by how much -- after the whole corpus
+// has already been read out of the database and pushed over the network.
 func (c *Client) CreateAnswer(ctx context.Context, req AnswerRequest) (*AnswerResponse, error) {
+	if err := checkRequestSize(req); err != nil {
+		return nil, err
+	}
 	var out AnswerResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/answers", req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// checkRequestSize measures everything in the body that is not a document, then hands the
+// documents to document.CheckPayload with that envelope accounted for.
+func checkRequestSize(req AnswerRequest) error {
+	envelope := req
+	envelope.Documents = nil
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		return fmt.Errorf("horizonclient: encoding request: %w", err)
+	}
+	if err := document.CheckPayload(req.Documents, len(encoded)); err != nil {
+		return fmt.Errorf("horizonclient: %w", err)
+	}
+	return nil
 }
 
 // GetAnswer calls GET /v1/answers/{id}, optionally requesting the full verified claim list.

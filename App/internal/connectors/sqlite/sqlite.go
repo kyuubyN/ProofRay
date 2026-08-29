@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path/filepath"
 
 	_ "modernc.org/sqlite"
 
@@ -23,6 +24,7 @@ const defaultTable = "support_articles"
 type Connector struct {
 	db           *sql.DB
 	table        string
+	source       string
 	maxDocuments int
 }
 
@@ -60,7 +62,19 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("sqlite: %w", err)
 	}
 
-	return &Connector{db: db, table: table, maxDocuments: maxDocuments}, nil
+	// The absolute path names the physical origin: two databases with the same table name in
+	// different files must not share document identities.
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		absolute = path
+	}
+
+	return &Connector{
+		db:           db,
+		table:        table,
+		source:       fmt.Sprintf("sqlite:%s/%s", absolute, table),
+		maxDocuments: maxDocuments,
+	}, nil
 }
 
 func (c *Connector) Name() string { return "sqlite" }
@@ -76,25 +90,23 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 	}
 	defer rows.Close()
 
-	session := "sqlite:" + c.table
-	var documents []document.Document
+	acc := &document.Accumulator{
+		Origin:       fmt.Sprintf("sqlite: table %q", c.table),
+		MaxDocuments: c.maxDocuments,
+	}
 	for rows.Next() {
 		var id, body string
 		if err := rows.Scan(&id, &body); err != nil {
 			return nil, fmt.Errorf("sqlite: scanning row: %w", err)
 		}
-		documents = append(documents, document.New(session, id, body, len(documents)))
-		if len(documents) > c.maxDocuments {
-			return nil, fmt.Errorf(
-				"sqlite: table %q holds more than %d documents: %w -- narrow the table or raise "+
-					"the ceiling with max_documents / HORIZON_MAX_DOCUMENTS",
-				c.table, c.maxDocuments, connectors.ErrCorpusTooLarge)
+		if err := acc.Add(document.New(c.source, id, body, acc.Len())); err != nil {
+			return nil, err
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("sqlite: reading rows: %w", err)
 	}
-	return documents, nil
+	return acc.Documents(), nil
 }
 
 func (c *Connector) Close() error {
