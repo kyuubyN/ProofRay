@@ -1,31 +1,27 @@
 package mysql
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
-)
 
-// buildDSN mirrors exactly how New assembles its DSN. It exists so the escaping can be tested
-// without a live server: New itself dials before returning, so it cannot be called here.
-func buildDSN(user, password, host, port, database string) string {
-	cfg := mysqldriver.NewConfig()
-	cfg.User = user
-	cfg.Passwd = password
-	cfg.Net = "tcp"
-	cfg.Addr = net.JoinHostPort(host, port)
-	cfg.DBName = database
-	return cfg.FormatDSN()
-}
+	"horizonmemory/connector/internal/connectors"
+)
 
 // A previous version built this DSN with fmt.Sprintf, which let a value containing "?" smuggle
 // extra driver parameters in through a plain form field -- "allowAllFiles=true" makes the client
-// honor a malicious server's request to read arbitrary local files. FormatDSN escapes each field
-// instead. This is a regression guard for that fix, not a test of the driver.
+// honor a malicious server's request to read arbitrary local files. FormatDSN escapes DBName,
+// which closes that original database-field vector. This is a regression guard for that fix.
 func TestDSNCannotInjectDriverParameters(t *testing.T) {
-	dsn := buildDSN("root", "secret", "localhost", "3306", "horizon_example?allowAllFiles=true")
+	cfg := driverConfig(
+		"root", "secret", "localhost", "3306", "horizon_example?allowAllFiles=true")
+	dsn := cfg.FormatDSN()
 
 	if strings.Contains(dsn, "?allowAllFiles=true") {
 		t.Fatalf("database name injected a driver parameter into the DSN: %s", dsn)
@@ -44,8 +40,76 @@ func TestDSNCannotInjectDriverParameters(t *testing.T) {
 	}
 }
 
+// NewConnector consumes Config directly. Serializing and reparsing is unnecessary and lossy for
+// values that themselves resemble DSN syntax: for example, ParseDSN truncates the user fixture
+// below. Drive the real New path and capture the Config at the driver boundary so a regression to
+// sql.Open("mysql", cfg.FormatDSN()) cannot pass this test.
+func TestNewPassesExactFieldsToTheDriverConnector(t *testing.T) {
+	const (
+		user     = "root@tcp(evil:3306)/x?allowAllFiles=true#"
+		password = "pw@tcp(evil:3306)/x?allowAllFiles=true#"
+		host     = "h)/d?allowAllFiles=true&x=("
+		port     = "3306"
+		database = "literal?allowAllFiles=true"
+	)
+
+	// Prove the fixture distinguishes the implementations: this user value is changed by a
+	// FormatDSN -> ParseDSN round trip, while the direct connector path below must retain it.
+	roundTrip, err := mysqldriver.ParseDSN(
+		driverConfig(user, "ordinary-password", "db.internal", port, "safe").FormatDSN())
+	if err != nil {
+		t.Fatalf("round-trip fixture is not parseable: %v", err)
+	}
+	if roundTrip.User == user {
+		t.Fatal("fixture does not distinguish direct Config delivery from a DSN round trip")
+	}
+
+	originalOpen := openMySQLDB
+	var captured mysqldriver.Config
+	openMySQLDB = func(cfg *mysqldriver.Config) (*sql.DB, error) {
+		captured = *cfg
+		return sql.OpenDB(stubConnector{}), nil
+	}
+	t.Cleanup(func() { openMySQLDB = originalOpen })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	conn, err := New(ctx, connectors.Options{
+		"host": host, "port": port, "user": user, "password": password,
+		"database": database, "max_documents": "10",
+	})
+	if err != nil {
+		t.Fatalf("New did not use the injected structured-config opener: %v", err)
+	}
+	defer conn.Close()
+
+	wantAddr := net.JoinHostPort(host, port)
+	if captured.User != user || captured.Passwd != password || captured.Addr != wantAddr ||
+		captured.DBName != database || captured.Net != "tcp" {
+		t.Errorf("driver received changed fields:\n  got:  user=%q password=%q addr=%q db=%q net=%q\n"+
+			"  want: user=%q password=%q addr=%q db=%q net=%q",
+			captured.User, captured.Passwd, captured.Addr, captured.DBName, captured.Net,
+			user, password, wantAddr, database, "tcp")
+	}
+}
+
+type stubConnector struct{}
+
+func (stubConnector) Connect(context.Context) (driver.Conn, error) { return stubConn{}, nil }
+func (stubConnector) Driver() driver.Driver                        { return stubDriver{} }
+
+type stubDriver struct{}
+
+func (stubDriver) Open(string) (driver.Conn, error) { return stubConn{}, nil }
+
+type stubConn struct{}
+
+func (stubConn) Prepare(string) (driver.Stmt, error) { return nil, driver.ErrSkip }
+func (stubConn) Close() error                        { return nil }
+func (stubConn) Begin() (driver.Tx, error)           { return nil, driver.ErrSkip }
+
 func TestDSNPreservesOrdinaryValues(t *testing.T) {
-	dsn := buildDSN("app", "p@ss w0rd/&?", "db.internal", "3307", "horizon_example")
+	dsn := driverConfig("app", "p@ss w0rd/&?", "db.internal", "3307", "horizon_example").FormatDSN()
 
 	parsed, err := mysqldriver.ParseDSN(dsn)
 	if err != nil {
@@ -69,7 +133,7 @@ func TestDSNPreservesOrdinaryValues(t *testing.T) {
 
 func TestDSNHandlesIPv6Host(t *testing.T) {
 	// net.JoinHostPort brackets an IPv6 literal; without it the DSN would be ambiguous.
-	dsn := buildDSN("root", "", "::1", "3306", "horizon_example")
+	dsn := driverConfig("root", "", "::1", "3306", "horizon_example").FormatDSN()
 	parsed, err := mysqldriver.ParseDSN(dsn)
 	if err != nil {
 		t.Fatalf("unexpected parse error: %v", err)

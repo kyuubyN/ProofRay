@@ -3,7 +3,27 @@ package dynamodb
 import (
 	"strings"
 	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
+
+func TestTableOriginRequiresThePhysicalTableARN(t *testing.T) {
+	for _, description := range []*types.TableDescription{nil, {}, {TableArn: aws.String("")}} {
+		if _, err := tableOrigin(description, ""); err == nil {
+			t.Error("missing TableArn fell back to a region-only identity")
+		}
+	}
+
+	const arn = "arn:aws:dynamodb:us-east-1:123456789012:table/articles"
+	got, err := tableOrigin(&types.TableDescription{TableArn: aws.String(arn)}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != arn {
+		t.Errorf("origin = %q, want %q", got, arn)
+	}
+}
 
 func TestEndpointIdentityRemovesCredentials(t *testing.T) {
 	const raw = "http://local-user:local-pass@localhost:8000/path?token=secret#fragment"

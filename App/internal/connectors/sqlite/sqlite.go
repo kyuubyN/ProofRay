@@ -7,6 +7,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
@@ -41,7 +43,12 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		)
 	}
 
-	db, err := sql.Open("sqlite", path)
+	canonicalPath, err := existingDatabasePath(path)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: database path: %w", err)
+	}
+
+	db, err := sql.Open("sqlite", sqliteDSN(canonicalPath))
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: opening %s: %w", path, err)
 	}
@@ -62,19 +69,44 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		return nil, fmt.Errorf("sqlite: %w", err)
 	}
 
-	// The absolute path names the physical origin: two databases with the same table name in
-	// different files must not share document identities.
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		absolute = path
-	}
-
 	return &Connector{
 		db:           db,
 		table:        table,
-		source:       fmt.Sprintf("sqlite:%s/%s", absolute, table),
+		source:       fmt.Sprintf("sqlite:%s/%s", canonicalPath, table),
 		maxDocuments: maxDocuments,
 	}, nil
+}
+
+// sqliteDSN escapes the canonical path as data rather than letting a literal '?' in a valid
+// filename become modernc/sqlite options such as _pragma. mode=rw makes the open itself refuse a
+// missing file, closing the create race between existingDatabasePath and sql.Open.
+func sqliteDSN(canonicalPath string) string {
+	location := &url.URL{Scheme: "file", Path: canonicalPath}
+	query := url.Values{"mode": {"rw"}}
+	location.RawQuery = query.Encode()
+	return location.String()
+}
+
+// existingDatabasePath prevents modernc/sqlite from silently creating an empty database when a
+// configured path is misspelled. EvalSymlinks also makes provenance name the physical file: two
+// symlink aliases to the same database must not produce different fact IDs for the same row.
+func existingDatabasePath(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(canonical)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%q is not a regular database file", path)
+	}
+	return canonical, nil
 }
 
 func (c *Connector) Name() string { return "sqlite" }

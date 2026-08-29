@@ -35,14 +35,28 @@ func TestAccumulatorStopsAtTheDocumentCount(t *testing.T) {
 // A configured ceiling may lower the API's limit but must never raise it.
 func TestAccumulatorClampsToTheAPILimit(t *testing.T) {
 	acc := &Accumulator{Origin: "test", MaxDocuments: 999999}
-	small := New("src", "k", "text", 0)
 	for i := 0; i < MaxDocuments; i++ {
-		if err := acc.Add(small); err != nil {
+		if err := acc.Add(New("src", strconv.Itoa(i), "text", i)); err != nil {
 			t.Fatalf("unexpected error at %d: %v", i, err)
 		}
 	}
-	if err := acc.Add(small); !errors.Is(err, ErrCorpusTooLarge) {
+	if err := acc.Add(New("src", "over", "text", MaxDocuments)); !errors.Is(err, ErrCorpusTooLarge) {
 		t.Errorf("got %v, want ErrCorpusTooLarge at the API's own ceiling", err)
+	}
+}
+
+func TestAccumulatorRejectsDuplicateFactIDsBeforeSending(t *testing.T) {
+	acc := &Accumulator{Origin: "test"}
+	first := New("src", "same-key", "first", 0)
+	if err := acc.Add(first); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := New("src", "same-key", "second", 1)
+	if err := acc.Add(duplicate); !errors.Is(err, ErrDuplicateFactID) {
+		t.Errorf("got %v, want ErrDuplicateFactID", err)
+	}
+	if acc.Len() != 1 {
+		t.Errorf("duplicate changed accumulator length to %d", acc.Len())
 	}
 }
 
@@ -147,6 +161,49 @@ func TestCheckPayloadRechecksMetadata(t *testing.T) {
 
 	if err := CheckPayload([]Document{doc}, 0); !errors.Is(err, ErrInvalidMetadata) {
 		t.Errorf("got %v, want ErrInvalidMetadata", err)
+	}
+}
+
+func TestCheckPayloadRejectsEmptyAndDuplicateDocuments(t *testing.T) {
+	if err := CheckPayload(nil, 0); !errors.Is(err, ErrInvalidDocument) {
+		t.Errorf("empty payload: got %v, want ErrInvalidDocument", err)
+	}
+
+	doc := New("src", "same-key", "text", 0)
+	if err := CheckPayload([]Document{doc, doc}, 0); !errors.Is(err, ErrDuplicateFactID) {
+		t.Errorf("duplicate payload: got %v, want ErrDuplicateFactID", err)
+	}
+}
+
+func TestPayloadChecksMirrorStructuredDocumentValidation(t *testing.T) {
+	negative := -1
+	negativeTime := int64(-1)
+	cases := map[string]func(*Document){
+		"whitespace text": func(doc *Document) { doc.Text = " \t\n" },
+		"empty source":    func(doc *Document) { doc.Source = " " },
+		"empty session":   func(doc *Document) { doc.Session = " " },
+		"negative fact id": func(doc *Document) {
+			doc.FactID = -1
+		},
+		"wrong scope":  func(doc *Document) { doc.Scope = Scope + 1 },
+		"zero version": func(doc *Document) { doc.Version = 0 },
+		"negative sequence": func(doc *Document) {
+			doc.Sequence = &negative
+		},
+		"negative event time": func(doc *Document) {
+			doc.EventTime = &negativeTime
+		},
+		"wrong digest": func(doc *Document) { doc.TextSHA256 = strings.Repeat("0", 64) },
+	}
+
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			doc := New("src", "key", "text", 0)
+			mutate(&doc)
+			if err := CheckPayload([]Document{doc}, 0); !errors.Is(err, ErrInvalidDocument) {
+				t.Errorf("got %v, want ErrInvalidDocument", err)
+			}
+		})
 	}
 }
 

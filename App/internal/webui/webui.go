@@ -181,8 +181,8 @@ func (s *Server) ask(ctx context.Context, selected, question string, includeSour
 	if selected == "" {
 		return nil, fmt.Errorf("choose a database")
 	}
-	if question == "" {
-		return nil, fmt.Errorf("a question is required")
+	if err := horizonclient.ValidateQuestion(question); err != nil {
+		return nil, err
 	}
 
 	factory, ok := connectors.Get(selected)

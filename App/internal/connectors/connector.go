@@ -15,6 +15,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"sync"
 
 	"horizonmemory/connector/internal/document"
 )
@@ -62,31 +63,46 @@ func (o Options) Get(key, envVar, fallback string) string {
 // follow.
 type Factory func(ctx context.Context, opts Options) (Connector, error)
 
-var registry = map[string]Factory{}
+var (
+	registryMu sync.RWMutex
+	registry   = map[string]Factory{}
+)
 
 // Register adds a backend under the given name and returns a function that restores the previous
 // registration (or removes the new one). Connector init functions ignore the return value; tests
 // use it for cleanup so temporary factories cannot leak into later tests through the global map.
 func Register(name string, factory Factory) func() {
+	registryMu.Lock()
 	previous, existed := registry[name]
 	registry[name] = factory
+	registryMu.Unlock()
+
+	var once sync.Once
 	return func() {
-		if existed {
-			registry[name] = previous
-			return
-		}
-		delete(registry, name)
+		once.Do(func() {
+			registryMu.Lock()
+			defer registryMu.Unlock()
+			if existed {
+				registry[name] = previous
+				return
+			}
+			delete(registry, name)
+		})
 	}
 }
 
 // Get looks up a previously registered backend by name.
 func Get(name string) (Factory, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	factory, ok := registry[name]
 	return factory, ok
 }
 
 // Names lists every backend registered so far (import side effects populate this at startup).
 func Names() []string {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	names := make([]string, 0, len(registry))
 	for name := range registry {
 		names = append(names, name)

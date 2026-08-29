@@ -138,6 +138,8 @@ func TestDoRequiresToken(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// Deliberately omit documents: authentication is checked before payload validation, so a
+	// missing credential remains the primary actionable error for every protected route.
 	_, err := New(server.URL).CreateAnswer(context.Background(), AnswerRequest{Question: "q"})
 	if !errors.Is(err, ErrNoToken) {
 		t.Errorf("got %v, want ErrNoToken", err)
@@ -160,7 +162,7 @@ func TestAPIErrorDoesNotLeakToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := New(server.URL).CreateAnswer(context.Background(), AnswerRequest{Question: "q"})
+	_, err := New(server.URL).CreateAnswer(context.Background(), validAnswerRequest())
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -187,7 +189,7 @@ func TestNonJSONErrorBodyIsReported(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := New(server.URL).CreateAnswer(context.Background(), AnswerRequest{Question: "q"})
+	_, err := New(server.URL).CreateAnswer(context.Background(), validAnswerRequest())
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -223,6 +225,80 @@ func TestCreateAnswerRejectsAnOversizedPayloadWithoutSending(t *testing.T) {
 	}
 	if reached {
 		t.Error("the oversized request was sent instead of being rejected locally")
+	}
+}
+
+func TestValidateQuestionMirrorsTheAPIByteLimit(t *testing.T) {
+	if err := ValidateQuestion(strings.Repeat("x", MaxQuestionBytes)); err != nil {
+		t.Errorf("exact boundary was rejected: %v", err)
+	}
+	if err := ValidateQuestion(strings.Repeat("x", MaxQuestionBytes+1)); !errors.Is(err, ErrInvalidQuestion) {
+		t.Errorf("one byte over: got %v, want ErrInvalidQuestion", err)
+	}
+	// Multibyte text is measured in bytes, not runes.
+	if err := ValidateQuestion(strings.Repeat("é", MaxQuestionBytes/2+1)); !errors.Is(err, ErrInvalidQuestion) {
+		t.Errorf("multibyte overflow: got %v, want ErrInvalidQuestion", err)
+	}
+}
+
+func TestValidateQuestionRejectsWhitespaceAndInvalidUTF8(t *testing.T) {
+	for _, question := range []string{" \t\n", string([]byte{'q', 0xff})} {
+		if err := ValidateQuestion(question); !errors.Is(err, ErrInvalidQuestion) {
+			t.Errorf("question %q: got %v, want ErrInvalidQuestion", question, err)
+		}
+	}
+}
+
+func TestValidateBaseURL(t *testing.T) {
+	for _, valid := range []string{"http://127.0.0.1:8420", "https://api.internal/proofray/"} {
+		if err := ValidateBaseURL(valid); err != nil {
+			t.Errorf("valid URL %q rejected: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{
+		"", "localhost:8420", "ftp://api.internal", "http://user:pass@api.internal",
+		"http://api.internal?token=secret", "http://api.internal?", "http://api.internal/#fragment",
+		"http://api.internal#",
+	} {
+		if err := ValidateBaseURL(invalid); !errors.Is(err, ErrInvalidBaseURL) {
+			t.Errorf("invalid URL %q: got %v, want ErrInvalidBaseURL", invalid, err)
+		}
+	}
+}
+
+func TestValidateBaseURLErrorDoesNotEchoUserinfo(t *testing.T) {
+	const raw = "http://user:super-secret-password@api.internal"
+	err := ValidateBaseURL(raw)
+	if err == nil {
+		t.Fatal("URL containing userinfo was accepted")
+	}
+	if strings.Contains(err.Error(), "user:") || strings.Contains(err.Error(), "super-secret-password") {
+		t.Errorf("validation error leaked URL userinfo: %v", err)
+	}
+}
+
+func validAnswerRequest() AnswerRequest {
+	return AnswerRequest{
+		Question:  "q",
+		Documents: []document.Document{document.New("src", "1", "text", 0)},
+	}
+}
+
+func TestNewNormalizesTrailingSlashes(t *testing.T) {
+	client := New("http://127.0.0.1:8420///")
+	if client.baseURL != "http://127.0.0.1:8420" {
+		t.Errorf("baseURL = %q, want trailing slashes removed", client.baseURL)
+	}
+}
+
+func TestCheckRequestSizeRejectsIncompletePolishRequest(t *testing.T) {
+	req := AnswerRequest{
+		Question:  "q",
+		Documents: []document.Document{document.New("src", "1", "text", 0)},
+		Polish:    true,
+	}
+	if err := checkRequestSize(req); err == nil || !strings.Contains(err.Error(), "polish_model") {
+		t.Errorf("got %v, want a missing polish_model error", err)
 	}
 }
 

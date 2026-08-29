@@ -18,12 +18,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"horizonmemory/connector/internal/config"
 	"horizonmemory/connector/internal/connectors"
 	"horizonmemory/connector/internal/horizonclient"
+	"horizonmemory/connector/internal/sanitize"
 
 	// Blank-imported for side-effect registration into the connectors registry, the same
 	// pattern database/sql drivers use.
@@ -38,9 +40,32 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "horizon-connect:", err)
+		writeError(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func writeError(w io.Writer, err error) {
+	fmt.Fprintln(w, "horizon-connect:", safeError(err))
+}
+
+var sensitiveEnvironmentKeys = []string{
+	"POSTGRES_DSN", "MYSQL_PASSWORD", "MONGODB_URI", "REDIS_URL", "ELASTICSEARCH_URL",
+	"DYNAMODB_ENDPOINT_URL", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+	"PROOFRAY_API_TOKEN", "HORIZON_API_TOKEN",
+}
+
+// safeError removes every credential this CLI can read from its environment before an error is
+// printed. Drivers routinely echo malformed connection strings; unlike the web UI, the CLI has
+// no submitted form map, so its exact secrets come from the environment itself.
+func safeError(err error) string {
+	secrets := make([]string, 0, len(sensitiveEnvironmentKeys))
+	for _, key := range sensitiveEnvironmentKeys {
+		if value := os.Getenv(key); value != "" {
+			secrets = append(secrets, value)
+		}
+	}
+	return sanitize.Error(err, secrets...)
 }
 
 func run() error {

@@ -3,6 +3,8 @@ package connectors
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"horizonmemory/connector/internal/document"
@@ -184,5 +186,32 @@ func TestRegisterCleanupRestoresThePreviousFactory(t *testing.T) {
 	removeFirst()
 	if _, ok := Get("cleanup-test"); ok {
 		t.Error("cleanup did not remove a registration that had no predecessor")
+	}
+}
+
+func TestRegistrySupportsConcurrentReadsAndTemporaryRegistrations(t *testing.T) {
+	const workers = 32
+	var group sync.WaitGroup
+	group.Add(workers)
+	for i := 0; i < workers; i++ {
+		i := i
+		go func() {
+			defer group.Done()
+			name := fmt.Sprintf("concurrent-test-%d", i)
+			cleanup := Register(name, nil)
+			defer cleanup()
+			if _, ok := Get(name); !ok {
+				t.Errorf("Get did not find %q during its registration", name)
+			}
+			_ = Names()
+		}()
+	}
+	group.Wait()
+
+	for i := 0; i < workers; i++ {
+		name := fmt.Sprintf("concurrent-test-%d", i)
+		if _, ok := Get(name); ok {
+			t.Errorf("temporary registration %q survived cleanup", name)
+		}
 	}
 }

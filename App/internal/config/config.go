@@ -5,10 +5,12 @@ package config
 import (
 	"fmt"
 	"os"
+
+	"horizonmemory/connector/internal/horizonclient"
 )
 
 // Config is the connector CLI's process-level configuration -- which HorizonAPI instance to
-// call and, optionally, which question to ask against the fetched corpus.
+// call and which question to ask against the fetched corpus.
 type Config struct {
 	// HorizonBaseURL is the running api/server.py instance. Defaults to
 	// http://127.0.0.1:8420, the same default run_api_server.py binds to.
@@ -39,6 +41,12 @@ func Load() (Config, error) {
 	}
 	if cfg.Question == "" {
 		return Config{}, fmt.Errorf("config: QUESTION is required")
+	}
+	if err := horizonclient.ValidateQuestion(cfg.Question); err != nil {
+		return Config{}, fmt.Errorf("config: QUESTION: %w", err)
+	}
+	if err := horizonclient.ValidateBaseURL(cfg.HorizonBaseURL); err != nil {
+		return Config{}, fmt.Errorf("config: HORIZON_API_BASE_URL: %w", err)
 	}
 	return cfg, nil
 }

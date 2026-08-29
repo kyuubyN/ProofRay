@@ -107,8 +107,8 @@ func TestRedactErrorCatchesKeyValueSecrets(t *testing.T) {
 }
 
 // When a DSN and the password inside it are both submitted, replacing the shorter value first
-// would leave the DSN unmatched and let the rest of it through. secretValues sorts longest first
-// to prevent that.
+// would leave the DSN unmatched and let the rest of it through. The shared sanitizer sorts exact
+// values longest first to prevent that.
 func TestRedactErrorHandlesOverlappingSecrets(t *testing.T) {
 	const password = "hunter2-secret"
 	dsn := "postgres://app:" + password + "@db.internal:5432/prod"

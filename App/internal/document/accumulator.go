@@ -1,8 +1,11 @@
 package document
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -33,6 +36,7 @@ type Accumulator struct {
 
 	docs  []Document
 	bytes int
+	ids   map[int64]struct{}
 }
 
 // Add appends one document, or reports why the corpus cannot be sent.
@@ -42,13 +46,14 @@ func (a *Accumulator) Add(doc Document) error {
 		limit = MaxDocuments
 	}
 
-	if err := checkText(doc); err != nil {
+	if err := validateDocument(doc); err != nil {
 		return fmt.Errorf("%s: %w", a.Origin, err)
 	}
-	if err := checkMetadata(doc); err != nil {
-		return fmt.Errorf("%s: %w", a.Origin, err)
+	if _, duplicate := a.ids[doc.FactID]; duplicate {
+		return fmt.Errorf(
+			"%s: fact_id %d occurs more than once: %w",
+			a.Origin, doc.FactID, ErrDuplicateFactID)
 	}
-
 	size := doc.EncodedSize()
 
 	if len(a.docs)+1 > limit {
@@ -69,6 +74,10 @@ func (a *Accumulator) Add(doc Document) error {
 
 	a.docs = append(a.docs, doc)
 	a.bytes += size
+	if a.ids == nil {
+		a.ids = make(map[int64]struct{})
+	}
+	a.ids[doc.FactID] = struct{}{}
 	return nil
 }
 
@@ -90,6 +99,9 @@ func (a *Accumulator) Documents() []Document { return a.docs }
 // it goes out (see horizonclient). It measures the documents as they will actually be encoded,
 // rather than trusting a running total.
 func CheckPayload(docs []Document, envelopeBytes int) error {
+	if len(docs) == 0 {
+		return fmt.Errorf("the API requires at least one document: %w", ErrInvalidDocument)
+	}
 	if len(docs) > MaxDocuments {
 		return fmt.Errorf(
 			"%d documents exceeds the API's %d-document limit: %w",
@@ -99,13 +111,16 @@ func CheckPayload(docs []Document, envelopeBytes int) error {
 	// The array brackets and the n-1 separators between documents, so this measures the body
 	// that will actually be sent rather than an approximation of it.
 	total := envelopeBytes + 2
+	ids := make(map[int64]struct{}, len(docs))
 	for i, doc := range docs {
-		if err := checkText(doc); err != nil {
+		if err := validateDocument(doc); err != nil {
 			return err
 		}
-		if err := checkMetadata(doc); err != nil {
-			return err
+		if _, duplicate := ids[doc.FactID]; duplicate {
+			return fmt.Errorf(
+				"fact_id %d occurs more than once: %w", doc.FactID, ErrDuplicateFactID)
 		}
+		ids[doc.FactID] = struct{}{}
 		total += doc.EncodedSize() - 1 // EncodedSize includes a separator; count them below
 		if i > 0 {
 			total++
@@ -131,15 +146,58 @@ var ErrInvalidMetadata = errors.New("document metadata is oversized or contains 
 // the API decodes from the JSON body.
 var ErrInvalidUTF8 = errors.New("document contains invalid UTF-8")
 
+// ErrInvalidDocument reports a structured field the API would reject with HTTP 400.
+var ErrInvalidDocument = errors.New("document does not match the API schema")
+
+// ErrDuplicateFactID reports two records that collapse to the same API identity. This can be a
+// query returning a duplicate primary key or, far less likely, a truncated-hash collision.
+var ErrDuplicateFactID = errors.New("documents contain duplicate fact IDs")
+
 // MaxMetadataBytes mirrors MAX_METADATA_BYTES in api/_engine_bridge.py, the cap on every string
 // field other than the text itself.
 const MaxMetadataBytes = 4 * 1024
+
+const maxVersion = uint64(1<<32) - 1
+
+func validateDocument(doc Document) error {
+	if err := checkText(doc); err != nil {
+		return err
+	}
+	if err := checkMetadata(doc); err != nil {
+		return err
+	}
+	if doc.FactID < 0 || uint64(doc.FactID) > maxFactID {
+		return fmt.Errorf("fact_id %d is outside the API's 62-bit domain: %w", doc.FactID, ErrInvalidDocument)
+	}
+	if doc.Scope != Scope {
+		return fmt.Errorf("scope %d is not the API's authorized scope %d: %w", doc.Scope, Scope, ErrInvalidDocument)
+	}
+	if doc.Version < 1 || uint64(doc.Version) > maxVersion {
+		return fmt.Errorf("version %d is outside the API's unsigned 32-bit domain: %w", doc.Version, ErrInvalidDocument)
+	}
+	if doc.Sequence != nil && *doc.Sequence < 0 {
+		return fmt.Errorf("sequence %d is negative: %w", *doc.Sequence, ErrInvalidDocument)
+	}
+	if doc.EventTime != nil && *doc.EventTime < 0 {
+		return fmt.Errorf("event_time %d is negative: %w", *doc.EventTime, ErrInvalidDocument)
+	}
+	if doc.TextSHA256 != "" {
+		observed := sha256.Sum256([]byte(doc.Text))
+		if doc.TextSHA256 != hex.EncodeToString(observed[:]) {
+			return fmt.Errorf("text_sha256 is not the lowercase digest of text: %w", ErrInvalidDocument)
+		}
+	}
+	return nil
+}
 
 func checkText(doc Document) error {
 	if !utf8.ValidString(doc.Text) {
 		return fmt.Errorf(
 			"record %q has text that is not valid UTF-8; JSON encoding would change its bytes and digest: %w",
 			doc.Source, ErrInvalidUTF8)
+	}
+	if strings.TrimSpace(doc.Text) == "" {
+		return fmt.Errorf("record %q has empty or whitespace-only text: %w", doc.Source, ErrInvalidDocument)
 	}
 	// MaxDocumentBytes is measured against the TEXT, not the encoded document: the server
 	// checks `_utf8_size(text)` alone (api/_engine_bridge.py), so comparing the JSON -- which
@@ -168,6 +226,9 @@ func checkMetadata(doc Document) error {
 			return fmt.Errorf(
 				"%s is not valid UTF-8; JSON encoding would change its bytes: %w",
 				field.name, ErrInvalidUTF8)
+		}
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("%s is empty or whitespace-only: %w", field.name, ErrInvalidDocument)
 		}
 		if len(field.value) > MaxMetadataBytes {
 			return fmt.Errorf(

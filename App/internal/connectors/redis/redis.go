@@ -78,9 +78,14 @@ func (c *Connector) Name() string { return "redis" }
 // follows. Keys are sorted for a stable, reproducible document order.
 func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, error) {
 	var keys []string
+	seen := make(map[string]struct{})
 	iter := c.client.Scan(ctx, 0, c.prefix+"*", 0).Iterator()
 	for iter.Next(ctx) {
-		keys = append(keys, iter.Val())
+		var err error
+		keys, err = appendUniqueKey(keys, seen, iter.Val(), c.maxDocuments)
+		if err != nil {
+			return nil, fmt.Errorf("redis: prefix %q: %w", c.prefix, err)
+		}
 	}
 	if err := iter.Err(); err != nil {
 		return nil, fmt.Errorf("redis: scanning keys: %w", err)
@@ -106,6 +111,22 @@ func (c *Connector) FetchDocuments(ctx context.Context) ([]document.Document, er
 		}
 	}
 	return acc.Documents(), nil
+}
+
+// appendUniqueKey bounds SCAN before values are fetched. Redis documents that SCAN may return
+// the same element more than once while a keyspace changes, so duplicates are ignored; otherwise
+// they would consume the local count budget and later produce duplicate fact IDs at the API.
+func appendUniqueKey(keys []string, seen map[string]struct{}, key string, limit int) ([]string, error) {
+	if _, exists := seen[key]; exists {
+		return keys, nil
+	}
+	if len(keys) >= limit {
+		return keys, fmt.Errorf(
+			"holds more than %d documents, the configured/API limit: %w -- narrow the key prefix",
+			limit, document.ErrCorpusTooLarge)
+	}
+	seen[key] = struct{}{}
+	return append(keys, key), nil
 }
 
 func (c *Connector) Close() error {

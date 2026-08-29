@@ -136,8 +136,8 @@ func (d Document) WithEventTime(unixSeconds int64) Document {
 // The source is mixed in with a length prefix rather than a plain separator, so no combination of
 // source and key can be re-split to produce another pair's input -- a separator byte alone is
 // ambiguous for any key that may itself contain that byte (a Redis key contains ':' by
-// convention). If two records in one fetch ever do collide, the server rejects the whole request
-// ("structured documents require unique fact_id values") rather than silently merging them.
+// convention). If two records in one fetch ever do collide, the accumulator/client rejects the
+// payload before sending it rather than letting the server merge or reject it later.
 func factID(source, primaryKey string) int64 {
 	h := sha256.New()
 	var length [8]byte

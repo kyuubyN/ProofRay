@@ -46,6 +46,10 @@ func main() {
 	addr := getenvDefault("WEB_ADDR", "127.0.0.1:8080")
 	benchmarkURL := getenvDefault("HORIZON_BENCHMARK_URL", "http://127.0.0.1:5050")
 
+	if err := horizonclient.ValidateBaseURL(apiBaseURL); err != nil {
+		fmt.Fprintln(os.Stderr, "horizon-web:", err)
+		os.Exit(1)
+	}
 	if err := checkBindAddr(addr, os.Getenv(allowRemoteEnv) != ""); err != nil {
 		fmt.Fprintln(os.Stderr, "horizon-web:", err)
 		os.Exit(1)

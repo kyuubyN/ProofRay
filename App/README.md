@@ -34,6 +34,7 @@ App/
   cmd/horizon-web/main.go         web UI entry point — form in the browser instead of env vars
   internal/config/                env-var configuration (CLI only)
   internal/horizonclient/         HTTP client for api/server.py (types.go mirrors its JSON contract)
+  internal/sanitize/              shared credential redaction for browser and CLI diagnostics
   internal/webui/                 the /ask form handler + embedded html/template
   internal/document/              the structured document type sent to POST /v1/answers
   internal/connectors/
@@ -179,7 +180,7 @@ rather than two unrelated tools bolted together.
 
 `api/server.py` requires a bearer token on every route except `GET /v1/health` (added after this
 Go client was first written — see `api/machine_auth.py`). `horizonclient` handles this
-automatically and needs no configuration in the common case: on every request it looks for
+automatically and needs no configuration in the common case: before every protected request it looks for
 `PROOFRAY_API_TOKEN` or `HORIZON_API_TOKEN` in the environment first, and otherwise reads the token
 straight out of the same credentials file `api/server.py` itself generates on first run
 (`~/.config/proofray/api_credentials.json`, or `~/.config/horizon-memory/api_credentials.json` for
@@ -242,15 +243,25 @@ also where the security-relevant logic lives:
   validates (it rejects unknown fields, so a rename breaks every request). Also the corpus
   limits: that the byte budget stops a fetch long before the document count would.
 - `internal/connectors` — `ValidateIdentifier` against the injection payloads it exists to reject,
-  and `MaxDocuments` rejecting a zero/negative ceiling rather than reading it as "unlimited".
-- `internal/connectors/mysql` — a regression guard for the DSN-parameter injection fixed in Round
-  3: a `database` field containing `?allowAllFiles=true` must not enable that flag.
+  `MaxDocuments` rejecting a zero/negative ceiling rather than reading it as "unlimited", and
+  concurrent registry reads/temporary registrations under the race detector.
+- `internal/connectors/mysql` — a regression guard for the original database-field DSN injection,
+  plus a real-`New` test proving user, password, address and database reach `mysql.NewConnector`
+  unchanged even when their values resemble DSN syntax.
+- `internal/connectors/redis` — duplicate results permitted by `SCAN` are deduplicated, and a scan
+  stops at the document ceiling instead of collecting an unbounded keyspace before budgeting.
+- `internal/connectors/sqlite` — a typo or open-time race cannot silently create an empty database,
+  filename punctuation cannot become driver parameters, directories are rejected, and symlink
+  aliases resolve to the same source identity.
 - `internal/webui` — that a submitted password/DSN/URI never survives into the re-rendered page,
   and that a driver's error message is redacted before it is rendered or logged (a connection or
   DSN-parse error routinely quotes the connection string back, password included).
 - `internal/horizonclient` — that `GET /v1/health` stays unauthenticated, every other route sends
   the bearer token, a missing token fails before the request rather than as an ambiguous 401, and
   no error path echoes the token back to the caller (it would land in the page's error message).
+  It also pins question/base-URL validation before fetch and the exact JSON request-size boundary.
+- `cmd/horizon-connect` — that a driver error printed to stderr cannot echo a DSN, URI, password,
+  cloud secret, or API token read from the environment.
 - `cmd/horizon-web` — that the loopback bind check refuses `0.0.0.0`, `:8080`, `[::]` and LAN/public
   literals, while honoring the explicit opt-out.
 
@@ -271,9 +282,10 @@ Two were confirmed real vulnerabilities and fixed:
   `database` value like `horizon_example?allowAllFiles=true` was parsed by the driver as an extra
   connection parameter, not a literal db name — confirmed exploitable (verified `AllowAllFiles`
   flipped to `true` after a round-trip through the old code). Fixed by building a `mysql.Config`
-  struct and calling `.FormatDSN()` instead, which `url.PathEscape`s each field independently
-  (confirmed the same round-trip now leaves `AllowAllFiles: false` and the `?` literally
-  percent-encoded).
+  and passing it directly to `mysql.NewConnector`/`sql.OpenDB`. `FormatDSN` already escapes the
+  database field and the driver parser does not turn the tested user/password/address strings into
+  `allowAllFiles`; the direct connector remains preferable because it avoids an unnecessary,
+  lossy serialize/reparse round trip and preserves those field values exactly.
 - **Credentials echoed back into the HTML form (was High).** After a failed submission, every
   field — including `mysql_password` and any DSN/URI/URL — was written back into the page's
   `value="..."` attributes. A `type="password"` input only masks the rendered widget; the actual
@@ -292,11 +304,10 @@ numbers, several of which didn't check out) found reachable advisories in both; 
 reports zero reachable vulnerabilities now.
 
 The remaining findings (CSRF, rate limiting, TLS, per-connector host allowlisting, blocklisting
-system-ish index/collection names) are real observations but not new code changes — they're the
-same "no auth, trusted network only" tradeoff `../api/README.md` already made for `api/server.py`,
-just showing up again here because these connectors are, by design, "connect to whatever
-DSN/URI/host the caller gives you." See the entries below for exactly what that means and where
-the line is.
+system-ish index/collection names) are real observations but not new code changes. They apply to
+the browser-facing connector UI, which still has no inbound auth even though `api/server.py` now
+does; the connectors are, by design, "connect to whatever DSN/URI/host the caller gives you."
+See the entries below for exactly what that means and where the line is.
 
 ## Security audit (Round 4, Maestri terminals) — auth integration
 
@@ -338,14 +349,15 @@ Two were checked and are not real issues, not applied:
 Token rotation/refresh and custom TLS/mTLS support were flagged again as gaps but are scope
 decisions, not bugs (the TLS one is the same one named below since Round 3).
 
-## Corpus limits
+## Request and corpus limits
 
-Four limits apply, all mirrored from the API in `internal/document` so a corpus that cannot be
-sent fails while it is being read rather than as an HTTP 413 after the whole thing has been pulled
-out of the database:
+Five limits apply, mirrored from the API in `internal/document` and `internal/horizonclient` so an
+invalid question is rejected before connecting to a database and a corpus that cannot be sent
+fails while it is being read rather than as an HTTP 400/413 after a full fetch:
 
 | Limit | Value | Applies to | Mirrors |
 | --- | --- | --- | --- |
+| Question bytes | 16 KiB | trimmed question | `MAX_QUESTION_BYTES` (`api/_engine_bridge.py`) |
 | Documents per request | 2000 | count | `MAX_DOCUMENTS` (`api/_engine_bridge.py`) |
 | Bytes per document | 64 KiB | the **text** only | `MAX_DOCUMENT_BYTES` (`api/_engine_bridge.py`) |
 | Bytes per metadata field | 4 KiB | `source`, `session` | `MAX_METADATA_BYTES` (`api/_engine_bridge.py`) |
@@ -359,6 +371,11 @@ name. Metadata is validated too (length, and the control characters the server r
 legal in Redis and would otherwise be answered with a 400. Text and metadata must also be valid
 UTF-8: Go's JSON encoder replaces invalid bytes with U+FFFD, which would otherwise change both the
 wire size and the text the API hashes after `text_sha256` was calculated.
+
+Structured documents are also checked for the API's non-empty text/metadata rule, authorized
+scope, fact-ID/version domains, non-negative optional timestamps/sequences, matching SHA-256, and
+unique fact IDs. This matters even for SQL connectors: a query can return duplicate IDs when the
+configured table does not actually enforce the schema assumed by the example.
 
 The **byte budget is the one that binds in practice**: 2000 documents at 64 KiB each would be
 128 MiB, so a document count alone never establishes that a corpus is sendable. A fetch stops as

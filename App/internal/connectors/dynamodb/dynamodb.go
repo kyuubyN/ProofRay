@@ -88,12 +88,9 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 	// would share a fact_id. DynamoDB Local returns an ARN with a dummy account, so the endpoint
 	// is appended there to keep two local instances apart. Endpoint userinfo/query/fragment are
 	// stripped below so no credential appears in either form.
-	origin := region
-	if described.Table != nil && described.Table.TableArn != nil {
-		origin = *described.Table.TableArn
-	}
-	if endpoint != "" {
-		origin = fmt.Sprintf("%s@%s", origin, endpointIdentity(endpoint))
+	origin, err := tableOrigin(described.Table, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("dynamodb: describing table %q: %w", table, err)
 	}
 
 	return &Connector{
@@ -102,6 +99,17 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		source:       fmt.Sprintf("dynamodb:%s", origin),
 		maxDocuments: maxDocuments,
 	}, nil
+}
+
+func tableOrigin(description *types.TableDescription, endpoint string) (string, error) {
+	if description == nil || description.TableArn == nil || *description.TableArn == "" {
+		return "", fmt.Errorf("response did not include TableArn; physical table identity is unknown")
+	}
+	origin := *description.TableArn
+	if endpoint != "" {
+		origin = fmt.Sprintf("%s@%s", origin, endpointIdentity(endpoint))
+	}
+	return origin, nil
 }
 
 // endpointIdentity keeps DynamoDB Local instances distinct without putting credentials into

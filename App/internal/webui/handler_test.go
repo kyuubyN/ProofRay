@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -165,6 +166,27 @@ func TestHandleAskReportsAnOversizedCorpus(t *testing.T) {
 
 	if !strings.Contains(body, "caps a request body") && !strings.Contains(body, "request body would be") {
 		t.Errorf("the oversized corpus was not reported to the visitor:\n%s", firstError(body))
+	}
+}
+
+func TestHandleAskRejectsAnOversizedQuestionBeforeConnecting(t *testing.T) {
+	const name = "question-preflight-test"
+	var factoryCalled bool
+	t.Cleanup(connectors.Register(name, func(context.Context, connectors.Options) (connectors.Connector, error) {
+		factoryCalled = true
+		return nil, errors.New("factory must not run")
+	}))
+
+	body := postAsk(t, url.Values{
+		"connector": {name},
+		"question":  {strings.Repeat("x", horizonclient.MaxQuestionBytes+1)},
+	})
+
+	if factoryCalled {
+		t.Error("database factory ran before the question limit was checked")
+	}
+	if !strings.Contains(body, "16384-byte limit") {
+		t.Errorf("question limit was not reported to the visitor:\n%s", firstError(body))
 	}
 }
 

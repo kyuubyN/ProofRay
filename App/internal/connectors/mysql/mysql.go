@@ -45,19 +45,13 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 	password := opts.Get("password", "MYSQL_PASSWORD", "")
 	database := opts.Get("database", "MYSQL_DB", "horizon_example")
 
-	// mysql.Config.FormatDSN escapes each field independently -- unlike building the DSN with
-	// fmt.Sprintf, a value containing "?" or "&" (e.g. database="horizon_example?allowAllFiles=true")
-	// can't inject extra driver parameters this way.
-	cfg := mysqldriver.NewConfig()
-	cfg.User = user
-	cfg.Passwd = password
-	cfg.Net = "tcp"
-	cfg.Addr = net.JoinHostPort(host, port)
-	cfg.DBName = database
-
-	db, err := sql.Open("mysql", cfg.FormatDSN())
+	// Pass the structured config straight to the driver. A FormatDSN -> ParseDSN round trip is
+	// unnecessary and can change fields containing DSN syntax (notably user names); NewConnector
+	// preserves the exact values the caller supplied.
+	cfg := driverConfig(user, password, host, port, database)
+	db, err := openMySQLDB(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("mysql: opening: %w", err)
+		return nil, fmt.Errorf("mysql: configuring driver: %w", err)
 	}
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
@@ -84,6 +78,29 @@ func New(ctx context.Context, opts connectors.Options) (connectors.Connector, er
 		source:       fmt.Sprintf("mysql:%s/%s/%s", cfg.Addr, cfg.DBName, table),
 		maxDocuments: maxDocuments,
 	}, nil
+}
+
+// openMySQLDB is a narrow seam for verifying that New hands the exact structured Config to the
+// driver without requiring a live MySQL server. Tests replace it only for the duration of one
+// non-parallel test; production only reads it.
+var openMySQLDB = func(cfg *mysqldriver.Config) (*sql.DB, error) {
+	driverConnector, err := mysqldriver.NewConnector(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return sql.OpenDB(driverConnector), nil
+}
+
+// driverConfig is shared with the regression tests so they exercise the exact structured config
+// New passes to mysql.NewConnector, rather than a test-only DSN builder.
+func driverConfig(user, password, host, port, database string) *mysqldriver.Config {
+	cfg := mysqldriver.NewConfig()
+	cfg.User = user
+	cfg.Passwd = password
+	cfg.Net = "tcp"
+	cfg.Addr = net.JoinHostPort(host, port)
+	cfg.DBName = database
+	return cfg
 }
 
 func (c *Connector) Name() string { return "mysql" }
